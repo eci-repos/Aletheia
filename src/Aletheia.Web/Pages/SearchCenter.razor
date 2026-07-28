@@ -1,0 +1,251 @@
+@page "/search"
+@inject RepositoryApiClient ApiClient
+@inject ActivityLogService ActivityLog
+
+<PageTitle>Search Center - Aletheia</PageTitle>
+
+<h1>Search Center</h1>
+
+<div class="mb-3">
+    <div class="btn-group" role="group">
+        <button type="button" class="btn @(_mode == "semantic" ? "btn-primary" : "btn-outline-primary")" @onclick="SetSemanticMode">Semantic</button>
+        <button type="button" class="btn @(_mode == "wrags" ? "btn-primary" : "btn-outline-primary")" @onclick="SetWragsMode">WRAGS</button>
+        <button type="button" class="btn @(_mode == "graphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetGraphRagMode">GraphRAG</button>
+        <button type="button" class="btn @(_mode == "lazygraphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetLazyGraphRagMode">LazyGraphRAG</button>
+    </div>
+</div>
+
+<div class="input-group mb-3">
+    <input type="text" class="form-control" placeholder="Enter your query..." @bind="_query" @bind:event="oninput" @onkeydown="HandleKeyDown" />
+    <button class="btn btn-primary" @onclick="SearchAsync">Search</button>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Results to show: @_topK</label>
+    <input type="range" class="form-range" min="1" max="20" @bind="_topK" />
+</div>
+
+@if (_mode is "wrags" or "graphrag" or "lazygraphrag")
+{
+    <div class="mb-3">
+        <label class="form-label">@(_mode == "lazygraphrag" ? "Expansion limit" : "Expansion hops"): @_expansionHops</label>
+        <input type="range" class="form-range" min="0" max="3" @bind="_expansionHops" />
+    </div>
+}
+
+@if (_searching)
+{
+    <div class="alert alert-info">Searching...</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_searchError))
+{
+    <div class="alert alert-danger">@_searchError</div>
+}
+
+@if (_results is not null)
+{
+    @if (_results.Count == 0)
+    {
+        <div class="alert alert-warning">No results found.</div>
+    }
+    else
+    {
+        <h3>@(_mode.ToUpperInvariant()) Results (@_results.Count)</h3>
+        @foreach (var result in _results)
+        {
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">
+                        @if (result.Rank > 0)
+                        {
+                            <span>Rank @result.Rank · </span>
+                        }
+                        Score: @result.Score.ToString("P2")
+                        @if (!string.IsNullOrWhiteSpace(result.RetrievalStrategy))
+                        {
+                            <span> · @result.RetrievalStrategy</span>
+                        }
+                    </h6>
+                    <p class="card-text">@result.Chunk.Content</p>
+                    @if (result.Citations.Count > 0)
+                    {
+                        <div class="small mb-2">
+                            <strong>Citations:</strong> @string.Join(", ", result.Citations)
+                        </div>
+                    }
+                    @if (result.RankingSignals.Count > 0 && result.RankingSignals.TryGetValue("final", out var finalScore))
+                    {
+                        <div class="small text-muted mb-2">Final rank score: @finalScore.ToString("P2")</div>
+                    }
+                    <small class="text-muted">Chunk @result.Chunk.Index from source @result.Chunk.SourceId</small>
+                </div>
+            </div>
+        }
+    }
+}
+
+<hr />
+
+<h3>Ingest Content</h3>
+<p class="text-muted small">Content is ingested for @_mode retrieval. WRAGS regeneration is managed from the WRAGS page.</p>
+<div class="mb-3">
+    <textarea class="form-control" rows="5" placeholder="Paste content to ingest..." @bind="_ingestContent" @bind:event="oninput"></textarea>
+</div>
+<button class="btn btn-outline-primary" @onclick="IngestAsync" disabled="@_ingesting">
+    @(_ingesting ? "Ingesting..." : "Ingest Content")
+</button>
+
+@if (!string.IsNullOrEmpty(_ingestStatus))
+{
+    <div class="alert @( _ingestSuccess ? "alert-success" : "alert-danger") mt-3">@_ingestStatus</div>
+}
+
+@code {
+    private string _query = string.Empty;
+    private int _topK = 5;
+    private int _expansionHops = 1;
+    private string _mode = "semantic";
+    private bool _searching;
+    private string _searchError = string.Empty;
+    private List<SearchResult>? _results;
+
+    private string _ingestContent = string.Empty;
+    private bool _ingesting;
+    private string _ingestStatus = string.Empty;
+    private bool _ingestSuccess;
+
+    private void SetSemanticMode() => SetMode("semantic");
+    private void SetWragsMode() => SetMode("wrags");
+    private void SetGraphRagMode() => SetMode("graphrag");
+    private void SetLazyGraphRagMode() => SetMode("lazygraphrag");
+
+    private void SetMode(string mode)
+    {
+        _mode = mode;
+        _results = null;
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+        {
+            return;
+        }
+
+        var activityId = ActivityLog.Begin("Search Center", $"{_mode.ToUpperInvariant()} search", $"Searching for \"{_query}\".");
+        _searching = true;
+        _searchError = string.Empty;
+        _results = null;
+
+        try
+        {
+            if (_mode == "wrags")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "WRAGS search", "Reading durable wiki pages as retrieval context.");
+                var results = await ApiClient.WragsRetrieveAsync(_query, _topK, _expansionHops);
+                _results = results?.ToList() ?? new List<SearchResult>();
+            }
+            else if (_mode == "graphrag")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "GraphRAG search", "Reading entity/community summaries and graph context.");
+                var results = await ApiClient.GraphRagRetrieveAsync(_query, _topK, _expansionHops);
+                _results = results?.ToList() ?? new List<SearchResult>();
+            }
+            else if (_mode == "lazygraphrag")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG search", "Running query-time discovery, traversal budgets, and pruning.");
+                var results = await ApiClient.LazyGraphRagRetrieveAsync(_query, _topK, _expansionHops);
+                _results = results?.ToList() ?? new List<SearchResult>();
+            }
+            else
+            {
+                ActivityLog.Trace(activityId, "Search Center", "Semantic search", "Retrieving ranked semantic chunks.");
+                var results = await ApiClient.RagsRetrieveAsync(_query, _topK);
+                _results = results?.ToList() ?? new List<SearchResult>();
+            }
+
+            ActivityLog.Complete(activityId, "Search Center", $"{_mode.ToUpperInvariant()} search", $"Search completed with {_results.Count} results.");
+        }
+        catch (Exception ex)
+        {
+            _results = new List<SearchResult>();
+            _searchError = ex.Message;
+            ActivityLog.Fail(activityId, "Search Center", $"{_mode.ToUpperInvariant()} search", ex.Message);
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task IngestAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_ingestContent))
+        {
+            return;
+        }
+
+        var activityId = ActivityLog.Begin("Search Center", $"{_mode.ToUpperInvariant()} ingest", "Submitting content to ingestion API.");
+        _ingesting = true;
+        _ingestStatus = string.Empty;
+        _ingestSuccess = false;
+
+        try
+        {
+            BackgroundJobClientSnapshot? job;
+            if (_mode == "wrags")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "WRAGS ingest", "Queueing semantic ingestion; regenerate wiki pages from the WRAGS page after content is searchable.");
+                job = await ApiClient.RagsIngestJobAsync(Guid.NewGuid(), _ingestContent);
+            }
+            else if (_mode == "graphrag")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "GraphRAG ingest", "Generating chunks, typed graph entities, relationships, communities, and summaries.");
+                job = await ApiClient.GraphRagIngestJobAsync(Guid.NewGuid(), _ingestContent);
+            }
+            else if (_mode == "lazygraphrag")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG ingest", "Recording chunks and low-cost corpus statistics.");
+                job = await ApiClient.LazyGraphRagIngestJobAsync(Guid.NewGuid(), _ingestContent);
+            }
+            else
+            {
+                ActivityLog.Trace(activityId, "Search Center", "Semantic ingest", "Generating chunks and embeddings.");
+                job = await ApiClient.RagsIngestJobAsync(Guid.NewGuid(), _ingestContent);
+            }
+
+            _ingestSuccess = job is not null;
+            _ingestStatus = job is not null ? "Ingestion job queued." : "Ingestion failed to queue.";
+
+            if (job is not null)
+            {
+                ActivityLog.Complete(activityId, "Search Center", $"{_mode.ToUpperInvariant()} ingest", $"Background job {job.JobId:N} queued.");
+                ActivityLog.UpsertJob(job);
+                _ingestContent = string.Empty;
+            }
+            else
+            {
+                ActivityLog.Fail(activityId, "Search Center", $"{_mode.ToUpperInvariant()} ingest", "Ingestion API did not return a job.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _ingestSuccess = false;
+            _ingestStatus = $"Ingestion failed: {ex.Message}";
+            ActivityLog.Fail(activityId, "Search Center", $"{_mode.ToUpperInvariant()} ingest", ex.Message);
+        }
+        finally
+        {
+            _ingesting = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+}

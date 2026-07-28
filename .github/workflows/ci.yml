@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aletheia
+          POSTGRES_PASSWORD: aletheia
+          POSTGRES_DB: aletheia
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/aletheia
+        ports:
+          - 7687:7687
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore Aletheia.slnx
+      - name: Build
+        run: dotnet build Aletheia.slnx --configuration Release --no-restore
+      - name: Test Foundation
+        run: dotnet test tests/Aletheia.Foundation.UnitTests/Aletheia.Foundation.UnitTests.csproj --configuration Release --no-build --collect "XPlat Code Coverage"
+      - name: Test Repository
+        run: dotnet test tests/Repository.UnitTests/Repository.UnitTests.csproj --configuration Release --no-build --collect "XPlat Code Coverage"
+      - name: Test Integration
+        env:
+          ConnectionStrings__PostgreSQL: "Host=localhost;Port=5432;Database=aletheia;Username=aletheia;Password=aletheia"
+        run: dotnet test tests/Repository.IntegrationTests/Repository.IntegrationTests.csproj --configuration Release --no-build --collect "XPlat Code Coverage"
+      - name: Test RAGS
+        env:
+          ConnectionStrings__PostgreSQL: "Host=localhost;Port=5432;Database=aletheia;Username=aletheia;Password=aletheia"
+        run: dotnet test tests/RAGS.UnitTests/RAGS.UnitTests.csproj --configuration Release --no-build --collect "XPlat Code Coverage"

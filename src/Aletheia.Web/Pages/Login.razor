@@ -1,0 +1,57 @@
+@page "/login"
+@inject AuthService Auth
+@inject NavigationManager Navigation
+
+<PageTitle>Login - Aletheia</PageTitle>
+
+<div class="login-container">
+    <div class="card" style="width: 24rem;">
+        <div class="card-body">
+            <h5 class="card-title">Aletheia Sign In</h5>
+            <div class="mb-3">
+                <label class="form-label">User Name</label>
+                <input type="text" class="form-control" @bind="_userName" @bind:event="oninput" placeholder="Enter your user name" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password" class="form-control" @bind="_password" @bind:event="oninput" />
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger" role="alert">@_error</div>
+            }
+            <button class="btn btn-primary w-100" @onclick="SignIn" disabled="@_isBusy">
+                @(_isBusy ? "Signing in..." : "Sign In")
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _userName = string.Empty;
+    private string _password = string.Empty;
+    private string? _error;
+    private bool _isBusy;
+
+    private async Task SignIn()
+    {
+        _isBusy = true;
+        _error = null;
+
+        try
+        {
+            var result = await Auth.LoginAsync(_userName, _password);
+            if (result.IsSuccess)
+            {
+                Navigation.NavigateTo("/");
+                return;
+            }
+
+            _error = result.Error;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+}

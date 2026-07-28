@@ -1,0 +1,136 @@
+@page "/metadata"
+@inject RepositoryApiClient ApiClient
+@inject NavigationManager Navigation
+
+<PageTitle>Metadata - Aletheia</PageTitle>
+
+<h1>Metadata Editor</h1>
+
+@if (!HasFileQuery)
+{
+    <div class="alert alert-info">
+        Select a file from the repository browser before editing metadata.
+        <a href="browse" class="alert-link">Open Browse</a>
+    </div>
+}
+else if (_metadata is not null)
+{
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">@_metadata.Descriptor.FileName</h5>
+
+            <div class="mb-3">
+                <label class="form-label">File ID</label>
+                <input type="text" class="form-control" value="@_metadata.Descriptor.FileId" disabled />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Content Type</label>
+                <input type="text" class="form-control" value="@_metadata.ContentType" disabled />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Size (bytes)</label>
+                <input type="text" class="form-control" value="@_metadata.SizeBytes" disabled />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Uploaded At</label>
+                <input type="text" class="form-control" value="@_metadata.UploadedAt.ToString("g")" disabled />
+            </div>
+
+            @if (_metadata.Descriptor.Version is not null)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Version</label>
+                    <input type="text" class="form-control" value="@_metadata.Descriptor.Version" disabled />
+                </div>
+            }
+
+            <h6>Tags</h6>
+            @if (_metadata.Tags.Any())
+            {
+                <ul class="list-group mb-3">
+                    @foreach (var tag in _metadata.Tags)
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>@tag.Key = @tag.Value</span>
+                            <button class="btn btn-sm btn-danger" @onclick="() => RemoveTag(tag.Key)">Remove</button>
+                        </li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p class="text-muted">No tags.</p>
+            }
+
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" placeholder="Key" @bind="_newTagKey" />
+                <input type="text" class="form-control" placeholder="Value" @bind="_newTagValue" />
+                <button class="btn btn-outline-primary" @onclick="AddTag">Add Tag</button>
+            </div>
+
+            <div class="mt-3">
+                <a class="btn btn-outline-primary" href="download?fileId=@_metadata.Descriptor.FileId&fileName=@Uri.EscapeDataString(_metadata.Descriptor.FileName)&version=@_metadata.Descriptor.Version">Download</a>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="alert alert-warning">File not found.</div>
+}
+
+@code {
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public Guid FileId { get; set; }
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string FileName { get; set; } = string.Empty;
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string? Version { get; set; }
+
+    private Aletheia.Repository.Abstractions.Models.FileMetadata? _metadata;
+    private string _newTagKey = string.Empty;
+    private string _newTagValue = string.Empty;
+
+    private bool HasFileQuery => FileId != Guid.Empty && !string.IsNullOrWhiteSpace(FileName);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _metadata = null;
+
+        if (!HasFileQuery)
+        {
+            return;
+        }
+
+        try
+        {
+            _metadata = await ApiClient.GetMetadataAsync(FileId, FileName, Version);
+        }
+        catch (HttpRequestException)
+        {
+            _metadata = null;
+        }
+    }
+
+    private void RemoveTag(string key)
+    {
+        // In a full implementation, this would call an API to update metadata.
+        // For now, this is a UI demonstration.
+    }
+
+    private void AddTag()
+    {
+        // In a full implementation, this would call an API to update metadata.
+        // For now, this is a UI demonstration.
+        _newTagKey = string.Empty;
+        _newTagValue = string.Empty;
+    }
+}

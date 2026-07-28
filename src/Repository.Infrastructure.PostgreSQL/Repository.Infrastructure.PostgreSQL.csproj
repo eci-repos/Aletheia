@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Repository.Abstractions\Repository.Abstractions.csproj" />
+    <ProjectReference Include="..\Aletheia.Foundation\Aletheia.Foundation.csproj" />
+    <ProjectReference Include="..\Aletheia.Security\Aletheia.Security.csproj" />
+  </ItemGroup>
+
+</Project>

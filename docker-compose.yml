@@ -1,0 +1,105 @@
+services:
+  
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aletheia-postgres
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-aletheia}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-aletheia}"
+      POSTGRES_DB: "${POSTGRES_DB:-aletheia}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aletheia -d aletheia"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: aletheia-minio
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: aletheia-neo4j
+    environment:
+      NEO4J_AUTH: "${NEO4J_AUTH:-neo4j/aletheia}"
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Repository.API/Dockerfile
+    container_name: aletheia-api
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Development}"
+      ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=aletheia;Username=${POSTGRES_USER:-aletheia};Password=${POSTGRES_PASSWORD:-aletheia}"
+      MinIO__Endpoint: "minio:9000"
+      MinIO__AccessKey: "${MINIO_ROOT_USER:-minioadmin}"
+      MinIO__SecretKey: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      MinIO__BucketName: "aletheia-files"
+      Neo4j__Uri: "bolt://neo4j:7687"
+      Neo4j__Username: "neo4j"
+      Neo4j__Password: "${NEO4J_PASSWORD:-aletheia}"
+      AI__DefaultProvider: "${AI_DEFAULT_PROVIDER:-LocalOllama}"
+      AI__Providers__0__Name: "${AI_PROVIDER_NAME:-LocalOllama}"
+      AI__Providers__0__Type: "${AI_PROVIDER_TYPE:-Ollama}"
+      AI__Providers__0__Enabled: "${AI_PROVIDER_ENABLED:-true}"
+      AI__Providers__0__Endpoint: "${AI_PROVIDER_ENDPOINT:-http://host.docker.internal:11434}"
+      AI__Providers__0__DefaultModel: "${AI_PROVIDER_MODEL:-kimi-k2.7-code:cloud}"
+      ALETHEIA_JWT_SECRET: "${ALETHEIA_JWT_SECRET:-development-jwt-secret-that-is-at-least-32-characters}"
+      ALETHEIA_ADMIN_PASSWORD: "${ALETHEIA_ADMIN_PASSWORD:-Admin123!}"
+      Authentication__Jwt__AccessTokenLifetimeMinutes: "${ALETHEIA_ACCESS_TOKEN_MINUTES:-43200}"
+      Authentication__Jwt__RefreshTokenLifetimeMinutes: "${ALETHEIA_REFRESH_TOKEN_MINUTES:-525600}"
+      Authentication__Jwt__ClockSkewMinutes: "${ALETHEIA_JWT_CLOCK_SKEW_MINUTES:-43200}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: src/Aletheia.Web/Dockerfile
+    container_name: aletheia-web
+    ports:
+      - "8081:8080"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  minio_data:
+  neo4j_data:
+

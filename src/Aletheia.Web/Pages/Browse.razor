@@ -1,0 +1,174 @@
+@page "/browse"
+@inject RepositoryApiClient ApiClient
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Browse - Aletheia</PageTitle>
+
+<h1>Repository Browser</h1>
+
+<div class="input-group mb-3">
+    <input type="text" class="form-control" placeholder="Search files..." @bind="_query" @bind:event="oninput" />
+    <button class="btn btn-outline-primary" @onclick="StartSearchAsync" disabled="@_isLoading">
+        @(_isLoading ? "Searching..." : "Search")
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-warning">@_error</div>
+}
+else if (_results is not null)
+{
+    <div class="mb-2 text-muted">
+        Showing @_results.Items.Count of @_results.TotalCount uploaded files
+    </div>
+
+    @if (_results.Items.Count == 0)
+    {
+        <div class="alert alert-info">No uploaded files found.</div>
+    }
+    else
+    {
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Uploaded</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var file in _results.Items)
+                {
+                    <tr>
+                        <td>@file.Descriptor.FileName</td>
+                        <td>@file.ContentType</td>
+                        <td>@file.SizeBytes bytes</td>
+                        <td>@file.UploadedAt.ToString("g")</td>
+                        <td>
+                            <div class="action-buttons">
+                                <a class="btn btn-sm btn-outline-info action-button" title="Edit" aria-label="Edit" href="metadata?fileId=@file.Descriptor.FileId&fileName=@Uri.EscapeDataString(file.Descriptor.FileName)&version=@file.Descriptor.Version">
+                                    <span aria-hidden="true">&#9998;</span>
+                                </a>
+                                <a class="btn btn-sm btn-outline-primary action-button" title="Download" aria-label="Download" href="download?fileId=@file.Descriptor.FileId&fileName=@Uri.EscapeDataString(file.Descriptor.FileName)&version=@file.Descriptor.Version">
+                                    <span aria-hidden="true">&#8681;</span>
+                                </a>
+                                <button class="btn btn-sm btn-outline-danger action-button" title="Delete" aria-label="Delete" @onclick="() => DeleteAsync(file)" disabled="@_isDeleting">
+                                    <span aria-hidden="true">&#128465;</span>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (_results.TotalPages > 1)
+    {
+        <nav>
+            <ul class="pagination">
+                @for (var i = 1; i <= _results.TotalPages; i++)
+                {
+                    var pageNumber = i;
+                    <li class="page-item @(pageNumber == _results.PageNumber ? "active" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(pageNumber)">@pageNumber</button>
+                    </li>
+                }
+            </ul>
+        </nav>
+    }
+}
+
+@code {
+    private string? _query;
+    private Aletheia.Foundation.Shared.PagedResult<Aletheia.Repository.Abstractions.Models.FileMetadata>? _results;
+    private string? _error;
+    private bool _isLoading;
+    private bool _isDeleting;
+    private int _pageNumber = 1;
+    private const int PageSize = 10;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SearchAsync();
+    }
+
+    private async Task StartSearchAsync()
+    {
+        _pageNumber = 1;
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        _isLoading = true;
+        _error = null;
+
+        try
+        {
+            var response = await ApiClient.SearchAsync(_query, _pageNumber, PageSize);
+            _results = response?.Results;
+            if (_results is null)
+            {
+                _error = "Browse could not load uploaded files. Refresh and retry.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _results = null;
+            _error = $"Browse failed: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task GoToPage(int pageNumber)
+    {
+        _pageNumber = pageNumber;
+        await SearchAsync();
+    }
+
+    private async Task DeleteAsync(Aletheia.Repository.Abstractions.Models.FileMetadata file)
+    {
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Delete '{file.Descriptor.FileName}'? This removes the file, metadata, and RAGS ingestion.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        _isDeleting = true;
+        _error = null;
+
+        try
+        {
+            var deleted = await ApiClient.DeleteAsync(
+                file.Descriptor.FileId,
+                file.Descriptor.FileName,
+                file.Descriptor.Version);
+
+            if (!deleted)
+            {
+                _error = "Delete failed. Refresh and try again.";
+                return;
+            }
+
+            await SearchAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete failed: {ex.Message}";
+        }
+        finally
+        {
+            _isDeleting = false;
+        }
+    }
+}

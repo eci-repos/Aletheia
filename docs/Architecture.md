@@ -1,0 +1,171 @@
+# Architecture
+
+## Overview
+
+Aletheia is an AI-native knowledge and document management platform built on .NET 10. It follows Clean Architecture, Hexagonal Architecture, and Domain-Driven Design principles. The system is organized into vertical slices (modules) for Repository, Knowledge Graph, and RAGS (Retrieval Augmented Generation System), with a shared Foundation layer and Blazor Web UI.
+
+For a presentation-ready walkthrough of CLI operation, WebAssembly, API, Repository, RAGS, Graph, GraphRAG, LazyGraphRAG, and the end-to-end document ingestion to Copilot chat-completion flow, see `docs/Technical-Presentation-Guide.md`.
+
+## Layered Model
+
+Dependencies point inward toward the domain core. Each module follows the same layering pattern.
+
+```
+Client/UI (Blazor)
+  ↓
+API (REST Controllers)
+  ↓
+Abstractions (Interfaces, DTOs, Models)
+  ↓
+Application (Use Cases / Orchestrators)
+  ↓
+Domain (Business Logic Interfaces)
+  ↓
+Infrastructure (Adapters: PostgreSQL, MinIO, Neo4j, pgvector)
+  ↓
+Contracts (Cross-cutting abstractions)
+  ↓
+Foundation (Domain primitives, validation, context, exceptions)
+```
+
+## Modules
+
+### Repository (Phases 2–3)
+
+- **Repository.Abstractions**: Contracts (interfaces, DTOs) for file operations.
+- **Repository.Domain**: Business workflows for upload, download, search, metadata, versioning.
+- **Repository.Application**: Service orchestrator implementing use cases.
+- **Repository.Infrastructure.PostgreSQL**: Relational metadata and document indexing.
+- **Repository.Infrastructure.MinIO**: Object storage for file payloads.
+- **Repository.API**: REST endpoints (Files, Versions, Metadata, Search, Collaboration, Governance).
+
+### Knowledge Graph (Phases 5–6)
+
+- **KnowledgeGraph.Abstractions**: Graph models (`GraphNode`, `GraphEdge`, `GraphPath`) and `IGraphService`.
+- **KnowledgeGraph.Application**: Domain events and graph mutation orchestration.
+- **KnowledgeGraph.Infrastructure.Neo4j**: Cypher-based graph persistence via Neo4j.
+
+### RAGS — Retrieval Augmented Generation System (Phases 11–12, 15–16, 21)
+
+- **RAGS.Abstractions**: Interfaces for `IRagsService`, `ICopilotService`, `IGraphRagService`, `ILazyGraphRagService`, `IVectorStore`, `IEmbeddingProvider`, models for `Chunk`, `RetrievalRequest`, chat, and ontology.
+- **RAGS.Application**: Ingestion, retrieval, summarization, explanation, chat use cases, GraphRAG summary retrieval, global search, and LazyGraphRAG traversal.
+- **RAGS.Infrastructure.PgVector**: Vector database adapter using PostgreSQL `pgvector`.
+- **RAGS.Infrastructure.PostgreSQL**: Supporting relational stores for RAG sessions.
+- **API Controllers**: `RagsController`, `CopilotController`, `GraphRagController`, `LazyGraphRagController`, `OntologyController`, `TaxonomyController`.
+
+#### GraphRAG v2 Intelligence
+
+RAGS v2 adds an index-heavy GraphRAG layer that moves commonly reused reasoning artifacts into the graph index:
+
+- Per-chunk entity and relationship extraction.
+- Typed `Entity`, `Source`, and `Community` nodes in Neo4j.
+- Typed relationship edges using `GraphEdge.RelationshipType`.
+- Entity-to-source `found_in` edges.
+- Document, entity, relationship, community, and global summaries.
+- Hierarchical community metadata.
+- Summary-based retrieval before raw chunk fallback.
+- Global search over top-level community summaries.
+- Structured context assembly through `IGraphContextBuilder`.
+
+For browser upload and queued GraphRAG ingestion, Phase 21 now uses a faster searchable-first path: RAGS chunks and embeddings are created, lightweight source/chunk graph seed nodes are persisted, and expensive entity/relationship/summary enrichment is deferred to bounded query-time lazy enrichment for relevant chunks. Lazy entity and relationship discoveries are written back through `ILazyEnrichmentKnowledgeSink` so PostgreSQL Taxonomy/Ontology explorers reflect what query-time enrichment has learned.
+
+#### LazyGraphRAG v2 Optimization
+
+LazyGraphRAG follows a different cost model:
+
+- Ingestion updates chunks and corpus text statistics without LLM entity extraction.
+- Query-time discovery uses TF-IDF/BM25-style candidate selection.
+- Traversal uses a budgeted best-first search instead of blind BFS.
+- `IGraphTraversalBudget` limits LLM calls, depth, nodes, relationships, token budget, and execution time.
+- `ISubgraphPruningService` removes low-relevance nodes and relationships before final ranking.
+
+Copilot chat responses include operational telemetry on the assistant message: elapsed seconds, estimated prompt/completion tokens, estimated token throughput, retrieved context count, citation count, retrieval scores, and a retrieval-based alignment confidence estimate. When a plan-based execution completes, the response also includes a plan-versus-actual estimate comparison summary.
+
+The conversational planning system added in Sprints 22.1–22.7 is documented in `docs/Chat-Planning-Architecture-Report.md` and `docs/Copilot-Progress-API-Documentation.md`.
+
+#### Search Center
+
+`Aletheia.Web` exposes Search Center at `/search` as the primary human-facing retrieval workbench. The page lets users choose Semantic, WRAGS, GraphRAG, or LazyGraphRAG mode against the same Repository-backed knowledge estate:
+
+- Semantic mode calls standard RAGS retrieval over chunks and embeddings.
+- WRAGS mode retrieves durable wiki pages as knowledge context.
+- GraphRAG mode calls summary-aware graph retrieval and exposes an expansion-hop control.
+- LazyGraphRAG mode calls query-time discovery/traversal and exposes an expansion-limit control.
+- Direct content ingestion from the page queues background jobs for all three modes.
+- Search results show rank, score, retrieval strategy, citations, chunk/source details, and technical API errors when failures occur.
+
+#### WRAGS Wiki
+
+WRAGS means Wiki Retrieval Augmented Generation System. It is Aletheia's durable LLM Wiki surface over RAGS, GraphRAG, and LazyGraphRAG:
+
+- `/api/wiki` exposes search, recent pages, page lookup, regeneration, queued regeneration, retrieval-as-context, related-page lookup, page history, page edits, and lifecycle status updates.
+- PostgreSQL stores generated and edited wiki pages with topic, title, body/summary, source IDs, citations, generation mode, version, lifecycle status, review metadata, related topics, score, rank, retrieval strategy, source/chunk metadata, timestamps, and prior revisions in `wiki_page_history`.
+- WRAGS mode searches saved pages first, generates from GraphRAG on first miss, and falls back to LazyGraphRAG and Semantic retrieval when needed.
+- Users can also force GraphRAG, LazyGraphRAG, or Semantic mode.
+- The current slice persists generated snapshots, supports `Generated`/`Reviewed`/`Approved`/`NeedsReview`/`Stale` page state, stale warnings, related topics, related pages, editable page bodies, version history, source-change stale detection from Repository metadata, queued regeneration, and use of saved WRAGS pages in Search Center/Copilot retrieval context.
+
+## Foundation (Phases 0–1)
+
+- Domain core: `Entity`, `AggregateRoot`, `ValueObject`, `DomainEvent`
+- Shared types: `Result<T>`, `PagedResult<T>`
+- Validation: `ValidationResult`, `ValidationException`
+- Context: `CorrelationContext`, `SecurityContext`, `TenantContext`
+- Audit: `AuditInfo`, `AuditActor`
+- Exceptions: `DomainException`, `SecurityException`
+
+## Dependency Rules
+
+- Domain and Foundation projects must not reference infrastructure implementations.
+- All cross-module communication uses abstractions (interfaces in `.Abstractions` projects).
+- No speculative implementations outside the current sprint scope.
+
+## External Dependencies
+
+| Service        | Technology          | Purpose                          |
+|----------------|---------------------|----------------------------------|
+| Primary DB     | PostgreSQL + pgvector | Relational data & vector search |
+| Graph DB       | Neo4j               | Knowledge graph, typed graph entities, relationships, communities, summaries |
+| Object Store   | MinIO               | File blob storage                |
+| Web Framework  | ASP.NET Core 10     | REST API & Blazor WebAssembly    |
+
+## API Surface
+
+The `Repository.API` exposes 13 controllers covering document management, RAG operations, knowledge graph interaction, and collaborative features. See `src/Repository.API/Controllers/` for the full list. The conversational planning API surface is documented in `docs/Copilot-Progress-API-Documentation.md`.
+
+## End-to-End Knowledge Flow
+
+At runtime, document upload and Copilot chat are connected by a source-attributable knowledge flow:
+
+1. `Aletheia.Web` uploads a document through `POST /api/files/upload`.
+2. `Repository.API` stores the source artifact through Repository use cases.
+3. MinIO persists the file payload and PostgreSQL persists file metadata.
+4. The API queues a background ingestion job and returns an `IngestionJobId`.
+5. The worker extracts supported text, calls `IRagsService.IngestAsync`, and stores chunks plus embeddings in pgvector.
+6. The worker indexes taxonomy hints and lightweight graph seed nodes for the source and chunks.
+7. GraphRAG enriches relevant chunks lazily during retrieval when stored summaries are absent, then syncs discovered entities and relationships into Taxonomy/Ontology.
+8. LazyGraphRAG records low-cost corpus statistics for query-time candidate discovery.
+9. `Aletheia.Web` polls `/api/jobs` and renders stage, heartbeat, failure details, and approximate progress in the Activity panel.
+10. Copilot resolves user document references from registered metadata and aliases.
+11. Copilot retrieves source-filtered RAGS chunks, GraphRAG summaries/lazy-enriched context, or LazyGraphRAG pruned context as needed, then sends an augmented prompt to chat completion.
+12. Responses return to the WebAssembly app with citations, optional output formatting, and chat-completion stats.
+
+This keeps Repository as the system of record and RAGS as the retrieval-ready semantic memory for ingested documents.
+
+## Deployment Validation Snapshot
+
+The Docker Compose topology has been validated with:
+
+- `aletheia-api` on `http://localhost:8080`
+- `aletheia-web` on `http://localhost:8081`
+- PostgreSQL, MinIO, and Neo4j healthy
+- `/health/live` returning HTTP 200
+- `/health/ready` returning HTTP 200
+- Authenticated Search Center Semantic, GraphRAG, and LazyGraphRAG retrieval through the Web UI
+- Search Center GraphRAG retrieval returning summary-based results such as `summary-entity`
+- LazyGraphRAG retrieval honoring traversal budgets without failing when optional enrichment reaches a configured limit
+- Background ingestion job status visible through `/api/jobs` and the Web Activity panel
+
+Operationally important runtime fixes are part of the current codebase:
+
+- API container includes `libgssapi-krb5-2` for Npgsql/GSSAPI native dependency resolution.
+- `RAGS.Infrastructure.Graph` uses `Neo4j.Driver` `6.2.1` to align with the Neo4j infrastructure provider.

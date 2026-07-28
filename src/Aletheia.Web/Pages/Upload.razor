@@ -1,0 +1,127 @@
+@page "/upload"
+@inject RepositoryApiClient ApiClient
+@inject ActivityLogService ActivityLog
+
+<PageTitle>Upload - Aletheia</PageTitle>
+
+<h1>Upload Files</h1>
+
+<div class="upload-container">
+    <InputFile OnChange="LoadFiles" class="form-control" multiple />
+
+    @if (_filesToUpload.Any())
+    {
+        <ul class="list-group mt-3">
+            @foreach (var file in _filesToUpload)
+            {
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    @file.Name (@file.Size bytes)
+                    @if (_statuses.TryGetValue(file.Name, out var status))
+                    {
+                        <span class="badge @status.Class">@status.Text</span>
+                    }
+                </li>
+            }
+        </ul>
+
+        <button class="btn btn-primary mt-3" @onclick="UploadFilesAsync" disabled="@_isUploading">
+            @(_isUploading ? "Uploading..." : "Upload All")
+        </button>
+    }
+</div>
+
+@code {
+    private const long MaxUploadSizeBytes = 250L * 1024L * 1024L;
+
+    private List<IBrowserFile> _filesToUpload = new();
+    private Dictionary<string, (string Text, string Class)> _statuses = new();
+    private bool _isUploading;
+
+    private void LoadFiles(InputFileChangeEventArgs e)
+    {
+        _filesToUpload = e.GetMultipleFiles().ToList();
+        _statuses.Clear();
+        foreach (var file in _filesToUpload)
+        {
+            var activityId = ActivityLog.Begin("Upload", file.Name, $"Queued {file.Size:N0} bytes for upload.");
+            ActivityLog.Complete(activityId, "Upload", file.Name, "File is ready to upload.");
+        }
+    }
+
+    private async Task UploadFilesAsync()
+    {
+        _isUploading = true;
+
+        foreach (var file in _filesToUpload)
+        {
+            var activityId = ActivityLog.Begin("Upload", file.Name, "Opening browser file stream.");
+            try
+            {
+                var fileId = Guid.NewGuid();
+                if (file.Size > MaxUploadSizeBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"Browser upload limit exceeded. FileSizeBytes: {file.Size}. MaxUploadSizeBytes: {MaxUploadSizeBytes}.");
+                }
+
+                using var stream = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes);
+                ActivityLog.Trace(activityId, "Upload", file.Name, "Sending file to API. Repository storage runs now; RAGS enrichment is queued as a background job.");
+                var upload = await ApiClient.UploadAsync(fileId, file.Name, file.ContentType, stream, file.Size);
+
+                _statuses[file.Name] = upload switch
+                {
+                    { Uploaded: false } => ($"Upload failed: {SummarizeUploadError(upload.Error)}", "bg-danger"),
+                    { IngestionJobId: not null } => ("Uploaded; ingestion queued", "bg-info text-dark"),
+                    { RagsIngested: true, KnowledgeIndexed: true } => ("Uploaded + RAGS + knowledge indexed", "bg-success"),
+                    { RagsIngested: true } => ("Uploaded + RAGS ingested", "bg-warning text-dark"),
+                    { IngestionStatus: "UnsupportedType" } => ("Uploaded; RAGS skipped", "bg-secondary"),
+                    _ => ("Uploaded; RAGS failed", "bg-warning text-dark")
+                };
+
+                if (!upload.Uploaded)
+                {
+                    ActivityLog.Fail(activityId, "Upload", file.Name, upload.Error ?? "Upload failed without API error detail.");
+                }
+                else if (upload.IngestionJobId is Guid jobId)
+                {
+                    ActivityLog.Complete(activityId, "Upload", file.Name, $"Upload stored. Background ingestion job {jobId:N} is queued.");
+                    var job = await ApiClient.GetIngestionJobAsync(jobId);
+                    if (job is not null)
+                    {
+                        ActivityLog.UpsertJob(job);
+                    }
+                }
+                else if (upload.RagsIngested && upload.KnowledgeIndexed)
+                {
+                    ActivityLog.Complete(activityId, "Upload", file.Name, $"Upload complete. RAGS and knowledge indexing completed with status {upload.IngestionStatus}.");
+                }
+                else if (upload.RagsIngested)
+                {
+                    ActivityLog.Warn(activityId, "Upload", file.Name, $"Upload complete. RAGS ingested, but knowledge indexing did not complete. Status: {upload.IngestionStatus}.");
+                }
+                else
+                {
+                    ActivityLog.Warn(activityId, "Upload", file.Name, $"Upload complete. RAGS/knowledge indexing skipped or failed. Status: {upload.IngestionStatus}. {upload.Error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _statuses[file.Name] = ($"Error: {ex.Message}", "bg-danger");
+                ActivityLog.Fail(activityId, "Upload", file.Name, $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        _isUploading = false;
+    }
+
+    private static string SummarizeUploadError(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return "no API detail";
+        }
+
+        const int maxLength = 96;
+        return error.Length <= maxLength ? error : $"{error[..maxLength]}...";
+    }
+}

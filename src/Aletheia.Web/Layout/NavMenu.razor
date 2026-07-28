@@ -1,0 +1,106 @@
+<div class="@NavShellCssClass">
+    <div class="top-row">
+        <div class="container-fluid nav-header">
+            <a class="navbar-brand" href="" title="Aletheia">
+                <span class="brand-text">Aletheia</span>
+            </a>
+            <button type="button" title="@SidebarToggleTitle" class="sidebar-toggle" @onclick="ToggleSidebarAsync" aria-label="@SidebarToggleTitle">
+                <span class="toggle-icon" aria-hidden="true"></span>
+            </button>
+        </div>
+    </div>
+
+    <div class="nav-scrollable">
+        <nav class="flex-column" aria-label="Main navigation">
+            <div class="nav-item">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Dashboard">
+                    <span class="nav-icon icon-dashboard" aria-hidden="true"></span>
+                    <span class="nav-text">Dashboard</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="browse" title="Browse">
+                    <span class="nav-icon icon-browse" aria-hidden="true"></span>
+                    <span class="nav-text">Browse</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="upload" title="Upload">
+                    <span class="nav-icon icon-upload" aria-hidden="true"></span>
+                    <span class="nav-text">Upload</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="download" title="Download">
+                    <span class="nav-icon icon-download" aria-hidden="true"></span>
+                    <span class="nav-text">Download</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="search" title="Search">
+                    <span class="nav-icon icon-search" aria-hidden="true"></span>
+                    <span class="nav-text">Search</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="wiki" title="WRAGS Wiki">
+                    <span class="nav-icon icon-wiki" aria-hidden="true"></span>
+                    <span class="nav-text">WRAGS</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="metadata" title="Metadata">
+                    <span class="nav-icon icon-metadata" aria-hidden="true"></span>
+                    <span class="nav-text">Metadata</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="taxonomy" title="Taxonomy">
+                    <span class="nav-icon icon-taxonomy" aria-hidden="true"></span>
+                    <span class="nav-text">Taxonomy</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="ontology" title="Ontology">
+                    <span class="nav-icon icon-ontology" aria-hidden="true"></span>
+                    <span class="nav-text">Ontology</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="graph" title="Graph">
+                    <span class="nav-icon icon-graph" aria-hidden="true"></span>
+                    <span class="nav-text">Graph</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="copilot" title="Copilot">
+                    <span class="nav-icon icon-copilot" aria-hidden="true"></span>
+                    <span class="nav-text">Copilot</span>
+                </NavLink>
+            </div>
+            <div class="nav-item">
+                <NavLink class="nav-link" href="governance" title="Governance">
+                    <span class="nav-icon icon-governance" aria-hidden="true"></span>
+                    <span class="nav-text">Governance</span>
+                </NavLink>
+            </div>
+        </nav>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public bool IsCollapsed { get; set; }
+
+    [Parameter]
+    public EventCallback OnToggleSidebar { get; set; }
+
+    private string NavShellCssClass => IsCollapsed ? "nav-shell is-collapsed" : "nav-shell";
+
+    private string SidebarToggleTitle => IsCollapsed ? "Expand menu" : "Collapse menu";
+
+    private async Task ToggleSidebarAsync()
+    {
+        await OnToggleSidebar.InvokeAsync();
+    }
+}

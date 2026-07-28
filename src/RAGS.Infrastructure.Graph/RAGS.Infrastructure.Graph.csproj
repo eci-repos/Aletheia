@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Neo4j.Driver" Version="6.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KnowledgeGraph.Abstractions\KnowledgeGraph.Abstractions.csproj" />
+    <ProjectReference Include="..\RAGS.Abstractions\RAGS.Abstractions.csproj" />
+    <ProjectReference Include="..\Aletheia.Foundation\Aletheia.Foundation.csproj" />
+  </ItemGroup>
+
+</Project>

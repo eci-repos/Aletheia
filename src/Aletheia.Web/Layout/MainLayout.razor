@@ -1,0 +1,52 @@
+﻿@inherits LayoutComponentBase
+@inject AuthService Auth
+@inject NavigationManager Navigation
+
+<div class="page">
+    <div class="@SidebarCssClass">
+        <NavMenu IsCollapsed="@isSidebarCollapsed" OnToggleSidebar="@ToggleSidebar" />
+    </div>
+
+    <main>
+        <div class="top-row px-4 d-flex justify-content-between">
+            <span>Aletheia Repository</span>
+            <AuthorizeView>
+                <Authorized>
+                    <span class="me-2">Hello, @Auth.UserName!</span>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="Logout">Logout</button>
+                </Authorized>
+                <NotAuthorized>
+                    <a href="login" class="btn btn-sm btn-outline-primary">Login</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+
+    <ActivityPanel />
+</div>
+
+@code {
+    private bool isSidebarCollapsed;
+
+    private string SidebarCssClass => isSidebarCollapsed ? "sidebar collapsed" : "sidebar";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.GetAuthenticationStateAsync();
+    }
+
+    private void ToggleSidebar()
+    {
+        isSidebarCollapsed = !isSidebarCollapsed;
+    }
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        Navigation.NavigateTo("/");
+    }
+}

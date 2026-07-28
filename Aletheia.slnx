@@ -1,0 +1,30 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Aletheia.Contracts/Aletheia.Contracts.csproj" />
+    <Project Path="src/Aletheia.Foundation/Aletheia.Foundation.csproj" />
+    <Project Path="src/Aletheia.Security/Aletheia.Security.csproj" />
+    <Project Path="src/Aletheia.Web/Aletheia.Web.csproj" />
+    <Project Path="src/RAGS.Abstractions/RAGS.Abstractions.csproj" />
+    <Project Path="src/RAGS.Application/RAGS.Application.csproj" />
+    <Project Path="src/RAGS.Infrastructure.PgVector/RAGS.Infrastructure.PgVector.csproj" />
+    <Project Path="src/RAGS.Infrastructure.PostgreSQL/RAGS.Infrastructure.PostgreSQL.csproj" />
+    <Project Path="src/KnowledgeGraph.Abstractions/KnowledgeGraph.Abstractions.csproj" />
+    <Project Path="src/KnowledgeGraph.Application/KnowledgeGraph.Application.csproj" />
+    <Project Path="src/KnowledgeGraph.Infrastructure.Neo4j/KnowledgeGraph.Infrastructure.Neo4j.csproj" />
+    <Project Path="src/RAGS.Infrastructure.Graph/RAGS.Infrastructure.Graph.csproj" />
+    <Project Path="src/Repository.Abstractions/Repository.Abstractions.csproj" />
+    <Project Path="src/Repository.Domain/Repository.Domain.csproj" />
+    <Project Path="src/Repository.Application/Repository.Application.csproj" />
+    <Project Path="src/Repository.Infrastructure.MinIO/Repository.Infrastructure.MinIO.csproj" />
+    <Project Path="src/Repository.Infrastructure.PostgreSQL/Repository.Infrastructure.PostgreSQL.csproj" />
+    <Project Path="src/Repository.API/Repository.API.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Aletheia.Foundation.UnitTests/Aletheia.Foundation.UnitTests.csproj" />
+    <Project Path="tests/Repository.UnitTests/Repository.UnitTests.csproj" />
+    <Project Path="tests/Repository.IntegrationTests/Repository.IntegrationTests.csproj" />
+    <Project Path="tests/Aletheia.LoadTests/Aletheia.LoadTests.csproj" />
+    <Project Path="tests/RAGS.UnitTests/RAGS.UnitTests.csproj" />
+    <Project Path="tests/Aletheia.Web.UnitTests/Aletheia.Web.UnitTests.csproj" />
+  </Folder>
+</Solution>

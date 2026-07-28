@@ -1,0 +1,80 @@
+@page "/taxonomy"
+@inject RepositoryApiClient ApiClient
+
+<PageTitle>Taxonomy Explorer - Aletheia</PageTitle>
+
+<h1>Taxonomy Explorer</h1>
+
+@if (_categories is null)
+{
+    <div class="alert alert-info">
+        Loading categories...
+    </div>
+}
+else if (_categories.Count == 0)
+{
+    <div class="alert alert-warning">No categories found.</div>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-4">
+            <h5>Categories</h5>
+            <div class="list-group">
+                @foreach (var category in _categories)
+                {
+                    <button class="list-group-item list-group-item-action @(_selectedCategory == category ? "active" : "")"
+                            @onclick="() => SelectCategory(category)">
+                        @category
+                    </button>
+                }
+            </div>
+        </div>
+        <div class="col-md-8">
+            @if (_selectedCategory is not null)
+            {
+                <h5>Tags for @_selectedCategory</h5>
+                @if (_tags is null)
+                {
+                    <div class="alert alert-info">Loading tags...</div>
+                }
+                else if (_tags.Count == 0)
+                {
+                    <div class="alert alert-warning">No tags found for this category.</div>
+                }
+                else
+                {
+                    <div class="d-flex flex-wrap gap-2">
+                        @foreach (var tag in _tags)
+                        {
+                            <span class="badge bg-secondary">@tag</span>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="alert alert-light">Select a category to view tags.</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyCollection<string>? _categories;
+    private string? _selectedCategory;
+    private IReadOnlyCollection<string>? _tags;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _categories = await ApiClient.GetCategoriesAsync();
+    }
+
+    private async Task SelectCategory(string category)
+    {
+        _selectedCategory = category;
+        _tags = null;
+
+        _tags = await ApiClient.GetTagsAsync(category);
+    }
+}

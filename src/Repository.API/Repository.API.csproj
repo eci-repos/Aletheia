@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Repository.Application\Repository.Application.csproj" />
+    <ProjectReference Include="..\Repository.Domain\Repository.Domain.csproj" />
+    <ProjectReference Include="..\Repository.Abstractions\Repository.Abstractions.csproj" />
+    <ProjectReference Include="..\Repository.Infrastructure.MinIO\Repository.Infrastructure.MinIO.csproj" />
+    <ProjectReference Include="..\Repository.Infrastructure.PostgreSQL\Repository.Infrastructure.PostgreSQL.csproj" />
+    <ProjectReference Include="..\Aletheia.Foundation\Aletheia.Foundation.csproj" />
+    <ProjectReference Include="..\Aletheia.Security\Aletheia.Security.csproj" />
+    <ProjectReference Include="..\RAGS.Application\RAGS.Application.csproj" />
+    <ProjectReference Include="..\RAGS.Abstractions\RAGS.Abstractions.csproj" />
+    <ProjectReference Include="..\RAGS.Infrastructure.PgVector\RAGS.Infrastructure.PgVector.csproj" />
+    <ProjectReference Include="..\RAGS.Infrastructure.PostgreSQL\RAGS.Infrastructure.PostgreSQL.csproj" />
+    <ProjectReference Include="..\KnowledgeGraph.Abstractions\KnowledgeGraph.Abstractions.csproj" />
+    <ProjectReference Include="..\KnowledgeGraph.Application\KnowledgeGraph.Application.csproj" />
+    <ProjectReference Include="..\KnowledgeGraph.Infrastructure.Neo4j\KnowledgeGraph.Infrastructure.Neo4j.csproj" />
+    <ProjectReference Include="..\RAGS.Infrastructure.Graph\RAGS.Infrastructure.Graph.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,76 @@
+@page "/"
+@inject RepositoryApiClient ApiClient
+@inject AuthService Auth
+
+<PageTitle>Dashboard - Aletheia</PageTitle>
+
+<h1>Dashboard</h1>
+
+<p>Welcome to the Aletheia repository.</p>
+
+<div class="dashboard-cards">
+    <div class="card">
+        <h5 class="card-title">Upload</h5>
+        <p class="card-text">Add new files to the repository.</p>
+        <a href="upload" class="btn btn-primary">Upload Files</a>
+    </div>
+    <div class="card">
+        <h5 class="card-title">Browse</h5>
+        <p class="card-text">Explore files and metadata.</p>
+        <a href="browse" class="btn btn-primary">Browse Repository</a>
+    </div>
+    <div class="card">
+        <h5 class="card-title">Search</h5>
+        <p class="card-text">Find files quickly.</p>
+        <a href="browse" class="btn btn-primary">Search</a>
+    </div>
+</div>
+
+@if (_recentFiles is not null && _recentFiles.Count > 0)
+{
+    <h3 class="mt-4">Recent Files</h3>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var file in _recentFiles)
+            {
+                <tr>
+                    <td>@file.Descriptor.FileName</td>
+                    <td>@file.ContentType</td>
+                    <td>@file.SizeBytes bytes</td>
+                    <td>@file.UploadedAt.ToString("g")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<Aletheia.Repository.Abstractions.Models.FileMetadata>? _recentFiles;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authenticationState = await Auth.GetAuthenticationStateAsync();
+        if (authenticationState.User.Identity?.IsAuthenticated != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var response = await ApiClient.SearchAsync(null, 1, 10);
+            _recentFiles = response?.Results.Items;
+        }
+        catch (HttpRequestException)
+        {
+            _recentFiles = Array.Empty<Aletheia.Repository.Abstractions.Models.FileMetadata>();
+        }
+    }
+}

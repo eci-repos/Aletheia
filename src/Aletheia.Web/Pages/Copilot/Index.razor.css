@@ -1,0 +1,112 @@
+.copilot-page {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 5.7rem);
+    min-height: 0;
+}
+
+.copilot-layout {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.copilot-conversation-column {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.copilot-conversation-card {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.copilot-conversation-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.copilot-message {
+    max-width: 100%;
+}
+
+.copilot-user-message {
+    white-space: pre-wrap;
+}
+
+.copilot-assistant-message {
+    margin-top: 0.25rem;
+}
+
+.copilot-assistant-message p:last-child,
+.copilot-assistant-message ul:last-child,
+.copilot-assistant-message table:last-child,
+.copilot-assistant-message pre:last-child {
+    margin-bottom: 0;
+}
+
+.copilot-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.copilot-table {
+    margin-bottom: 0.75rem;
+    vertical-align: top;
+}
+
+.copilot-json {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    white-space: pre-wrap;
+}
+
+.copilot-format-select {
+    flex: 0 0 8rem;
+}
+
+.copilot-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+    color: #495057;
+    font-size: 0.78rem;
+}
+
+.copilot-stats span {
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    background: #f8f9fa;
+    padding: 0.12rem 0.4rem;
+    line-height: 1.35;
+}
+
+@media (max-width: 767.98px) {
+    .copilot-page {
+        height: auto;
+        min-height: calc(100vh - 5.7rem);
+    }
+
+    .copilot-conversation-card {
+        min-height: 65vh;
+    }
+
+    .copilot-input-group {
+        flex-wrap: wrap;
+    }
+
+    .copilot-format-select {
+        flex: 1 0 100%;
+        border-top-right-radius: 0.375rem !important;
+        border-bottom-left-radius: 0 !important;
+        margin-bottom: 0.5rem;
+    }
+}

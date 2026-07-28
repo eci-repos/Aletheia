@@ -1,0 +1,172 @@
+@page "/graph"
+@inject RepositoryApiClient ApiClient
+@inject IJSRuntime JS
+
+<PageTitle>Graph Explorer - Aletheia</PageTitle>
+
+<div class="graph-workspace">
+    <div class="graph-toolbar">
+        <div class="graph-title">
+            <h1>Knowledge Graph Explorer</h1>
+            @if (_nodes is not null && _edges is not null)
+            {
+                <span>@_nodes.Count nodes / @_edges.Count edges</span>
+            }
+        </div>
+
+        <div class="graph-actions">
+            <button class="btn btn-outline-primary" @onclick="ImportGraphAsync" disabled="@_importing">
+                @(_importing ? "Importing..." : "Import from Ontology")
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="LoadGraphAsync">Refresh Graph</button>
+            <button class="btn btn-outline-secondary" title="Fit graph to window" @onclick="FitGraphAsync">Fit</button>
+            <button class="btn btn-outline-secondary" title="Run layout again" @onclick="RelayoutGraphAsync">Re-layout</button>
+            <button class="btn btn-outline-secondary" title="Spread nodes farther apart" @onclick="SpreadGraphAsync">Spread</button>
+        </div>
+
+        <div class="path-finder">
+            <label class="form-label" for="path-from">From</label>
+            <select id="path-from" class="form-select" @bind="_pathFrom">
+                <option value="">Select node...</option>
+                @if (_nodes is not null)
+                {
+                    @foreach (var node in _nodes)
+                    {
+                        <option value="@node.Id">@node.Label</option>
+                    }
+                }
+            </select>
+
+            <label class="form-label" for="path-to">To</label>
+            <select id="path-to" class="form-select" @bind="_pathTo">
+                <option value="">Select node...</option>
+                @if (_nodes is not null)
+                {
+                    @foreach (var node in _nodes)
+                    {
+                        <option value="@node.Id">@node.Label</option>
+                    }
+                }
+            </select>
+
+            <button class="btn btn-primary" @onclick="FindPathAsync">Find Path</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert @(_statusSuccess ? "alert-success" : "alert-danger") graph-message">@_statusMessage</div>
+    }
+
+    @if (_pathResult is not null)
+    {
+        <div class="path-result">
+            @if (_pathResult.Count == 0)
+            {
+                <span>No path found.</span>
+            }
+            else
+            {
+                @foreach (var path in _pathResult)
+                {
+                    <span>@string.Join(" -> ", path.Nodes.Select(n => n.Label))</span>
+                }
+            }
+        </div>
+    }
+
+    <div class="graph-canvas">
+        <div id="graph-container"></div>
+    </div>
+</div>
+
+@code {
+    private List<GraphNode>? _nodes;
+    private List<GraphEdge>? _edges;
+    private bool _importing;
+    private string _statusMessage = string.Empty;
+    private bool _statusSuccess;
+
+    private string _pathFrom = string.Empty;
+    private string _pathTo = string.Empty;
+    private List<GraphPath>? _pathResult;
+    private bool _renderGraphAfterRender;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadGraphAsync();
+        }
+
+        if (_renderGraphAfterRender && _nodes is not null && _edges is not null)
+        {
+            _renderGraphAfterRender = false;
+            await JS.InvokeVoidAsync("initGraph", "graph-container", _nodes, _edges);
+        }
+    }
+
+    private async Task LoadGraphAsync()
+    {
+        _statusMessage = string.Empty;
+        _nodes = await ApiClient.GraphGetNodesAsync();
+        _edges = await ApiClient.GraphGetEdgesAsync();
+
+        if (_nodes is null || _edges is null)
+        {
+            _statusSuccess = false;
+            _statusMessage = "Graph load failed. Refresh the graph or check the API response.";
+            StateHasChanged();
+            return;
+        }
+
+        if (_nodes.Count == 0)
+        {
+            _statusSuccess = true;
+            _statusMessage = "Graph is empty. Import from Ontology to populate it.";
+        }
+
+        _renderGraphAfterRender = true;
+        StateHasChanged();
+    }
+
+    private async Task ImportGraphAsync()
+    {
+        _importing = true;
+        _statusMessage = string.Empty;
+        var result = await ApiClient.GraphImportAsync();
+        _statusSuccess = result.IsSuccess;
+        _statusMessage = result.IsSuccess ? "Graph imported successfully." : $"Import failed: {result.Error}";
+        _importing = false;
+
+        if (result.IsSuccess)
+        {
+            await LoadGraphAsync();
+        }
+    }
+
+    private async Task FindPathAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pathFrom) || string.IsNullOrWhiteSpace(_pathTo))
+        {
+            return;
+        }
+
+        _pathResult = await ApiClient.GraphFindPathAsync(_pathFrom, _pathTo);
+    }
+
+    private async Task FitGraphAsync()
+    {
+        await JS.InvokeVoidAsync("fitGraph");
+    }
+
+    private async Task RelayoutGraphAsync()
+    {
+        await JS.InvokeVoidAsync("relayoutGraph");
+    }
+
+    private async Task SpreadGraphAsync()
+    {
+        await JS.InvokeVoidAsync("spreadGraph");
+    }
+}

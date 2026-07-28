@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RAGS.Abstractions\RAGS.Abstractions.csproj" />
+    <ProjectReference Include="..\Aletheia.Foundation\Aletheia.Foundation.csproj" />
+    <ProjectReference Include="..\Repository.Infrastructure.PostgreSQL\Repository.Infrastructure.PostgreSQL.csproj" />
+  </ItemGroup>
+
+</Project>

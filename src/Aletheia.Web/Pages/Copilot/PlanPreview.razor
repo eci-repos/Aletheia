@@ -1,0 +1,74 @@
+@using Aletheia.RAGS.Abstractions.Models
+
+@if (Plan is null)
+{
+    return;
+}
+
+<div class="copilot-plan-card card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Execution Plan</span>
+        @if (Plan.RequiresApproval)
+        {
+            <span class="badge bg-warning text-dark">Approval required</span>
+        }
+        else
+        {
+            <span class="badge bg-success">Fast path</span>
+        }
+    </div>
+    <div class="card-body">
+        <p class="mb-2"><strong>Mode:</strong> @Plan.Mode</p>
+        <p class="mb-2"><strong>Estimated duration:</strong> @Plan.EstimatedSecondsMin - @Plan.EstimatedSecondsMax seconds</p>
+        <p class="mb-2"><strong>Estimated model calls:</strong> @Plan.EstimatedLlmCalls</p>
+        <p class="mb-2"><strong>Estimated retrieval:</strong> @Plan.EstimatedRetrievalCount chunks</p>
+        <p class="mb-2"><strong>Expires:</strong> @Plan.ExpiresAt.ToString("g")</p>
+
+        <h6>Steps</h6>
+        <ol class="list-group list-group-numbered mb-3">
+            @foreach (var step in Plan.Steps)
+            {
+                <li class="list-group-item py-1">@step</li>
+            }
+        </ol>
+
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <div class="alert alert-info py-2 mb-2">@StatusMessage</div>
+        }
+
+        <div class="d-flex gap-2">
+            @if (Plan.RequiresApproval && Plan.Status == ChatPlanStatus.Proposed)
+            {
+                <button class="btn btn-success" @onclick="OnApprove" disabled="@IsBusy">Run</button>
+                <button class="btn btn-outline-secondary" @onclick="OnRevise" disabled="@IsBusy">Revise</button>
+                <button class="btn btn-outline-danger" @onclick="OnCancel" disabled="@IsBusy">Cancel</button>
+            }
+            else if (Plan.Status == ChatPlanStatus.Proposed)
+            {
+                <button class="btn btn-primary" @onclick="OnApprove" disabled="@IsBusy">Run</button>
+                <button class="btn btn-outline-secondary" @onclick="OnRevise" disabled="@IsBusy">Revise</button>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public ChatPlanRecord? Plan { get; set; }
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public string? StatusMessage { get; set; }
+
+    [Parameter]
+    public EventCallback OnApprove { get; set; }
+
+    [Parameter]
+    public EventCallback OnRevise { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+}

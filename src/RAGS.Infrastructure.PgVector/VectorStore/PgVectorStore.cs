@@ -1,0 +1,239 @@
+using Aletheia.Foundation.Shared;
+using Aletheia.RAGS.Abstractions.Interfaces;
+using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.Repository.Infrastructure.PostgreSQL.Connections;
+using Dapper;
+using Npgsql;
+
+namespace Aletheia.RAGS.Infrastructure.PgVector.VectorStore;
+
+public sealed class PgVectorStore : ISourceFilteredVectorStore
+{
+    private const string StoreFailedMessage = "Vector store operation failed.";
+    private const string SearchFailedMessage = "Vector search failed.";
+    private const string DeleteFailedMessage = "Vector deletion failed.";
+
+    private readonly PostgreSqlConnectionFactory _connectionFactory;
+    private readonly int _vectorDimension;
+
+    public PgVectorStore(PostgreSqlConnectionFactory connectionFactory, int vectorDimension)
+    {
+        _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
+        _vectorDimension = vectorDimension > 0 ? vectorDimension : throw new ArgumentOutOfRangeException(nameof(vectorDimension));
+    }
+
+    public async Task<Result> StoreAsync(Guid chunkId, ReadOnlyMemory<float> vector, Chunk chunk, CancellationToken cancellationToken = default)
+    {
+        if (chunk is null)
+        {
+            throw new ArgumentNullException(nameof(chunk));
+        }
+
+        const string sql = @"
+            INSERT INTO embeddings (chunk_id, source_id, content, embedding)
+            VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector)
+            ON CONFLICT (chunk_id)
+            DO UPDATE SET
+                source_id = EXCLUDED.source_id,
+                content = EXCLUDED.content,
+                embedding = EXCLUDED.embedding";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var parameters = new
+            {
+                chunkId,
+                chunk.SourceId,
+                chunk.Content,
+                Embedding = VectorToString(vector)
+            };
+
+            await connection.ExecuteAsync(sql, parameters).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"{StoreFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result> StoreBatchAsync(IEnumerable<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)> items, CancellationToken cancellationToken = default)
+    {
+        var itemList = items?.ToList() ?? throw new ArgumentNullException(nameof(items));
+        if (itemList.Count == 0)
+        {
+            return Result.Success();
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            const string sql = @"
+                INSERT INTO embeddings (chunk_id, source_id, content, embedding)
+                VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector)
+                ON CONFLICT (chunk_id)
+                DO UPDATE SET
+                    source_id = EXCLUDED.source_id,
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding";
+
+            foreach (var (chunkId, vector, chunk) in itemList)
+            {
+                var parameters = new
+                {
+                    ChunkId = chunkId,
+                    chunk.SourceId,
+                    chunk.Content,
+                    Embedding = VectorToString(vector)
+                };
+
+                await connection.ExecuteAsync(sql, parameters, transaction).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return Result.Failure($"{StoreFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<SearchResult>>> SearchAsync(ReadOnlyMemory<float> vector, int topK, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                e.chunk_id as ""ChunkId"",
+                e.source_id as ""SourceId"",
+                e.content as ""Content"",
+                m.file_name as ""SourceName"",
+                1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
+            FROM embeddings e
+            LEFT JOIN LATERAL (
+                SELECT file_name
+                FROM file_metadata
+                WHERE file_id = e.source_id
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            ) m ON true
+            ORDER BY e.embedding <=> @QueryEmbedding::vector
+            LIMIT @TopK";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<EmbeddingRow>(sql, new
+            {
+                QueryEmbedding = VectorToString(vector),
+                TopK = topK
+            }).ConfigureAwait(false);
+
+            var results = rows.Select(MapToSearchResult).ToList();
+
+            return Result<IReadOnlyList<SearchResult>>.Success(results);
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result> DeleteBySourceAsync(Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        const string sql = "DELETE FROM embeddings WHERE source_id = @SourceId";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await connection.ExecuteAsync(sql, new { SourceId = sourceId }).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"{DeleteFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<SearchResult>>> SearchBySourceAsync(
+        ReadOnlyMemory<float> vector,
+        int topK,
+        Guid sourceId,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                e.chunk_id as ""ChunkId"",
+                e.source_id as ""SourceId"",
+                e.content as ""Content"",
+                m.file_name as ""SourceName"",
+                1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
+            FROM embeddings e
+            LEFT JOIN LATERAL (
+                SELECT file_name
+                FROM file_metadata
+                WHERE file_id = e.source_id
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            ) m ON true
+            WHERE e.source_id = @SourceId
+            ORDER BY e.embedding <=> @QueryEmbedding::vector
+            LIMIT @TopK";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<EmbeddingRow>(sql, new
+            {
+                QueryEmbedding = VectorToString(vector),
+                TopK = topK,
+                SourceId = sourceId
+            }).ConfigureAwait(false);
+
+            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(MapToSearchResult).ToList());
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
+    private static string VectorToString(ReadOnlyMemory<float> vector)
+    {
+        return $"[{string.Join(",", vector.ToArray())}]";
+    }
+
+    private static SearchResult MapToSearchResult(EmbeddingRow row)
+    {
+        var citations = string.IsNullOrWhiteSpace(row.SourceName)
+            ? Array.Empty<string>()
+            : new[] { row.SourceName };
+
+        return new SearchResult(
+            new Chunk(row.ChunkId, row.SourceId, row.Content, 0),
+            (float)row.Score,
+            citations);
+    }
+
+    private record EmbeddingRow
+    {
+        public Guid ChunkId { get; set; }
+        public Guid SourceId { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public string? SourceName { get; set; }
+        public double Score { get; set; }
+    }
+}

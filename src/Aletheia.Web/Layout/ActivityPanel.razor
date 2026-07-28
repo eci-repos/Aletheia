@@ -1,0 +1,174 @@
+@implements IDisposable
+@inject ActivityLogService ActivityLog
+@inject RepositoryApiClient ApiClient
+
+<aside class="activity-panel @(isOpen ? "open" : "collapsed")" aria-label="Activity log">
+    <button class="activity-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle activity log">
+        <span>Activity</span>
+        @if (ActivityLog.RunningCount > 0)
+        {
+            <span class="activity-count">@ActivityLog.RunningCount</span>
+        }
+    </button>
+
+    @if (isOpen)
+    {
+        <div class="activity-shell">
+            <div class="activity-header">
+                <div>
+                    <h2>Activity</h2>
+                    <div class="activity-subtitle">@Subtitle</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="ActivityLog.Clear" disabled="@(!ActivityLog.Entries.Any())">
+                    Clear
+                </button>
+            </div>
+
+            <div class="activity-list">
+                @if (ActivityLog.Jobs.Any())
+                {
+                    <div class="job-section-title">Jobs</div>
+                    @foreach (var job in ActivityLog.Jobs)
+                    {
+                        <div class="job-card @JobStatusCss(job.Status)">
+                            <div class="job-card-top">
+                                <span class="job-status">@job.Status</span>
+                                <time>@FormatHeartbeat(job.LastHeartbeatAt)</time>
+                            </div>
+                            <div class="job-title">@job.Title</div>
+                            <div class="job-stage">@job.Stage</div>
+                            <div class="job-progress" aria-label="Job progress">
+                                <div class="job-progress-bar" style="width: @Math.Clamp(job.PercentComplete, 0, 100)%"></div>
+                            </div>
+                            <div class="job-detail">@job.PercentComplete% · @job.Detail</div>
+                            @if (!string.IsNullOrWhiteSpace(job.Error))
+                            {
+                                <div class="job-error">@job.Error</div>
+                            }
+                        </div>
+                    }
+                }
+
+                @if (!ActivityLog.Entries.Any() && !ActivityLog.Jobs.Any())
+                {
+                    <div class="activity-empty">No activity yet.</div>
+                }
+                else if (ActivityLog.Entries.Any())
+                {
+                    <div class="job-section-title">Trace</div>
+                    @foreach (var entry in ActivityLog.Entries)
+                    {
+                        <div class="activity-entry @StatusCss(entry.Status)">
+                            <div class="activity-entry-top">
+                                <span class="activity-status">@StatusText(entry.Status)</span>
+                                <time>@entry.Timestamp.ToString("HH:mm:ss")</time>
+                            </div>
+                            <div class="activity-entry-title">@entry.Title</div>
+                            <div class="activity-entry-area">@entry.Area</div>
+                            <div class="activity-entry-message">@entry.Message</div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
+</aside>
+
+@code {
+    private bool isOpen;
+    private Timer? timer;
+    private bool polling;
+
+    private string Subtitle => ActivityLog.RunningCount == 0
+        ? $"{ActivityLog.Jobs.Count} jobs · {ActivityLog.Entries.Count} events"
+        : $"{ActivityLog.RunningCount} running · {ActivityLog.Jobs.Count} jobs · {ActivityLog.Entries.Count} events";
+
+    protected override void OnInitialized()
+    {
+        ActivityLog.Changed += OnActivityChanged;
+        timer = new Timer(_ => _ = InvokeAsync(PollJobsAsync), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10));
+    }
+
+    private void Toggle()
+    {
+        isOpen = !isOpen;
+    }
+
+    private void OnActivityChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PollJobsAsync()
+    {
+        if (polling)
+        {
+            return;
+        }
+
+        polling = true;
+        try
+        {
+            var jobs = await ApiClient.GetIngestionJobsAsync(25);
+            if (jobs is not null)
+            {
+                foreach (var job in jobs)
+                {
+                    ActivityLog.UpsertJob(job);
+                }
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            polling = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string StatusCss(ActivityLogStatus status) => status switch
+    {
+        ActivityLogStatus.Running => "running",
+        ActivityLogStatus.Success => "success",
+        ActivityLogStatus.Warning => "warning",
+        ActivityLogStatus.Error => "error",
+        _ => "info"
+    };
+
+    private static string StatusText(ActivityLogStatus status) => status switch
+    {
+        ActivityLogStatus.Running => "running",
+        ActivityLogStatus.Success => "done",
+        ActivityLogStatus.Warning => "notice",
+        ActivityLogStatus.Error => "error",
+        _ => "trace"
+    };
+
+    private static string JobStatusCss(string status) => status switch
+    {
+        "Queued" or "Running" => "running",
+        "Succeeded" => "success",
+        "Failed" => "error",
+        "Cancelled" => "warning",
+        _ => "info"
+    };
+
+    private static string FormatHeartbeat(DateTimeOffset heartbeat)
+    {
+        var elapsed = DateTimeOffset.UtcNow - heartbeat;
+        if (elapsed.TotalSeconds < 60)
+        {
+            return $"{Math.Max(0, (int)elapsed.TotalSeconds)}s ago";
+        }
+
+        return $"{(int)elapsed.TotalMinutes}m ago";
+    }
+
+    public void Dispose()
+    {
+        ActivityLog.Changed -= OnActivityChanged;
+        timer?.Dispose();
+    }
+}

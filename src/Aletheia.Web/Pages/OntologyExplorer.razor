@@ -1,0 +1,91 @@
+@page "/ontology"
+@inject RepositoryApiClient ApiClient
+
+<PageTitle>Ontology Explorer - Aletheia</PageTitle>
+
+<h1>Ontology Explorer</h1>
+
+@if (_entities is null)
+{
+    <div class="alert alert-info">
+        Loading entities...
+    </div>
+}
+else if (_entities.Count == 0)
+{
+    <div class="alert alert-warning">No entities found.</div>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-4">
+            <h5>Entities</h5>
+            <div class="list-group">
+                @foreach (var entity in _entities)
+                {
+                    <button class="list-group-item list-group-item-action @(_selectedEntity == entity ? "active" : "")"
+                            @onclick="() => SelectEntity(entity)">
+                        @entity
+                    </button>
+                }
+            </div>
+        </div>
+        <div class="col-md-8">
+            @if (_selectedEntity is not null)
+            {
+                <h5>Relationships for @_selectedEntity</h5>
+                @if (_relationships is null)
+                {
+                    <div class="alert alert-info">Loading relationships...</div>
+                }
+                else if (_relationships.Count == 0)
+                {
+                    <div class="alert alert-warning">No relationships found for this entity.</div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Target</th>
+                                <th>Relationship Type</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var relationship in _relationships)
+                            {
+                                <tr>
+                                    <td>@relationship.Key</td>
+                                    <td>@relationship.Value</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+            else
+            {
+                <div class="alert alert-light">Select an entity to view relationships.</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyCollection<string>? _entities;
+    private string? _selectedEntity;
+    private IReadOnlyDictionary<string, string>? _relationships;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _entities = await ApiClient.GetEntitiesAsync();
+    }
+
+    private async Task SelectEntity(string entity)
+    {
+        _selectedEntity = entity;
+        _relationships = null;
+
+        _relationships = await ApiClient.GetRelationshipsAsync(entity);
+    }
+}

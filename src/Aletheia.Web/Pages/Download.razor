@@ -1,0 +1,95 @@
+@page "/download"
+@inject RepositoryApiClient ApiClient
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Download - Aletheia</PageTitle>
+
+<h1>Download</h1>
+
+@if (!HasFileQuery)
+{
+    <div class="alert alert-info">
+        Select a file from the repository browser before downloading.
+        <a href="browse" class="alert-link">Open Browse</a>
+    </div>
+}
+else if (_metadata is not null)
+{
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">@_metadata.Descriptor.FileName</h5>
+            <p class="card-text">
+                <strong>Type:</strong> @_metadata.ContentType<br />
+                <strong>Size:</strong> @_metadata.SizeBytes bytes<br />
+                <strong>Uploaded:</strong> @_metadata.UploadedAt.ToString("g")<br />
+                @if (_metadata.Descriptor.Version is not null)
+                {
+                    <strong>Version:</strong> @_metadata.Descriptor.Version<br />
+                }
+            </p>
+            <button class="btn btn-primary" @onclick="DownloadFileAsync">
+                @(_downloading ? "Downloading..." : "Download File")
+            </button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="alert alert-warning">File not found.</div>
+}
+
+@code {
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public Guid FileId { get; set; }
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string FileName { get; set; } = string.Empty;
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string? Version { get; set; }
+
+    private Aletheia.Repository.Abstractions.Models.FileMetadata? _metadata;
+    private bool _downloading;
+
+    private bool HasFileQuery => FileId != Guid.Empty && !string.IsNullOrWhiteSpace(FileName);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _metadata = null;
+
+        if (!HasFileQuery)
+        {
+            return;
+        }
+
+        try
+        {
+            _metadata = await ApiClient.GetMetadataAsync(FileId, FileName, Version);
+        }
+        catch (HttpRequestException)
+        {
+            _metadata = null;
+        }
+    }
+
+    private async Task DownloadFileAsync()
+    {
+        if (!HasFileQuery)
+        {
+            return;
+        }
+
+        _downloading = true;
+        var stream = await ApiClient.DownloadAsync(FileId, FileName, Version);
+        if (stream is not null)
+        {
+            using var streamRef = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("downloadFileFromStream", FileName, streamRef);
+        }
+        _downloading = false;
+    }
+}

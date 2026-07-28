@@ -1,0 +1,159 @@
+@page "/governance"
+@inject RepositoryApiClient ApiClient
+
+<PageTitle>Governance Center</PageTitle>
+
+<h3>Governance Center</h3>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-dark text-white">Roles & Permissions</div>
+            <div class="card-body">
+                @if (_roles.Count == 0)
+                {
+                    <p class="text-muted">Loading roles...</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var role in _roles)
+                        {
+                            <li class="list-group-item">
+                                <strong>@role.Name</strong>
+                                <div class="small text-muted">Permissions: @string.Join(", ", role.Permissions)</div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-warning">Audit Log</div>
+            <div class="card-body">
+                <button class="btn btn-outline-secondary mb-2 w-100" @onclick="LoadAuditLogs">Refresh Logs</button>
+                @if (_auditLogs.Count == 0)
+                {
+                    <p class="text-muted">No audit logs found.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead><tr><th>Action</th><th>User</th><th>Resource</th></tr></thead>
+                            <tbody>
+                                @foreach (var log in _auditLogs.Take(20))
+                                {
+                                    <tr>
+                                        <td>@log.Action</td>
+                                        <td>@log.UserId</td>
+                                        <td>@log.ResourceId</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-2">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">PII Scanner</div>
+            <div class="card-body">
+                <textarea class="form-control mb-2" rows="4" @bind="_piiContent" placeholder="Paste content to scan for PII..."></textarea>
+                <button class="btn btn-secondary w-100" @onclick="ScanPii">Scan for PII</button>
+
+                @if (_piiResult is not null)
+                {
+                    <div class="mt-3">
+                        @if (_piiResult.PiiDetected)
+                        {
+                            <div class="alert alert-danger">PII Detected!</div>
+                            <ul class="list-group list-group-flush">
+                                @foreach (var match in _piiResult.Matches)
+                                {
+                                    <li class="list-group-item">
+                                        <span class="badge bg-danger">@match.PiiType</span> at position @match.StartIndex–@match.EndIndex
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="alert alert-success">No PII detected.</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-info text-white">Retention Policies</div>
+            <div class="card-body">
+                <button class="btn btn-outline-info mb-2 w-100" @onclick="LoadPolicies">Load Policies</button>
+                @if (_policies.Count == 0)
+                {
+                    <p class="text-muted">No retention policies configured.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var policy in _policies)
+                        {
+                            <li class="list-group-item">
+                                <div><strong>@policy.Name</strong></div>
+                                <div class="small text-muted">Type: @policy.ResourceType | Action: @policy.ActionOnExpiry</div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Role> _roles = new();
+    private List<AuditLog> _auditLogs = new();
+    private List<RetentionPolicy> _policies = new();
+    private string _piiContent = string.Empty;
+    private PiiDetectionResult? _piiResult = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRoles();
+    }
+
+    private async Task LoadRoles()
+    {
+        var result = await ApiClient.GetRolesAsync();
+        _roles = result?.ToList() ?? new List<Role>();
+    }
+
+    private async Task LoadAuditLogs()
+    {
+        var result = await ApiClient.GetAuditLogsAsync();
+        _auditLogs = result?.ToList() ?? new List<AuditLog>();
+    }
+
+    private async Task LoadPolicies()
+    {
+        var result = await ApiClient.GetRetentionPoliciesAsync();
+        _policies = result?.ToList() ?? new List<RetentionPolicy>();
+    }
+
+    private async Task ScanPii()
+    {
+        if (string.IsNullOrWhiteSpace(_piiContent)) return;
+        _piiResult = await ApiClient.ScanPiiAsync(_piiContent);
+    }
+}

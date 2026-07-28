@@ -1,0 +1,81 @@
+.page {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    min-height: 100vh;
+}
+
+main {
+    flex: 1;
+    min-width: 0;
+    background-color: #ffffff;
+}
+
+.sidebar {
+    color: #111827;
+    background-color: #f3f4f6;
+    border-right: 1px solid #d1d5db;
+    flex: 0 0 264px;
+    width: 264px;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    overflow: hidden;
+    transition: flex-basis 160ms ease, width 160ms ease;
+}
+
+.sidebar.collapsed {
+    flex-basis: 88px;
+    width: 88px;
+}
+
+.top-row {
+    background-color: #ffffff;
+    border-bottom: 1px solid #d6d5d5;
+    justify-content: flex-end;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    color: #111827;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+    .top-row ::deep a, .top-row ::deep .btn-link {
+        white-space: nowrap;
+        margin-left: 1.5rem;
+        text-decoration: none;
+    }
+
+    .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
+        text-decoration: underline;
+    }
+
+    .top-row ::deep a:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+@media (max-width: 640.98px) {
+    .top-row {
+        justify-content: space-between;
+    }
+
+    .top-row ::deep a, .top-row ::deep .btn-link {
+        margin-left: 0;
+    }
+}
+
+@media (min-width: 641px) {
+    .top-row.auth ::deep a:first-child {
+        flex: 1;
+        text-align: right;
+        width: 0;
+    }
+
+    .top-row, article {
+        padding-left: 2rem !important;
+        padding-right: 1.5rem !important;
+    }
+}

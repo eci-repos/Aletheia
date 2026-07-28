@@ -1,0 +1,555 @@
+@page "/copilot"
+@using System.Text
+@using System.Text.Encodings.Web
+@using System.Text.RegularExpressions
+@implements IDisposable
+@inject RepositoryApiClient ApiClient
+@inject ActivityLogService ActivityLog
+
+<PageTitle>AI Copilot</PageTitle>
+
+<div class="copilot-page">
+    <h3>AI Copilot</h3>
+
+    <div class="copilot-layout">
+        <div class="copilot-conversation-column">
+            <div class="card copilot-conversation-card">
+                <div class="card-header bg-primary text-white">Conversation</div>
+                <div class="card-body copilot-conversation-body">
+                    @if (_session.Messages.Count == 0)
+                    {
+                        <p class="text-muted">Start a conversation...</p>
+                    }
+                    else
+                    {
+                        @foreach (var msg in _session.Messages)
+                        {
+                            <div class="copilot-message mb-3">
+                                <strong class="text-@(msg.Role == "user" ? "primary" : "success")">@(msg.Role == "user" ? "You" : "Copilot"):</strong>
+                                @if (msg.Role == "assistant")
+                                {
+                                    <div class="copilot-assistant-message">@RenderMarkdown(msg.Content)</div>
+                                    @if (msg.Stats is not null)
+                                    {
+                                        <div class="copilot-stats" title="@msg.Stats.ConfidenceBasis">
+                                            <span>@msg.Stats.ElapsedSeconds.ToString("0.0")s</span>
+                                            <span>@msg.Stats.TokensPerSecond.ToString("0.0") tok/s</span>
+                                            <span>@msg.Stats.EstimatedCompletionTokens est. tokens</span>
+                                            <span>@msg.Stats.RetrievedContextCount context</span>
+                                            <span>@msg.Stats.CitationCount citations</span>
+                                            <span>@(Math.Round(msg.Stats.AlignmentConfidence * 100))% confidence</span>
+                                        </div>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="copilot-user-message">@msg.Content</span>
+                                }
+                            </div>
+                        }
+                    }
+
+                    @if (_isChatting)
+                    {
+                        <div class="text-muted">Copilot is thinking...</div>
+                    }
+                </div>
+                <div class="card-footer">
+                    @if (!string.IsNullOrWhiteSpace(_chatError))
+                    {
+                        <div class="alert alert-warning py-2 mb-2">@_chatError</div>
+                    }
+                    <div class="input-group copilot-input-group">
+                        <select class="form-select copilot-format-select" @bind="_outputFormat" disabled="@IsInputDisabled" aria-label="Response format">
+                            <option value="auto">Auto</option>
+                            <option value="summary">Summary</option>
+                            <option value="table">Table</option>
+                            <option value="bullets">Bullets</option>
+                            <option value="json">JSON</option>
+                        </select>
+                        <input type="text" class="form-control" @bind="_userInput" @bind:event="oninput" placeholder="Ask a question..." @onkeydown="HandleKeyPress" />
+                        <button class="btn btn-primary" @onclick="SendChat" disabled="@IsInputDisabled">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="copilot-plan-column">
+            @if (_pendingPlan is not null)
+            {
+                <PlanPreview
+                    Plan="_pendingPlan"
+                    IsBusy="_isBusy"
+                    StatusMessage="_planStatusMessage"
+                    OnApprove="ApprovePlan"
+                    OnRevise="RevisePlan"
+                    OnCancel="CancelPlan" />
+            }
+
+            @if (_progress is not null)
+            {
+                <ProgressPanel
+                    Progress="_progress"
+                    Telemetry="_telemetry"
+                    IsCancelling="_isCancelling"
+                    OnCancel="CancelJob" />
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private ChatSession _session = new();
+    private string _userInput = string.Empty;
+    private string _outputFormat = "auto";
+    private bool _isChatting = false;
+    private string _chatError = string.Empty;
+
+    private ChatPlanRecord? _pendingPlan;
+    private ChatProgressRecord? _progress;
+    private ChatExecutionTelemetry? _telemetry;
+    private Guid? _activeJobId;
+    private bool _isBusy = false;
+    private bool _isCancelling = false;
+    private string _planStatusMessage = string.Empty;
+    private CancellationTokenSource _pollingCts = new();
+
+    private bool IsInputDisabled => _isChatting || _isBusy;
+
+    protected override void OnInitialized()
+    {
+        _ = RestoreActiveExecutionAsync();
+    }
+
+    public void Dispose()
+    {
+        _pollingCts.Cancel();
+        _pollingCts.Dispose();
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SendChat();
+        }
+    }
+
+    private async Task SendChat()
+    {
+        if (IsInputDisabled || string.IsNullOrWhiteSpace(_userInput))
+        {
+            return;
+        }
+
+        var userMessage = _userInput.Trim();
+        _isChatting = true;
+        _chatError = string.Empty;
+        _userInput = string.Empty;
+        _session.Messages.Add(new ChatMessage { Role = "user", Content = userMessage });
+        _session.LastActivity = DateTimeOffset.UtcNow;
+
+        if (_session.Messages.Count == 1)
+        {
+            _session.Title = userMessage.Length > 40 ? userMessage[..40] + "..." : userMessage;
+        }
+
+        try
+        {
+            _pendingPlan = await ApiClient.PlanChatAsync(userMessage);
+            if (_pendingPlan is null)
+            {
+                _chatError = "Unable to create execution plan.";
+                return;
+            }
+
+            if (!_pendingPlan.RequiresApproval)
+            {
+                await ApprovePlan();
+            }
+        }
+        catch (Exception ex)
+        {
+            _chatError = $"Planning failed: {ex.Message}";
+        }
+        finally
+        {
+            _isChatting = false;
+        }
+    }
+
+    private async Task ApprovePlan()
+    {
+        if (_pendingPlan is null || _isBusy)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _planStatusMessage = string.Empty;
+
+        try
+        {
+            var approved = await ApiClient.ApproveChatPlanAsync(_pendingPlan.PlanId);
+            if (approved is null)
+            {
+                _planStatusMessage = "Approval failed.";
+                return;
+            }
+
+            _pendingPlan = approved;
+            var job = await ApiClient.ExecuteChatPlanAsync(_pendingPlan.PlanId);
+            if (job is null)
+            {
+                _planStatusMessage = "Execution failed to start.";
+                return;
+            }
+
+            _activeJobId = job.JobId;
+            await StartProgressPollingAsync();
+        }
+        catch (Exception ex)
+        {
+            _planStatusMessage = $"Approval error: {ex.Message}";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task RevisePlan()
+    {
+        _pendingPlan = null;
+        _planStatusMessage = string.Empty;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CancelPlan()
+    {
+        if (_pendingPlan is null || _isBusy)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        try
+        {
+            var cancelled = await ApiClient.CancelChatPlanAsync(_pendingPlan.PlanId, "Cancelled by user.");
+            if (cancelled is not null)
+            {
+                _pendingPlan = cancelled;
+            }
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task CancelJob()
+    {
+        if (!_activeJobId.HasValue || _isCancelling)
+        {
+            return;
+        }
+
+        _isCancelling = true;
+        try
+        {
+            await ApiClient.CancelChatJobAsync(_activeJobId.Value);
+        }
+        finally
+        {
+            _isCancelling = false;
+        }
+    }
+
+    private async Task StartProgressPollingAsync()
+    {
+        _pollingCts.Cancel();
+        _pollingCts.Dispose();
+        _pollingCts = new CancellationTokenSource();
+
+        try
+        {
+            while (!_pollingCts.Token.IsCancellationRequested)
+            {
+                await RefreshProgressAsync();
+
+                if (_progress?.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed or ChatJobStatus.Cancelled)
+                {
+                    if (_progress.Status == ChatJobStatus.Succeeded && !string.IsNullOrWhiteSpace(_progress.FinalResult))
+                    {
+                        _session.Messages.Add(new ChatMessage
+                        {
+                            Role = "assistant",
+                            Content = _progress.FinalResult,
+                            Stats = _telemetry is not null
+                                ? new ChatCompletionStats
+                                {
+                                    ElapsedSeconds = _telemetry.ElapsedSeconds,
+                                    EstimatedPromptTokens = _telemetry.PromptTokens,
+                                    EstimatedCompletionTokens = _telemetry.CompletionTokens,
+                                    TokensPerSecond = _telemetry.TokensPerSecond,
+                                    RetrievedContextCount = _telemetry.RetrievalCount,
+                                    CitationCount = _telemetry.CitationCount,
+                                    AlignmentConfidence = _telemetry.AlignmentConfidence,
+                                    ConfidenceBasis = $"{_telemetry.ConfidenceBasis} {_telemetry.EstimateComparisonSummary}"
+                                }
+                                : new ChatCompletionStats
+                                {
+                                    RetrievedContextCount = 0,
+                                    CitationCount = 0,
+                                    ConfidenceBasis = "Background execution completed."
+                                }
+                        });
+                        _session.LastActivity = DateTimeOffset.UtcNow;
+                    }
+
+                    _pendingPlan = null;
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), _pollingCts.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshProgressAsync()
+    {
+        if (_pendingPlan is null)
+        {
+            return;
+        }
+
+        var progress = await ApiClient.GetChatPlanProgressAsync(_pendingPlan.PlanId);
+        if (progress is not null)
+        {
+            _progress = progress;
+            if (progress.JobId != Guid.Empty)
+            {
+                _activeJobId = progress.JobId;
+            }
+
+            if (progress.Telemetry is not null)
+            {
+                _telemetry = progress.Telemetry;
+            }
+            else if (_activeJobId.HasValue && progress.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed)
+            {
+                var telemetry = await ApiClient.GetChatJobTelemetryAsync(_activeJobId.Value);
+                if (telemetry is not null)
+                {
+                    _telemetry = telemetry;
+                }
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RestoreActiveExecutionAsync()
+    {
+        try
+        {
+            var jobs = await ApiClient.GetIngestionJobsAsync(200);
+            var chatJob = jobs?.OfType<ChatJobSnapshot>().FirstOrDefault();
+            if (chatJob is null)
+            {
+                return;
+            }
+
+            _activeJobId = chatJob.JobId;
+            _progress = await ApiClient.GetChatPlanProgressAsync(chatJob.PlanId);
+            if (_progress is not null)
+            {
+                _pendingPlan = new ChatPlanRecord
+                {
+                    PlanId = _progress.PlanId,
+                    Prompt = _progress.Prompt
+                };
+            }
+
+            await StartProgressPollingAsync();
+        }
+        catch
+        {
+        }
+    }
+
+    private static ChatSession CloneSession(ChatSession session)
+    {
+        return new ChatSession
+        {
+            Id = session.Id,
+            Title = session.Title,
+            CreatedAt = session.CreatedAt,
+            LastActivity = session.LastActivity,
+            Messages = session.Messages
+                .Select(message => new ChatMessage
+                {
+                    Id = message.Id,
+                    Role = message.Role,
+                    Content = message.Content,
+                    Timestamp = message.Timestamp,
+                    Stats = message.Stats
+                })
+                .ToList()
+        };
+    }
+
+    private static MarkupString RenderMarkdown(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return new MarkupString(string.Empty);
+        }
+
+        var trimmed = content.Trim();
+        if (trimmed.StartsWith("{", StringComparison.Ordinal) || trimmed.StartsWith("[", StringComparison.Ordinal))
+        {
+            return new MarkupString($"<pre class=\"copilot-json\">{HtmlEncoder.Default.Encode(trimmed)}</pre>");
+        }
+
+        var lines = content
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+        var html = new StringBuilder();
+
+        for (var i = 0; i < lines.Length;)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                i++;
+                continue;
+            }
+
+            if (IsTableStart(lines, i))
+            {
+                i = AppendTable(html, lines, i);
+                continue;
+            }
+
+            if (TryAppendHeading(html, line))
+            {
+                i++;
+                continue;
+            }
+
+            if (IsListItem(line))
+            {
+                i = AppendList(html, lines, i);
+                continue;
+            }
+
+            i = AppendParagraph(html, lines, i);
+        }
+
+        return new MarkupString(html.ToString());
+    }
+
+    private static bool IsTableStart(string[] lines, int index)
+    {
+        return index + 1 < lines.Length
+            && lines[index].Contains('|', StringComparison.Ordinal)
+            && Regex.IsMatch(lines[index + 1], @"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$");
+    }
+
+    private static int AppendTable(StringBuilder html, string[] lines, int index)
+    {
+        var headers = SplitTableRow(lines[index]);
+        html.Append("<div class=\"copilot-table-wrap\"><table class=\"table table-sm table-bordered copilot-table\"><thead><tr>");
+        foreach (var header in headers)
+        {
+            html.Append("<th>").Append(RenderInline(header)).Append("</th>");
+        }
+
+        html.Append("</tr></thead><tbody>");
+        index += 2;
+        while (index < lines.Length && lines[index].Contains('|', StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(lines[index]))
+        {
+            html.Append("<tr>");
+            foreach (var cell in SplitTableRow(lines[index]))
+            {
+                html.Append("<td>").Append(RenderInline(cell)).Append("</td>");
+            }
+
+            html.Append("</tr>");
+            index++;
+        }
+
+        html.Append("</tbody></table></div>");
+        return index;
+    }
+
+    private static IReadOnlyList<string> SplitTableRow(string line)
+    {
+        return line.Trim().Trim('|').Split('|').Select(cell => cell.Trim()).ToList();
+    }
+
+    private static bool TryAppendHeading(StringBuilder html, string line)
+    {
+        var trimmed = line.TrimStart();
+        var level = trimmed.TakeWhile(c => c == '#').Count();
+        if (level is < 1 or > 4 || trimmed.Length <= level || trimmed[level] != ' ')
+        {
+            return false;
+        }
+
+        html.Append("<h").Append(level).Append('>')
+            .Append(RenderInline(trimmed[(level + 1)..]))
+            .Append("</h").Append(level).Append('>');
+        return true;
+    }
+
+    private static bool IsListItem(string line)
+    {
+        var trimmed = line.TrimStart();
+        return trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.StartsWith("* ", StringComparison.Ordinal);
+    }
+
+    private static int AppendList(StringBuilder html, string[] lines, int index)
+    {
+        html.Append("<ul>");
+        while (index < lines.Length && IsListItem(lines[index]))
+        {
+            html.Append("<li>").Append(RenderInline(lines[index].TrimStart()[2..])).Append("</li>");
+            index++;
+        }
+
+        html.Append("</ul>");
+        return index;
+    }
+
+    private static int AppendParagraph(StringBuilder html, string[] lines, int index)
+    {
+        var paragraph = new List<string>();
+        while (index < lines.Length
+            && !string.IsNullOrWhiteSpace(lines[index])
+            && !IsTableStart(lines, index)
+            && !IsListItem(lines[index])
+            && !lines[index].TrimStart().StartsWith("# ", StringComparison.Ordinal)
+            && !lines[index].TrimStart().StartsWith("## ", StringComparison.Ordinal))
+        {
+            paragraph.Add(lines[index].Trim());
+            index++;
+        }
+
+        html.Append("<p>").Append(RenderInline(string.Join(" ", paragraph))).Append("</p>");
+        return index;
+    }
+
+    private static string RenderInline(string value)
+    {
+        var encoded = HtmlEncoder.Default.Encode(value);
+        encoded = Regex.Replace(encoded, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+        encoded = Regex.Replace(encoded, @"`(.+?)`", "<code>$1</code>");
+        return encoded;
+    }
+}

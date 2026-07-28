@@ -1,0 +1,164 @@
+@using Aletheia.RAGS.Abstractions.Models
+
+@if (Progress is null)
+{
+    return;
+}
+
+<div class="copilot-progress-card card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Background Execution</span>
+        <span class="badge @StatusBadgeClass">@Progress.Status</span>
+    </div>
+    <div class="card-body">
+        <div class="mb-3">
+            <div class="progress">
+                <div class="progress-bar @ProgressBarClass" role="progressbar" style="width: @(PercentComplete)%" aria-valuenow="@PercentComplete" aria-valuemin="0" aria-valuemax="100">
+                    @PercentComplete%
+                </div>
+            </div>
+        </div>
+
+        @if (Elapsed.HasValue)
+        {
+            <p class="mb-2"><strong>Elapsed:</strong> @Elapsed.Value.ToString("g")</p>
+        }
+
+        @if (LastHeartbeat.HasValue)
+        {
+            <p class="mb-2 text-muted"><span class="bi bi-activity"></span> Last heartbeat @((DateTimeOffset.UtcNow - LastHeartbeat.Value).TotalSeconds.ToString("0"))s ago</p>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Progress.PartialResult))
+        {
+            <div class="alert alert-secondary py-2 mb-2">@Progress.PartialResult</div>
+        }
+
+        <h6>Steps</h6>
+        <ul class="list-group mb-3">
+            @foreach (var step in Progress.Steps.OrderBy(s => s.Order))
+            {
+                <li class="list-group-item py-1 d-flex align-items-center">
+                    <span class="badge @StepBadgeClass(step) me-2">@step.Status</span>
+                    <span>@step.Name</span>
+                    @if (!string.IsNullOrWhiteSpace(step.Detail) && step.Status == ChatProgressStepStatus.Running)
+                    {
+                        <span class="ms-2 text-muted small">@step.Detail</span>
+                    }
+                </li>
+            }
+        </ul>
+
+        @if (!string.IsNullOrWhiteSpace(Progress.Error))
+        {
+            <div class="alert alert-danger py-2 mb-2">@Progress.Error</div>
+        }
+
+        @if (Telemetry is not null)
+        {
+            <div class="card mb-3 border-info">
+                <div class="card-header bg-info bg-opacity-10">Execution Telemetry</div>
+                <div class="card-body">
+                    <p class="mb-1"><strong>Duration:</strong> @Telemetry.ElapsedSeconds.ToString("F1")s (estimate @Telemetry.EstimatedSecondsMin-@Telemetry.EstimatedSecondsMax s)</p>
+                    <p class="mb-1"><strong>Tokens:</strong> @Telemetry.PromptTokens prompt + @Telemetry.CompletionTokens completion (@Telemetry.TokensPerSecond.ToString("F2")/s)</p>
+                    <p class="mb-1"><strong>Retrieval:</strong> @Telemetry.RetrievalCount chunks (estimate @Telemetry.EstimatedRetrievalCount) | <strong>Citations:</strong> @Telemetry.CitationCount</p>
+                    <p class="mb-1"><strong>Model calls:</strong> @Telemetry.LlmCallCount (estimate @Telemetry.EstimatedLlmCalls)</p>
+                    <p class="mb-1"><strong>Alignment confidence:</strong> @Telemetry.AlignmentConfidence.ToString("P0")</p>
+                    <p class="mb-0 text-muted small">@Telemetry.ConfidenceBasis</p>
+                    @if (!string.IsNullOrWhiteSpace(Telemetry.EstimateComparisonSummary))
+                    {
+                        <p class="mb-0 mt-2 text-muted small"><em>@Telemetry.EstimateComparisonSummary</em></p>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (IsTerminal)
+        {
+            @if (Progress.Status == ChatJobStatus.Succeeded)
+            {
+                <div class="alert alert-success py-2 mb-2">Execution completed successfully. All steps finished and the answer has been added to the conversation.</div>
+            }
+            else if (Progress.Status == ChatJobStatus.Failed)
+            {
+                <div class="alert alert-danger py-2 mb-2">Execution failed. One or more steps did not complete.</div>
+            }
+            else if (Progress.Status == ChatJobStatus.Cancelled)
+            {
+                <div class="alert alert-secondary py-2 mb-2">Execution was cancelled.</div>
+            }
+        }
+        else
+        {
+            <button class="btn btn-outline-danger" @onclick="OnCancel" disabled="@IsCancelling">Cancel execution</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public ChatProgressRecord? Progress { get; set; }
+
+    [Parameter]
+    public ChatExecutionTelemetry? Telemetry { get; set; }
+
+    [Parameter]
+    public bool IsCancelling { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private int PercentComplete => Progress?.PercentComplete ?? 0;
+
+    private bool IsTerminal => Progress?.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed or ChatJobStatus.Cancelled;
+
+    private TimeSpan? Elapsed
+    {
+        get
+        {
+            var start = Progress?.StartedAt ?? Progress?.CreatedAt;
+            if (!start.HasValue)
+            {
+                return null;
+            }
+
+            var end = Progress?.CompletedAt ?? DateTimeOffset.UtcNow;
+            return end - start.Value;
+        }
+    }
+
+    private DateTimeOffset? LastHeartbeat
+    {
+        get
+        {
+            var last = Progress?.Heartbeats.LastOrDefault();
+            return last?.Timestamp;
+        }
+    }
+
+    private string StatusBadgeClass => Progress?.Status switch
+    {
+        ChatJobStatus.Succeeded => "bg-success",
+        ChatJobStatus.Failed => "bg-danger",
+        ChatJobStatus.Cancelled => "bg-secondary",
+        ChatJobStatus.Running => "bg-primary",
+        _ => "bg-info"
+    };
+
+    private string ProgressBarClass => Progress?.Status switch
+    {
+        ChatJobStatus.Succeeded => "bg-success",
+        ChatJobStatus.Failed => "bg-danger",
+        ChatJobStatus.Cancelled => "bg-secondary",
+        _ => string.Empty
+    };
+
+    private static string StepBadgeClass(ChatProgressStep step) => step.Status switch
+    {
+        ChatProgressStepStatus.Completed => "bg-success",
+        ChatProgressStepStatus.Running => "bg-primary",
+        ChatProgressStepStatus.Failed => "bg-danger",
+        ChatProgressStepStatus.Skipped => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+}

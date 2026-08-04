@@ -44,6 +44,20 @@ public sealed class JobsControllerTests
         Assert.Equal("Queued", job.Status);
     }
 
+    [Fact]
+    public void RepairRags_returns_accepted_job_snapshot()
+    {
+        var controller = new JobsController(new FakeIngestionJobService());
+
+        var result = controller.RepairRags("RFP");
+
+        var accepted = Assert.IsType<AcceptedResult>(result);
+        var job = Assert.IsType<IngestionJobSnapshot>(accepted.Value);
+        Assert.Equal("RagsRepair", job.Kind);
+        Assert.Equal("Queued", job.Status);
+        Assert.Equal("RFP", job.SourceName);
+    }
+
     private sealed class FakeIngestionJobService : IIngestionJobService
     {
         private readonly IngestionJobSnapshot _job = CreateJob(Guid.NewGuid(), "RagsIngestion");
@@ -70,6 +84,17 @@ public sealed class JobsControllerTests
         public IngestionJobSnapshot EnqueueWikiRegeneration(WikiSearchRequest request)
         {
             return CreateJob(Guid.NewGuid(), "WikiRegeneration");
+        }
+
+        public IngestionJobSnapshot EnqueueDocumentBriefs(Guid? sourceId = null, string? sourceName = null)
+        {
+            return CreateJob(sourceId ?? Guid.Empty, "DocumentBriefs");
+        }
+
+        public IngestionJobSnapshot EnqueueRagsRepair(string? query = null)
+        {
+            var job = CreateJob(Guid.Empty, "RagsRepair");
+            return job with { SourceName = query };
         }
 
         public IReadOnlyList<IngestionJobSnapshot> List(int take = 50)

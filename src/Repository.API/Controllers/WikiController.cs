@@ -13,15 +13,21 @@ public sealed class WikiController : ControllerBase
 {
     private readonly IWragsWikiService _wikiService;
     private readonly IIngestionJobService _jobs;
+    private readonly IInternalSearchGate _internalSearchGate;
 
-    public WikiController(IWragsWikiService wikiService, IIngestionJobService jobs)
+    public WikiController(
+        IWragsWikiService wikiService,
+        IIngestionJobService jobs,
+        IInternalSearchGate internalSearchGate)
     {
         _wikiService = wikiService ?? throw new ArgumentNullException(nameof(wikiService));
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
+        _internalSearchGate = internalSearchGate ?? throw new ArgumentNullException(nameof(internalSearchGate));
     }
 
     [HttpGet("search")]
     [ProducesResponseType(typeof(IReadOnlyList<WikiPage>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> SearchAsync(
         [FromQuery] string query,
@@ -31,6 +37,21 @@ public sealed class WikiController : ControllerBase
         [FromQuery] bool regenerate = false,
         CancellationToken cancellationToken = default)
     {
+        if (regenerate)
+        {
+            var gate = GateInternalSearch();
+            if (gate is not null)
+            {
+                return gate;
+            }
+        }
+
+        var internalGate = GateInternalMode(mode);
+        if (internalGate is not null)
+        {
+            return internalGate;
+        }
+
         var result = await _wikiService.SearchAsync(
             new WikiSearchRequest
             {
@@ -50,13 +71,38 @@ public sealed class WikiController : ControllerBase
         return Ok(result.Value);
     }
 
+    [HttpPost("briefs/regenerate")]
+    [ProducesResponseType(typeof(IngestionJobSnapshot), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult RegenerateBriefs([FromBody] DocumentBriefRegenerationRequest? request = null)
+    {
+        try
+        {
+            var job = _jobs.EnqueueDocumentBriefs(
+                request?.SourceId,
+                string.IsNullOrWhiteSpace(request?.SourceName) ? null : request.SourceName?.Trim());
+            return Accepted(job);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpPost("regenerate")]
     [ProducesResponseType(typeof(IReadOnlyList<WikiPage>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RegenerateAsync(
         [FromBody] WikiSearchRequest request,
         CancellationToken cancellationToken = default)
     {
+        var gate = GateInternalSearch();
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         var result = await _wikiService.RegenerateAsync(request, cancellationToken).ConfigureAwait(false);
         if (result.IsFailure)
         {
@@ -68,9 +114,16 @@ public sealed class WikiController : ControllerBase
 
     [HttpPost("regenerate/job")]
     [ProducesResponseType(typeof(IngestionJobSnapshot), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult RegenerateJob([FromBody] WikiSearchRequest request)
     {
+        var gate = GateInternalSearch();
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         try
         {
             return Accepted(_jobs.EnqueueWikiRegeneration(request));
@@ -83,6 +136,7 @@ public sealed class WikiController : ControllerBase
 
     [HttpGet("retrieve")]
     [ProducesResponseType(typeof(IReadOnlyList<SearchResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RetrieveAsync(
         [FromQuery] string query,
@@ -91,6 +145,12 @@ public sealed class WikiController : ControllerBase
         [FromQuery] int expansion = 1,
         CancellationToken cancellationToken = default)
     {
+        var gate = GateInternalMode(mode);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         var result = await _wikiService.RetrieveAsync(
             new WikiSearchRequest
             {
@@ -217,5 +277,25 @@ public sealed class WikiController : ControllerBase
         }
 
         return result.Value is null ? NotFound() : Ok(result.Value);
+    }
+
+    private IActionResult? GateInternalSearch()
+    {
+        return _internalSearchGate.ShowInternalSearch
+            ? null
+            : NotFound(new { error = "Not found." });
+    }
+
+    private IActionResult? GateInternalMode(string mode)
+    {
+        if (_internalSearchGate.ShowInternalSearch)
+        {
+            return null;
+        }
+
+        var normalized = mode?.Trim().ToLowerInvariant();
+        return normalized is "graphrag" or "lazygraphrag"
+            ? NotFound(new { error = "Not found." })
+            : null;
     }
 }

@@ -1,59 +1,132 @@
 @page "/"
 @inject RepositoryApiClient ApiClient
 @inject AuthService Auth
+@inject NavigationManager Navigation
+@using Aletheia.RAGS.Abstractions.Models
 
 <PageTitle>Dashboard - Aletheia</PageTitle>
 
 <h1>Dashboard</h1>
+<p class="text-muted">Welcome to the Aletheia repository. Search documents, read wiki briefs, and ask Copilot.</p>
 
-<p>Welcome to the Aletheia repository.</p>
-
-<div class="dashboard-cards">
-    <div class="card">
-        <h5 class="card-title">Upload</h5>
-        <p class="card-text">Add new files to the repository.</p>
-        <a href="upload" class="btn btn-primary">Upload Files</a>
-    </div>
-    <div class="card">
-        <h5 class="card-title">Browse</h5>
-        <p class="card-text">Explore files and metadata.</p>
-        <a href="browse" class="btn btn-primary">Browse Repository</a>
-    </div>
-    <div class="card">
-        <h5 class="card-title">Search</h5>
-        <p class="card-text">Find files quickly.</p>
-        <a href="browse" class="btn btn-primary">Search</a>
-    </div>
-</div>
-
-@if (_recentFiles is not null && _recentFiles.Count > 0)
+@if (_recentFiles is not null)
 {
-    <h3 class="mt-4">Recent Files</h3>
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Size</th>
-                <th>Uploaded</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var file in _recentFiles)
-            {
-                <tr>
-                    <td>@file.Descriptor.FileName</td>
-                    <td>@file.ContentType</td>
-                    <td>@file.SizeBytes bytes</td>
-                    <td>@file.UploadedAt.ToString("g")</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
+    <div class="dashboard-stats d-flex flex-wrap gap-2 mb-3">
+        <span class="badge text-bg-light border">@_documentCount documents in the repository</span>
+        @if (_recentBriefs is { Count: > 0 })
+        {
+            <span class="badge text-bg-light border">@_recentBriefs.Count recent document briefs</span>
+        }
+    </div>
 
+    <div class="input-group dashboard-search mb-4">
+        <input type="text" class="form-control" placeholder="Search the repository..." @bind="_quickQuery" @bind:event="oninput" @onkeydown="HandleQuickKeyDown" />
+        <button class="btn btn-primary" @onclick="QuickSearchAsync">Search</button>
+    </div>
+
+    <div class="row row-cols-2 row-cols-md-3 row-cols-lg-5 g-3 mb-4">
+        <div class="col">
+            <div class="card h-100 dashboard-action">
+                <div class="card-body">
+                    <h6 class="card-title">Upload</h6>
+                    <p class="card-text small text-muted">Add new files to the repository.</p>
+                    <a href="upload" class="btn btn-sm btn-primary">Upload Files</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 dashboard-action">
+                <div class="card-body">
+                    <h6 class="card-title">Browse</h6>
+                    <p class="card-text small text-muted">Explore files and metadata.</p>
+                    <a href="browse" class="btn btn-sm btn-primary">Browse Repository</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 dashboard-action">
+                <div class="card-body">
+                    <h6 class="card-title">Search Center</h6>
+                    <p class="card-text small text-muted">Full-text and semantic search.</p>
+                    <a href="search" class="btn btn-sm btn-primary">Search</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 dashboard-action">
+                <div class="card-body">
+                    <h6 class="card-title">Wiki</h6>
+                    <p class="card-text small text-muted">Document briefs and wiki pages.</p>
+                    <a href="wiki" class="btn btn-sm btn-primary">Open Wiki</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 dashboard-action">
+                <div class="card-body">
+                    <h6 class="card-title">Copilot</h6>
+                    <p class="card-text small text-muted">Ask questions about the repository.</p>
+                    <a href="copilot" class="btn btn-sm btn-primary">Ask Copilot</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_recentBriefs is { Count: > 0 })
+    {
+        <h3 class="mt-4 d-flex align-items-center">
+            Recent Document Briefs
+            <a href="wiki" class="ms-auto btn btn-sm btn-outline-primary">Open Wiki</a>
+        </h3>
+        <div class="list-group mb-4">
+            @foreach (var brief in _recentBriefs)
+            {
+                <a href="wiki" class="list-group-item list-group-item-action">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h6 class="mb-1">@brief.Title</h6>
+                        <small class="text-muted">@brief.Status</small>
+                    </div>
+                    <small class="text-muted d-block text-truncate">@Snippet(brief.Summary)</small>
+                </a>
+            }
+        </div>
+    }
+
+    @if (_recentFiles is { Count: > 0 })
+    {
+        <h3 class="mt-4 d-flex align-items-center">
+            Recent Files
+            <a href="browse" class="ms-auto btn btn-sm btn-outline-primary">Browse All</a>
+        </h3>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Uploaded</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var file in _recentFiles)
+                {
+                    <tr>
+                        <td>@file.Descriptor.FileName</td>
+                        <td>@file.ContentType</td>
+                        <td>@FormatSize(file.SizeBytes)</td>
+                        <td>@file.UploadedAt.ToString("g")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+}
 @code {
     private IReadOnlyList<Aletheia.Repository.Abstractions.Models.FileMetadata>? _recentFiles;
+    private IReadOnlyList<WikiPage> _recentBriefs = Array.Empty<WikiPage>();
+    private int _documentCount;
+    private string _quickQuery = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -67,10 +140,68 @@
         {
             var response = await ApiClient.SearchAsync(null, 1, 10);
             _recentFiles = response?.Results.Items;
+            _documentCount = response?.Results.TotalCount ?? 0;
         }
         catch (HttpRequestException)
         {
             _recentFiles = Array.Empty<Aletheia.Repository.Abstractions.Models.FileMetadata>();
         }
+
+        try
+        {
+            var recent = await ApiClient.GetRecentWikiPagesAsync(8);
+            _recentBriefs = recent?
+                .Where(page => page.GeneratedFrom == "document-brief")
+                .Take(5)
+                .ToList()
+                ?? new List<WikiPage>();
+        }
+        catch
+        {
+            _recentBriefs = Array.Empty<WikiPage>();
+        }
+    }
+
+    private void QuickSearchAsync()
+    {
+        var query = _quickQuery.Trim();
+        Navigation.NavigateTo(string.IsNullOrEmpty(query)
+            ? "search"
+            : $"search?q={Uri.EscapeDataString(query)}");
+    }
+
+    private void HandleQuickKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            QuickSearchAsync();
+        }
+    }
+
+    private static string Snippet(string text)
+    {
+        const int maxLength = 160;
+        var value = (text ?? string.Empty).Trim();
+        return value.Length <= maxLength ? value : $"{value[..maxLength].TrimEnd()}...";
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        var units = new[] { "KB", "MB", "GB", "TB" };
+        var size = (double)bytes;
+        var unit = -1;
+        do
+        {
+            size /= 1024;
+            unit++;
+        }
+        while (size >= 1024 && unit < units.Length - 1);
+
+        return $"{size:0.#} {units[unit]}";
     }
 }

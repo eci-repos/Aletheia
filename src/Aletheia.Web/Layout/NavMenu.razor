@@ -1,3 +1,6 @@
+@using Microsoft.Extensions.Configuration
+@inject IConfiguration Config
+
 <div class="@NavShellCssClass">
     <div class="top-row">
         <div class="container-fluid nav-header">
@@ -30,12 +33,7 @@
                     <span class="nav-text">Upload</span>
                 </NavLink>
             </div>
-            <div class="nav-item">
-                <NavLink class="nav-link" href="download" title="Download">
-                    <span class="nav-icon icon-download" aria-hidden="true"></span>
-                    <span class="nav-text">Download</span>
-                </NavLink>
-            </div>
+
             <div class="nav-item">
                 <NavLink class="nav-link" href="search" title="Search">
                     <span class="nav-icon icon-search" aria-hidden="true"></span>
@@ -43,9 +41,9 @@
                 </NavLink>
             </div>
             <div class="nav-item">
-                <NavLink class="nav-link" href="wiki" title="WRAGS Wiki">
+                <NavLink class="nav-link" href="wiki" title="Wiki">
                     <span class="nav-icon icon-wiki" aria-hidden="true"></span>
-                    <span class="nav-text">WRAGS</span>
+                    <span class="nav-text">Wiki</span>
                 </NavLink>
             </div>
             <div class="nav-item">
@@ -54,18 +52,24 @@
                     <span class="nav-text">Metadata</span>
                 </NavLink>
             </div>
-            <div class="nav-item">
-                <NavLink class="nav-link" href="taxonomy" title="Taxonomy">
-                    <span class="nav-icon icon-taxonomy" aria-hidden="true"></span>
-                    <span class="nav-text">Taxonomy</span>
-                </NavLink>
-            </div>
-            <div class="nav-item">
-                <NavLink class="nav-link" href="ontology" title="Ontology">
-                    <span class="nav-icon icon-ontology" aria-hidden="true"></span>
-                    <span class="nav-text">Ontology</span>
-                </NavLink>
-            </div>
+            @if (ShowInternalSearch)
+            {
+                <div class="nav-item">
+                    <NavLink class="nav-link" href="taxonomy" title="Taxonomy">
+                        <span class="nav-icon icon-taxonomy" aria-hidden="true"></span>
+                        <span class="nav-text">Taxonomy</span>
+                    </NavLink>
+                </div>
+            }
+            @if (ShowInternalSearch)
+            {
+                <div class="nav-item">
+                    <NavLink class="nav-link" href="ontology" title="Ontology">
+                        <span class="nav-icon icon-ontology" aria-hidden="true"></span>
+                        <span class="nav-text">Ontology</span>
+                    </NavLink>
+                </div>
+            }
             <div class="nav-item">
                 <NavLink class="nav-link" href="graph" title="Graph">
                     <span class="nav-icon icon-graph" aria-hidden="true"></span>
@@ -89,6 +93,7 @@
 </div>
 
 @code {
+    private bool ShowInternalSearch { get; set; }
     [Parameter]
     public bool IsCollapsed { get; set; }
 
@@ -98,6 +103,11 @@
     private string NavShellCssClass => IsCollapsed ? "nav-shell is-collapsed" : "nav-shell";
 
     private string SidebarToggleTitle => IsCollapsed ? "Expand menu" : "Collapse menu";
+
+    protected override void OnInitialized()
+    {
+        ShowInternalSearch = bool.TryParse(Config["FeatureFlags:ShowInternalSearch"], out var enabled) && enabled;
+    }
 
     private async Task ToggleSidebarAsync()
     {

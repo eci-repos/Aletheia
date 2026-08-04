@@ -2,6 +2,11 @@ html, body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 
+body.copilot-resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
 h1:focus {
     outline: none;
 }
@@ -100,4 +105,27 @@ a, .btn-link {
 
 code {
     color: #c02d76;
+}
+
+/* Dashboard (end-user home) */
+.dashboard-search {
+    max-width: 560px;
+}
+
+.dashboard-action .card-title {
+    margin-bottom: .35rem;
+}
+
+.dashboard-action .btn {
+    margin-top: .25rem;
+}
+
+.dashboard-stats .badge {
+    font-size: .875rem;
+    font-weight: 500;
+    padding: .45rem .75rem;
+}
+
+.list-group-item h6 {
+    margin-bottom: .15rem;
 }

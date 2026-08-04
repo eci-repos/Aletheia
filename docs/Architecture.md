@@ -85,23 +85,21 @@ The conversational planning system added in Sprints 22.1–22.7 is documented in
 
 #### Search Center
 
-`Aletheia.Web` exposes Search Center at `/search` as the primary human-facing retrieval workbench. The page lets users choose Semantic, WRAGS, GraphRAG, or LazyGraphRAG mode against the same Repository-backed knowledge estate:
+`Aletheia.Web` exposes Search Center at `/search` as the primary human-facing retrieval workbench. The supported product surface exposes Semantic/Vector RAG as the primary user path against the same Repository-backed knowledge estate:
 
-- Semantic mode calls standard RAGS retrieval over chunks and embeddings.
-- WRAGS mode retrieves durable wiki pages as knowledge context.
-- GraphRAG mode calls summary-aware graph retrieval and exposes an expansion-hop control.
-- LazyGraphRAG mode calls query-time discovery/traversal and exposes an expansion-limit control.
-- Direct content ingestion from the page queues background jobs for all three modes.
+- Semantic mode calls standard RAGS retrieval over chunks and embeddings and is always visible.
+- WRAGS, GraphRAG, and LazyGraphRAG are internal operator modes, hidden from end users unless FeatureFlags:ShowInternalSearch is enabled (default false). When enabled, they are visible in Search Center and the Wiki; when hidden, their API endpoints return HTTP 404. Copilot still uses graph-backed retrieval internally for broad/global corpus prompts, while scoped document prompts continue to prefer Semantic RAGS evidence.
+- Direct content ingestion from the page queues background jobs for the visible RAG/WRAGS modes.
 - Search results show rank, score, retrieval strategy, citations, chunk/source details, and technical API errors when failures occur.
 
 #### WRAGS Wiki
 
-WRAGS means Wiki Retrieval Augmented Generation System. It is Aletheia's durable LLM Wiki surface over RAGS, GraphRAG, and LazyGraphRAG:
+WRAGS means Wiki Retrieval Augmented Generation System. It is Aletheia's durable LLM Wiki surface over RAGS:
 
 - `/api/wiki` exposes search, recent pages, page lookup, regeneration, queued regeneration, retrieval-as-context, related-page lookup, page history, page edits, and lifecycle status updates.
 - PostgreSQL stores generated and edited wiki pages with topic, title, body/summary, source IDs, citations, generation mode, version, lifecycle status, review metadata, related topics, score, rank, retrieval strategy, source/chunk metadata, timestamps, and prior revisions in `wiki_page_history`.
-- WRAGS mode searches saved pages first, generates from GraphRAG on first miss, and falls back to LazyGraphRAG and Semantic retrieval when needed.
-- Users can also force GraphRAG, LazyGraphRAG, or Semantic mode.
+- WRAGS mode searches saved pages first and uses Semantic/Vector RAG as the supported retrieval fallback.
+- Users can also force Semantic mode from the Wiki UI.
 - The current slice persists generated snapshots, supports `Generated`/`Reviewed`/`Approved`/`NeedsReview`/`Stale` page state, stale warnings, related topics, related pages, editable page bodies, version history, source-change stale detection from Repository metadata, queued regeneration, and use of saved WRAGS pages in Search Center/Copilot retrieval context.
 
 ## Foundation (Phases 0–1)
@@ -169,3 +167,13 @@ Operationally important runtime fixes are part of the current codebase:
 
 - API container includes `libgssapi-krb5-2` for Npgsql/GSSAPI native dependency resolution.
 - `RAGS.Infrastructure.Graph` uses `Neo4j.Driver` `6.2.1` to align with the Neo4j infrastructure provider.
+\n## Taxonomy Normalization (Sprint 50)\n\n- **ConfigurableTermNormalizer** (in `RAGS.Application`) loads stop‑words from `appsettings.json` under the `Taxonomy` section and phrase exemptions from `docs/doc-templates/*.md`.\n- The normalizer is registered as a singleton via `builder.Services.AddSingleton<ITermNormalizer, ConfigurableTermNormalizer>();` (see `src/Repository.API/Program.cs`).\n- `UploadedContentKnowledgeIndexer` now extracts topics through a new `ExtractTopics` method that uses the term normalizer to filter stop‑words and preserve exempt phrases.\n- A one‑time migration (`TaxonomyCleanMigration` in `src/Repository.Infrastructure.PostgreSQL/Migrations`) removes existing stop‑word tags from the `taxonomy_tags` table and renames any tag that differs only by case or stop‑word removal, ensuring a clean taxonomy baseline.\n- After migration, taxonomy and ontology pipelines operate only on meaningful terms, improving graph quality and search relevance.\n
+
+## Canonical Document Templates (Sprint 53/54)
+
+- Templates in `docs/doc-templates/*.md` define the **canonical format** for a document kind: the ordered sections (with explanations) every document of that kind must cover (e.g., `3.0 - RFP Analysis`).
+- A document's **file name carries the clue** to its canonical (e.g., `CMP 2026 - 3. RFP Analysis.docx` matches canonical `3.0 - RFP Analysis`).
+- `DocumentTemplateRegistry` (singleton, `RAGS.Application`) loads the templates at startup, matches documents by token overlap (`TryGetCanonicalName`), and exposes the ordered sections (`TryGetSections`).
+- **Ingestion gate**: `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` requires a canonical template match; ingestion stops with a clear error when no canonical is found. The gate covers upload ingestion jobs, hydration, and plugin-triggered ingestion.
+- Summaries for template documents open with the document's nature/purpose (deterministic first-chunk injection) and follow the template's section order, each section grounded by its own retrieved evidence (Sprint 53).
+- Adding a new document kind requires adding a template under `docs/doc-templates` **before** documents of that kind can be ingested.

@@ -15,6 +15,16 @@ After deploying Aletheia using Docker Compose, access the system at:
 
 In local Docker Compose deployments, the API seeds an `admin` user if one does not already exist. Set `ALETHEIA_ADMIN_PASSWORD` in `.env` before startup. If it is not set and the API runs in Development, the development fallback is `Admin123!`.
 
+If Taxonomy or Repository metadata shows a term such as `RFP` but Copilot/RAGS returns no chunks, run a scoped RAGS index repair:
+
+```http
+POST /api/jobs/rags/repair?query=RFP
+```
+
+Use `POST /api/jobs/rags/repair` to rebuild all registered Repository documents. The repair runs as a background job and appears in Activity as `RagsRepair`.
+
+Taxonomy and Ontology canonicalize common acronyms. `RFP`, `Rfp`, and legacy `Rpf` should resolve to the displayed concept `RFP`. After a fresh upload, selecting `RFP` in Ontology should show `found_in` relationships to each matching source document.
+
 Production deployments must provide a non-default password through environment variables or a secrets manager before the API starts.
 
 ### 1. Create the MinIO Bucket
@@ -83,6 +93,28 @@ The system uses the following conceptual roles:
 }
 ```
 
+### Feature Flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| FeatureFlags:ShowInternalSearch | alse | When alse, end users see only the user-facing **Wiki** surface (document briefs) and semantic search. Raw Wiki/WRAGS mode controls, GraphRAG, LazyGraphRAG, and global-graph search are hidden in the UI and return HTTP 404 from the corresponding API endpoints. Set to 	rue for admin/diagnostics work (e.g., in ppsettings.Development.json or the production override). |
+
+Example:
+
+`json
+{
+  "FeatureFlags": {
+    "ShowInternalSearch": false
+  }
+}
+`
+
+Environment variable override:
+
+`ash
+FeatureFlags__ShowInternalSearch=true
+`
+
 ### Environment Variable Overrides
 
 All JSON settings can be overridden via environment variables using double-underscore notation:
@@ -112,32 +144,50 @@ MinIO__AccessKey=newkey
 
 ## RAGS v2 Administration
 
-### WRAGS Wiki
+### Wiki (End Users) and WRAGS (Internal)
 
-WRAGS is the LLM Wiki surface for Aletheia. Open `http://localhost:8081/wiki` or use the WRAGS navigation item.
+The user-facing surface is labeled **Wiki** (never "WRAGS"). Open `http://localhost:8081/wiki` or use the Wiki navigation item.
 
-WRAGS stores generated and edited wiki pages in PostgreSQL and exposes them through `/api/wiki`. WRAGS mode searches saved pages first, then generates from GraphRAG on first miss, with LazyGraphRAG and Semantic fallback. Operators can also force one mode when comparing behavior. Results show rank, score, version, lifecycle status, stale warnings, retrieval strategy, citations, related topics, related pages, source ID, chunk index, updated time, and history.
+For end users (default `FeatureFlags:ShowInternalSearch=false`), the Wiki shows **document briefs**: per-document, plain-language summaries that open with the document's stated nature/purpose and then follow the canonical template's ordered sections, grounded and cited, with no chunk/community/graph jargon. Briefs are stored as `wiki_pages` rows with `generated_from = 'document-brief'`. Community summaries and other internal provenance are excluded from Wiki search/recent output.
 
-Use Queue regen when source knowledge has changed and a page needs to be refreshed. Regeneration runs as a background job, updates the durable page snapshot, increments the version for matching topic/title/mode, and records the prior revision in history.
+Briefs are generated automatically after a registered document is ingested (after `EnsureIngestedAsync` succeeds, and after upload ingestion jobs) and can be regenerated on demand:
+
+```http
+POST /api/wiki/briefs/regenerate
+```
+
+The request body is optional. Omit it (or send `{}`) to regenerate briefs for all registered documents; send `{ "sourceId": "...", "sourceName": "..." }` to regenerate a single document's brief. The call returns a background job snapshot (`IngestionJobSnapshot`, kind `DocumentBriefs`).
+
+Admin/diagnostics mode (`FeatureFlags:ShowInternalSearch=true`) re-enables the internal WRAGS controls on the Wiki page: retrieval mode buttons (Wiki/WRAGS, Semantic, GraphRAG, LazyGraphRAG), expansion, rank/score/strategy metadata, the source chunk index, **Queue regen**, and a **Regenerate briefs** button that queues document-brief regeneration for all registered documents (`POST /api/wiki/briefs/regenerate`). WRAGS stores generated and edited wiki pages in PostgreSQL and exposes them through `/api/wiki`; the supported operator-facing modes are WRAGS, Semantic/Vector RAG, GraphRAG, and LazyGraphRAG. When the flag is off, `/api/wiki/regenerate` and `/api/wiki/regenerate/job` return 404, and `/api/wiki/search` and `/api/wiki/retrieve` reject the `graphrag`/`lazygraphrag` modes with 404.
 
 Use Edit for manual page body changes and Reviewed, Approve, Needs review, and Stale to manage the lifecycle. Reviewed/Approved pages persist `reviewed_by` and `reviewed_at`; stale and needs-review pages surface a warning in the UI. Pages are also flagged stale when linked Repository source metadata is newer than the wiki page update time.
 
 ### Search Center Modes
 
-The Web UI Search Center supports three retrieval modes:
+Search Center is the primary human-facing retrieval workbench. Semantic search is the default and remains the primary user path.
+
+When FeatureFlags:ShowInternalSearch=false (default), only **Semantic** mode is visible and ingestion always uses the Semantic RAGS path. The internal WRAGS/GraphRAG/LazyGraphRAG mode buttons are hidden; the corresponding retrieval endpoints (/api/graphrag/retrieve, /api/graphrag/global, /api/lazygraphrag/retrieve, /api/lazygraphrag/global, /api/graph/query/*) return HTTP 404.
+
+When FeatureFlags:ShowInternalSearch=true, the four retrieval modes are visible:
 
 | Mode | Operational behavior |
 | --- | --- |
 | Semantic | Uses standard RAGS chunks and embeddings for fast passage retrieval |
 | WRAGS | Uses durable wiki pages as retrieval context |
-| GraphRAG | Uses typed Neo4j entities, relationships, hierarchical communities, stored entity/community summaries, and the page's expansion-hop control |
-| LazyGraphRAG | Uses low-cost corpus statistics, query-time candidate discovery, budgeted best-first traversal, pruning, and the page's expansion-limit control |
+| GraphRAG | Uses graph summaries and bounded lazy enrichment when graph context exists |
+| LazyGraphRAG | Uses budgeted query-time graph traversal and pruning |
 
-GraphRAG results may display retrieval strategies such as `summary-entity` or `summary-community`. LazyGraphRAG results may display combined strategies such as `lazy-semantic+lazy-corpus-expansion+lazy-entity-expansion`. These labels are useful when comparing whether a result came from raw semantic chunks, stored graph summaries, or query-time graph expansion.
+For scoped RFP/CMP/document feature prompts, Copilot still prefers source-scoped Semantic RAGS because that path returns document evidence. Broad corpus prompts can use GraphRAG first, LazyGraphRAG second, and Semantic RAGS fallback.
 
-Search Center direct ingestion uses background jobs for all three modes. The page should show "Ingestion job queued" quickly, then the Activity panel should show stage, heartbeat, progress, and any failure detail. Search failures should render the technical API error on the page instead of only saying that the search failed.
+Search Center direct ingestion uses background jobs for the visible RAG/WRAGS modes. The page should show "Ingestion job queued" quickly, then the Activity panel should show stage, heartbeat, progress, and any failure detail. Search failures should render the technical API error on the page instead of only saying that the search failed.
 
 LazyGraphRAG traversal budgets are guardrails. If optional enrichment reaches a configured LLM/node/relationship/token limit, retrieval should stop expanding and return the best available results; it should not fail merely because the limit was reached.
+
+### Copilot Activity Observability
+
+Copilot chat jobs appear in the global Activity panel. For troubleshooting, Activity shows the prompt snippet, execution approval, queued/running job state, repository tool dispatch, graph fallback when applicable, context verification, and synthesis handoff.
+
+Use these entries before changing timeouts or database credentials. If Activity does not show repository tool dispatch or context verification, investigate chat-agent orchestration first.
 
 ### GraphRAG Smoke Test
 
@@ -146,16 +196,15 @@ After deployment:
 1. Open `http://localhost:8081`.
 2. Sign in with the seeded admin account.
 3. Open Search Center.
-4. Ingest a short test note in Semantic, GraphRAG, or LazyGraphRAG mode and confirm a job is queued.
+4. Ingest a short test note in Semantic mode and confirm a job is queued.
 5. Search for the topic from that note in Semantic mode.
-6. Repeat in GraphRAG mode and confirm the expansion-hop control is visible.
-7. Repeat in LazyGraphRAG mode and confirm the expansion-limit control is visible.
-8. Confirm results include rank, score, retrieval strategy, citations, and source/chunk details.
+6. Repeat in WRAGS mode and confirm saved wiki pages can be used as retrieval context.
+7. Confirm results include rank, score, retrieval strategy, citations, and source/chunk details.
 
 Recent local Docker validation confirmed this flow with:
 
 - Authenticated login through the Web UI.
-- Background ingest returning a job through `/api/jobs/graphrag/ingest`.
+- Background ingest returning a job through the RAGS/Search Center path.
 - `GET /api/rags/retrieve`, `GET /api/graphrag/retrieve`, and `GET /api/lazygraphrag/retrieve` returning results from Search Center.
 - `GET /api/graphrag/retrieve` returning summary-based results.
 - `GET /api/lazygraphrag/retrieve` returning budgeted lazy expansion results without traversal-budget false failures.
@@ -167,6 +216,8 @@ Upload and queued GraphRAG ingestion now use a faster searchable-first path: chu
 Taxonomy/Ontology explorers start with lightweight upload metadata and become richer as GraphRAG queries lazily enrich relevant chunks. Query-time discoveries are synced back to PostgreSQL through `ILazyEnrichmentKnowledgeSink`, so entities, tags, and relationships should appear after related GraphRAG searches or Copilot retrieval touch the source content.
 
 Copilot answers display completion stats under each assistant response: elapsed seconds, estimated tokens per second, estimated completion tokens, retrieved context count, citation count, and a heuristic confidence percentage. For plan-based background executions, the Copilot page shows a progress panel with a status badge, progress bar, step checklist, heartbeats, elapsed time, partial and final results, and an execution telemetry card comparing actuals to the plan estimates. The confidence value is based on retrieval evidence and citations; it is not a calibrated correctness score.
+
+Mandatory Copilot repository tool calls now emit `Tool call` heartbeats while retrieval runs. They use the normal heartbeat cadence, 30 seconds by default, so the watchdog sees active retrieval progress, and they emit an immediate heartbeat when the long operation starts. They also use `ChatExecutionEngine:MandatoryToolTimeoutSeconds` (default 1800 seconds) instead of the generic 30-second step timeout, so broad opportunity/RFP questions have enough time to collect internal evidence. The watchdog is a longer safety net (`HeartbeatWatchdogMissedThreshold = 20`, 10 minutes with the default 30-second cadence). If a retrieval dependency hangs, the **Call repository tool** step should fail with the configured tool timeout or watchdog backstop instead of a short 90-second stall. Use **New chat** to clear the visible browser-local conversation, draft, execution panel, progress, telemetry, and stored Copilot state before testing a fresh prompt; cancel the active job separately if server-side work should stop.
 
 ## Health Checks
 

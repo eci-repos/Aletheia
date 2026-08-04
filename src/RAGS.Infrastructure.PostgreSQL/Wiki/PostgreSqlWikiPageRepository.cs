@@ -57,10 +57,12 @@ SELECT
     created_at AS CreatedAt,
     updated_at AS UpdatedAt
 FROM wiki_pages
-WHERE topic ILIKE @Pattern
+WHERE (topic ILIKE @Pattern
    OR title ILIKE @Pattern
-   OR summary ILIKE @Pattern
+   OR summary ILIKE @Pattern)
+  AND generated_from <> 'graphrag'
 ORDER BY
+    CASE WHEN generated_from = 'document-brief' THEN 0 ELSE 1 END,
     CASE WHEN topic_normalized = @Normalized THEN 0 ELSE 1 END,
     updated_at DESC,
     score DESC
@@ -120,7 +122,10 @@ SELECT
     created_at AS CreatedAt,
     updated_at AS UpdatedAt
 FROM wiki_pages
-ORDER BY updated_at DESC
+WHERE generated_from <> 'graphrag'
+ORDER BY
+    CASE WHEN generated_from = 'document-brief' THEN 0 ELSE 1 END,
+    updated_at DESC
 LIMIT @Take;";
 
         try

@@ -4,6 +4,7 @@ using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.Repository.API.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using RAGS.UnitTests.TestSupport;
 
 namespace RAGS.UnitTests.LazyGraphRAG;
 
@@ -17,7 +18,7 @@ public sealed class LazyGraphRagControllerTests
             .Setup(s => s.IngestAsync(It.IsAny<IngestionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success());
 
-        var controller = new LazyGraphRagController(mockService.Object);
+        var controller = new LazyGraphRagController(mockService.Object, new FakeInternalSearchGate());
         var request = new IngestionRequest(Guid.NewGuid(), "test content");
 
         var result = await controller.Ingest(request, CancellationToken.None);
@@ -34,7 +35,7 @@ public sealed class LazyGraphRagControllerTests
             .Setup(s => s.IngestAsync(It.IsAny<IngestionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Failure("ingestion failed"));
 
-        var controller = new LazyGraphRagController(mockService.Object);
+        var controller = new LazyGraphRagController(mockService.Object, new FakeInternalSearchGate());
         var request = new IngestionRequest(Guid.NewGuid(), "test content");
 
         var result = await controller.Ingest(request, CancellationToken.None);
@@ -55,7 +56,7 @@ public sealed class LazyGraphRagControllerTests
             .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<IReadOnlyList<SearchResult>>.Success(searchResults));
 
-        var controller = new LazyGraphRagController(mockService.Object);
+        var controller = new LazyGraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: true));
 
         var result = await controller.Retrieve("query");
 
@@ -72,11 +73,35 @@ public sealed class LazyGraphRagControllerTests
             .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<IReadOnlyList<SearchResult>>.Failure("retrieve failed"));
 
-        var controller = new LazyGraphRagController(mockService.Object);
+        var controller = new LazyGraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: true));
 
         var result = await controller.Retrieve("query");
 
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal(400, badRequestResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task Retrieve_returns_not_found_when_internal_search_hidden()
+    {
+        var mockService = new Mock<ILazyGraphRagService>();
+        var controller = new LazyGraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: false));
+
+        var result = await controller.Retrieve("query");
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        mockService.Verify(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GlobalSearch_returns_not_found_when_internal_search_hidden()
+    {
+        var mockService = new Mock<ILazyGraphRagService>();
+        var controller = new LazyGraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: false));
+
+        var result = await controller.GlobalSearch("query");
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        mockService.Verify(s => s.GlobalSearchAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

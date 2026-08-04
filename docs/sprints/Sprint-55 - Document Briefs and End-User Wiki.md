@@ -54,12 +54,14 @@ Make the Wiki genuinely useful for end users and stop exposing internal retrieva
 - Improving graph algorithms or community summaries themselves (they remain internal).
 - Server-side multi-tenant wiki history.
 
-
 ---
 
-## Progress (2026-08-04)
+## Implementation Status (2026-08-04)
 
-- **Document Briefs implemented**: IDocumentBriefService/DocumentBriefService and IDocumentBriefGenerator/SemanticKernelDocumentBriefGenerator (RAGS.Application); RetrievalAugmentedPromptBuilder.BuildDocumentBrief; IngestionJobService kind DocumentBriefs with POST /api/wiki/briefs/regenerate; triggers after EnsureIngestedAsync and after upload ingestion.
-- **Wiki surface shows briefs**: PostgreSqlWikiPageRepository search/recent exclude generated_from = 'graphrag' and order document-brief first.
-- **Internal search gated**: FeatureFlags:ShowInternalSearch (default false), IInternalSearchGate/InternalSearchGate; GraphRAG/LazyGraphRAG/GraphQuery controllers and the internal wiki modes return 404 when hidden; Search Center and Wiki UI hide the internal controls; user-facing labels renamed to **Wiki** (NavMenu, Wiki page).
-- **Tests**: DocumentBriefServiceTests, InternalSearchGateTests, WikiControllerInternalSearchGateTests, GraphRAG/LazyGraphRAG controller gating tests; RAGS (225), Foundation (55), Repository (91) suites green. Web C#/Razor compiles (full WASM build blocked locally by an environment task-host issue, pre-existing).
+Implemented (see docs/File 02-Current-Sprint.md):
+
+1. **Document Brief generation** — DocumentBriefService + SemanticKernelDocumentBriefGenerator (RAGS.Application), RetrievalAugmentedPromptBuilder.BuildDocumentBrief, background job kind DocumentBriefs in IngestionJobService, POST /api/wiki/briefs/regenerate, triggers on ingestion (after EnsureIngestedAsync and upload ingestion jobs). Briefs stored as wiki_pages rows with generated_from = 'document-brief'.
+2. **Wiki surface shows briefs** — repository search/recent exclude graphrag rows and order briefs first.
+3. **Internal search hidden** — FeatureFlags:ShowInternalSearch (default false) via IInternalSearchGate; gated GraphRAG/LazyGraphRAG/GraphQuery controllers and internal wiki modes; UI hides mode buttons/expansion/queue-regen; labels renamed to **Wiki**.
+4. **Tests** — DocumentBriefServiceTests (3), InternalSearchGateTests (2), WikiControllerInternalSearchGateTests (5), GraphRAG/LazyGraphRAG gating tests; suites green.
+5. **Docs** — Architecture, AdministratorGuide, OperationsGuide, AGENTS.md updated.

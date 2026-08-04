@@ -1,22 +1,28 @@
 @page "/wiki"
+@using Microsoft.Extensions.Configuration
+@inject IConfiguration Config
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
 @inject AuthService Auth
 
-<PageTitle>WRAGS Wiki - Aletheia</PageTitle>
+<PageTitle>Wiki - Aletheia</PageTitle>
 
 <div class="wiki-page">
     <div class="wiki-header">
         <div>
-            <h1>WRAGS Wiki</h1>
-            <div class="text-muted">Wiki Retrieval Augmented Generation System</div>
+            <h1>Wiki</h1>
+            <div class="text-muted">Document briefs and wiki pages from the Aletheia repository</div>
         </div>
-        <div class="wiki-mode btn-group" role="group" aria-label="Wiki retrieval mode">
-            <button type="button" class="btn @ModeButtonClass("wrags")" @onclick='() => SetMode("wrags")'>WRAGS</button>
-            <button type="button" class="btn @ModeButtonClass("graphrag")" @onclick='() => SetMode("graphrag")'>GraphRAG</button>
-            <button type="button" class="btn @ModeButtonClass("lazygraphrag")" @onclick='() => SetMode("lazygraphrag")'>Lazy</button>
-            <button type="button" class="btn @ModeButtonClass("semantic")" @onclick='() => SetMode("semantic")'>Semantic</button>
-        </div>
+        @if (ShowInternalSearch)
+        {
+            <div class="wiki-mode btn-group" role="group" aria-label="Wiki retrieval mode">
+                <button type="button" class="btn @ModeButtonClass("wrags")" @onclick='() => SetMode("wrags")'>Wiki</button>
+                <button type="button" class="btn @ModeButtonClass("semantic")" @onclick='() => SetMode("semantic")'>Semantic</button>
+                <button type="button" class="btn @ModeButtonClass("graphrag")" @onclick='() => SetMode("graphrag")'>GraphRAG</button>
+                <button type="button" class="btn @ModeButtonClass("lazygraphrag")" @onclick='() => SetMode("lazygraphrag")'>LazyGraphRAG</button>
+            </div>
+            <button type="button" class="btn btn-outline-secondary" title="Regenerate document briefs for all registered documents" @onclick="RegenerateBriefsAsync" disabled="@(_searching || _regeneratingBriefs)">Regenerate briefs</button>
+        }
     </div>
 
     <div class="wiki-search input-group">
@@ -24,28 +30,36 @@
         <button class="btn btn-primary" @onclick="SearchAsync" disabled="@_searching">Search</button>
     </div>
 
-    <div class="wiki-controls">
-        <label class="form-label">
-            Pages: @_topK
-            <input type="range" class="form-range" min="1" max="12" @bind="_topK" />
-        </label>
-        @if (_mode is "wrags" or "graphrag" or "lazygraphrag")
-        {
+    @if (ShowInternalSearch)
+    {
+        <div class="wiki-controls">
             <label class="form-label">
-                Expansion: @_expansion
-                <input type="range" class="form-range" min="0" max="3" @bind="_expansion" />
+                Pages: @_topK
+                <input type="range" class="form-range" min="1" max="12" @bind="_topK" />
             </label>
-        }
-    </div>
+            @if (_mode != "semantic")
+            {
+                <label class="form-label">
+                    Expansion: @_expansion
+                    <input type="range" class="form-range" min="0" max="3" @bind="_expansion" />
+                </label>
+            }
+        </div>
+    }
 
     @if (_searching)
     {
-        <div class="alert alert-info">Searching WRAGS...</div>
+        <div class="alert alert-info">Searching Wiki...</div>
     }
 
     @if (!string.IsNullOrWhiteSpace(_error))
     {
         <div class="alert alert-danger">@_error</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_notice))
+    {
+        <div class="alert alert-info">@_notice</div>
     }
 
     @if (_pages is not null)
@@ -62,7 +76,7 @@
                     {
                         <button type="button" class="wiki-index-item @(wikiPage == _selectedPage ? "is-selected" : "")" @onclick="() => SelectPageAsync(wikiPage)">
                             <span>@wikiPage.Title</span>
-                            <small>@wikiPage.GeneratedFrom · v@wikiPage.Version · @wikiPage.Status</small>
+                            <small>@PageKindLabel(wikiPage) · v@wikiPage.Version · @wikiPage.Status</small>
                         </button>
                     }
                 </aside>
@@ -74,14 +88,18 @@
                             <div>
                                 <h2>@_selectedPage.Title</h2>
                                 <div class="wiki-meta">
-                                    <span>Rank @_selectedPage.Rank</span>
-                                    <span>@_selectedPage.Score.ToString("P1")</span>
-                                    <span>@_selectedPage.RetrievalStrategy</span>
+                                    <span>@PageKindLabel(_selectedPage)</span>
                                     <span>v@_selectedPage.Version</span>
                                     <span>@_selectedPage.Status</span>
                                     @if (_selectedPage.IsStale)
                                     {
                                         <span>Stale</span>
+                                    }
+                                    @if (ShowInternalSearch)
+                                    {
+                                        <span>Rank @_selectedPage.Rank</span>
+                                        <span>@_selectedPage.Score.ToString("P1")</span>
+                                        <span>@_selectedPage.RetrievalStrategy</span>
                                     }
                                 </div>
                             </div>
@@ -91,7 +109,10 @@
                                 <button type="button" class="btn btn-outline-warning btn-sm" @onclick='() => UpdateStatusAsync("NeedsReview")' disabled="@_searching">Needs review</button>
                                 <button type="button" class="btn btn-outline-danger btn-sm" @onclick='() => UpdateStatusAsync("Stale")' disabled="@_searching">Stale</button>
                                 <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="BeginEdit" disabled="@_searching">Edit</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="RegenerateAsync" disabled="@_searching">Queue regen</button>
+                                @if (ShowInternalSearch)
+                                {
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="RegenerateAsync" disabled="@_searching">Queue regen</button>
+                                }
                             </div>
                         </div>
 
@@ -195,10 +216,21 @@
                         <div class="wiki-section">
                             <h3>Source</h3>
                             <dl class="wiki-source">
-                                <dt>Source ID</dt>
-                                <dd>@(_selectedPage.PrimarySourceId?.ToString() ?? string.Join(", ", _selectedPage.SourceIds))</dd>
-                                <dt>Chunk</dt>
-                                <dd>@(_selectedPage.ChunkIndex?.ToString() ?? "n/a")</dd>
+                                @if (_selectedPage.GeneratedFrom == "document-brief")
+                                {
+                                    <dt>Document</dt>
+                                    <dd>@_selectedPage.Title</dd>
+                                }
+                                else
+                                {
+                                    <dt>Source ID</dt>
+                                    <dd>@(_selectedPage.PrimarySourceId?.ToString() ?? string.Join(", ", _selectedPage.SourceIds))</dd>
+                                }
+                                @if (ShowInternalSearch && _selectedPage.GeneratedFrom != "document-brief")
+                                {
+                                    <dt>Chunk</dt>
+                                    <dd>@(_selectedPage.ChunkIndex?.ToString() ?? "n/a")</dd>
+                                }
                                 <dt>Updated</dt>
                                 <dd>@_selectedPage.UpdatedAt.ToLocalTime().ToString("g")</dd>
                                 <dt>Reviewed</dt>
@@ -218,7 +250,9 @@
     private int _topK = 6;
     private int _expansion = 1;
     private bool _searching;
+    private bool _regeneratingBriefs;
     private string _error = string.Empty;
+    private string _notice = string.Empty;
     private List<WikiPage>? _pages;
     private WikiPage? _selectedPage;
     private List<WikiPageLink> _relatedPages = new();
@@ -229,8 +263,11 @@
     private string _editTopics = string.Empty;
     private string _editNote = string.Empty;
 
+    private bool ShowInternalSearch { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
+        ShowInternalSearch = bool.TryParse(Config["FeatureFlags:ShowInternalSearch"], out var enabled) && enabled;
         try
         {
             var recent = await ApiClient.GetRecentWikiPagesAsync(20);
@@ -247,6 +284,8 @@
 
     private string ModeButtonClass(string mode) => _mode == mode ? "btn-primary" : "btn-outline-primary";
 
+    private static string PageKindLabel(WikiPage page) => page.GeneratedFrom == "document-brief" ? "Document brief" : "Wiki page";
+
     private void SetMode(string mode)
     {
         _mode = mode;
@@ -255,6 +294,7 @@
         _history = new List<WikiPageHistoryEntry>();
         _editing = false;
         _error = string.Empty;
+        _notice = string.Empty;
     }
 
     private async Task SelectPageAsync(WikiPage page)
@@ -272,9 +312,10 @@
             return;
         }
 
-        var activityId = ActivityLog.Begin("WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki search", $"Searching for \"{_query}\".");
+        var activityId = ActivityLog.Begin("Wiki", "Wiki search", $"Searching for \"{_query}\".");
         _searching = true;
         _error = string.Empty;
+        _notice = string.Empty;
         _pages = null;
         _selectedPage = null;
 
@@ -285,13 +326,13 @@
             _selectedPage = _pages.FirstOrDefault();
             await LoadRelatedPagesAsync();
             await LoadHistoryAsync();
-            ActivityLog.Complete(activityId, "WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki search", $"Wiki search completed with {_pages.Count} pages.");
+            ActivityLog.Complete(activityId, "Wiki", "Wiki search", $"Wiki search completed with {_pages.Count} pages.");
         }
         catch (Exception ex)
         {
             _pages = new List<WikiPage>();
             HandleError(ex);
-            ActivityLog.Fail(activityId, "WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki search", _error);
+            ActivityLog.Fail(activityId, "Wiki", "Wiki search", _error);
         }
         finally
         {
@@ -301,6 +342,11 @@
 
     private async Task RegenerateAsync()
     {
+        if (!ShowInternalSearch)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_query) && _selectedPage is not null)
         {
             _query = _selectedPage.Topic;
@@ -311,7 +357,7 @@
             return;
         }
 
-        var activityId = ActivityLog.Begin("WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki regeneration", $"Queueing regeneration for \"{_query}\".");
+        var activityId = ActivityLog.Begin("Wiki", "Wiki regeneration", $"Queueing regeneration for \"{_query}\".");
         _searching = true;
         _error = string.Empty;
 
@@ -321,21 +367,59 @@
             if (job is not null)
             {
                 ActivityLog.UpsertJob(job);
-                ActivityLog.Complete(activityId, "WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki regeneration", $"Background job {job.JobId:N} queued.");
+                ActivityLog.Complete(activityId, "Wiki", "Wiki regeneration", $"Background job {job.JobId:N} queued.");
             }
             else
             {
-                ActivityLog.Fail(activityId, "WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki regeneration", "Regeneration API did not return a job.");
+                ActivityLog.Fail(activityId, "Wiki", "Wiki regeneration", "Regeneration API did not return a job.");
             }
         }
         catch (Exception ex)
         {
             HandleError(ex);
-            ActivityLog.Fail(activityId, "WRAGS Wiki", $"{_mode.ToUpperInvariant()} wiki regeneration", _error);
+            ActivityLog.Fail(activityId, "Wiki", "Wiki regeneration", _error);
         }
         finally
         {
             _searching = false;
+        }
+    }
+
+    private async Task RegenerateBriefsAsync()
+    {
+        if (!ShowInternalSearch || _regeneratingBriefs)
+        {
+            return;
+        }
+
+        var activityId = ActivityLog.Begin("Wiki", "Document brief regeneration", "Queueing document brief regeneration for all registered documents.");
+        _regeneratingBriefs = true;
+        _error = string.Empty;
+        _notice = string.Empty;
+
+        try
+        {
+            var job = await ApiClient.RegenerateDocumentBriefsAsync();
+            if (job is not null)
+            {
+                ActivityLog.UpsertJob(job);
+                _notice = $"Document brief regeneration queued (job {job.JobId:N}).";
+                ActivityLog.Complete(activityId, "Wiki", "Document brief regeneration", $"Background job {job.JobId:N} queued.");
+            }
+            else
+            {
+                ActivityLog.Fail(activityId, "Wiki", "Document brief regeneration", "Regeneration API did not return a job.");
+                _error = "Document brief regeneration API did not return a job.";
+            }
+        }
+        catch (Exception ex)
+        {
+            HandleError(ex);
+            ActivityLog.Fail(activityId, "Wiki", "Document brief regeneration", _error);
+        }
+        finally
+        {
+            _regeneratingBriefs = false;
         }
     }
 

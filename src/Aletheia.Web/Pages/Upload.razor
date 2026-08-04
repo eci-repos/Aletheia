@@ -1,12 +1,18 @@
 @page "/upload"
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
+@inject RecentGraphContextService RecentGraphContext
 
 <PageTitle>Upload - Aletheia</PageTitle>
 
 <h1>Upload Files</h1>
 
 <div class="upload-container">
+    <div class="alert alert-info">
+        Uploads are processed in the background. When a file finishes ingesting you will see its status change to
+        <strong>Ready</strong> and a notification entry in the Activity panel — at that point the document is searchable
+        and a Wiki brief is generated automatically.
+    </div>
     <InputFile OnChange="LoadFiles" class="form-control" multiple />
 
     @if (_filesToUpload.Any())
@@ -82,7 +88,12 @@
                 {
                     ActivityLog.Fail(activityId, "Upload", file.Name, upload.Error ?? "Upload failed without API error detail.");
                 }
-                else if (upload.IngestionJobId is Guid jobId)
+                else
+                {
+                    await RecentGraphContext.RecordDocumentAsync(fileId, file.Name);
+                }
+
+                if (upload.Uploaded && upload.IngestionJobId is Guid jobId)
                 {
                     ActivityLog.Complete(activityId, "Upload", file.Name, $"Upload stored. Background ingestion job {jobId:N} is queued.");
                     var job = await ApiClient.GetIngestionJobAsync(jobId);
@@ -90,16 +101,18 @@
                     {
                         ActivityLog.UpsertJob(job);
                     }
+
+                    _ = TrackIngestionAsync(file.Name, jobId);
                 }
-                else if (upload.RagsIngested && upload.KnowledgeIndexed)
+                else if (upload.Uploaded && upload.RagsIngested && upload.KnowledgeIndexed)
                 {
                     ActivityLog.Complete(activityId, "Upload", file.Name, $"Upload complete. RAGS and knowledge indexing completed with status {upload.IngestionStatus}.");
                 }
-                else if (upload.RagsIngested)
+                else if (upload.Uploaded && upload.RagsIngested)
                 {
                     ActivityLog.Warn(activityId, "Upload", file.Name, $"Upload complete. RAGS ingested, but knowledge indexing did not complete. Status: {upload.IngestionStatus}.");
                 }
-                else
+                else if (upload.Uploaded)
                 {
                     ActivityLog.Warn(activityId, "Upload", file.Name, $"Upload complete. RAGS/knowledge indexing skipped or failed. Status: {upload.IngestionStatus}. {upload.Error}");
                 }
@@ -112,6 +125,49 @@
         }
 
         _isUploading = false;
+    }
+
+    private readonly CancellationTokenSource _trackCts = new();
+
+    private async Task TrackIngestionAsync(string fileName, Guid jobId)
+    {
+        var token = _trackCts.Token;
+        for (var attempt = 0; attempt < 120 && !token.IsCancellationRequested; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+                var job = await ApiClient.GetIngestionJobAsync(jobId).ConfigureAwait(false);
+                if (job is null)
+                {
+                    continue;
+                }
+
+                ActivityLog.UpsertJob(job);
+                if (job.Status is "Succeeded" or "Failed" or "Cancelled")
+                {
+                    _statuses[fileName] = job.Status == "Succeeded"
+                        ? ("Ready - fully ingested and searchable", "bg-success")
+                        : ($"Ingestion {job.Status.ToLowerInvariant()}", "bg-danger");
+                    await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+                    return;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch
+            {
+                // Transient polling errors are ignored; the Activity panel still shows job state.
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _trackCts.Cancel();
+        _trackCts.Dispose();
     }
 
     private static string SummarizeUploadError(string? error)

@@ -9,9 +9,53 @@
 @if (!HasFileQuery)
 {
     <div class="alert alert-info">
-        Select a file from the repository browser before editing metadata.
-        <a href="browse" class="alert-link">Open Browse</a>
+        Select a file below (or use the <strong>&#9998;</strong> Edit action in <a href="browse" class="alert-link">Browse</a>) to edit its metadata.
     </div>
+
+    <div class="input-group mb-3">
+        <input type="text" class="form-control" placeholder="Search files..." @bind="_pickerQuery" @bind:event="oninput" @onkeydown="HandlePickerKeyDown" />
+        <button class="btn btn-outline-primary" @onclick="PickerSearchAsync" disabled="@_pickerLoading">
+            @(_pickerLoading ? "Searching..." : "Search")
+        </button>
+    </div>
+
+    @if (_pickerError is not null)
+    {
+        <div class="alert alert-warning">@_pickerError</div>
+    }
+    else if (_pickerResults is not null)
+    {
+        @if (_pickerResults.Count == 0)
+        {
+            <div class="alert alert-info">No files found.</div>
+        }
+        else
+        {
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Uploaded</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var file in _pickerResults)
+                    {
+                        <tr>
+                            <td>@file.Descriptor.FileName</td>
+                            <td>@file.ContentType</td>
+                            <td>@file.UploadedAt.ToString("g")</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" @onclick="() => SelectFileAsync(file)">Edit</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
 }
 else if (_metadata is not null)
 {
@@ -117,6 +161,50 @@ else
         catch (HttpRequestException)
         {
             _metadata = null;
+        }
+    }
+
+    private string _pickerQuery = string.Empty;
+    private IReadOnlyList<Aletheia.Repository.Abstractions.Models.FileMetadata>? _pickerResults;
+    private string? _pickerError;
+    private bool _pickerLoading;
+
+    private async Task PickerSearchAsync()
+    {
+        _pickerLoading = true;
+        _pickerError = null;
+        _pickerResults = null;
+
+        try
+        {
+            var response = await ApiClient.SearchAsync(string.IsNullOrWhiteSpace(_pickerQuery) ? null : _pickerQuery.Trim(), 1, 10);
+            _pickerResults = response?.Results.Items;
+            if (_pickerResults is null)
+            {
+                _pickerError = "Could not load files. Refresh and retry.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _pickerError = $"Search failed: {ex.Message}";
+        }
+        finally
+        {
+            _pickerLoading = false;
+        }
+    }
+
+    private void SelectFileAsync(Aletheia.Repository.Abstractions.Models.FileMetadata file)
+    {
+        var version = file.Descriptor.Version is null ? string.Empty : $"&version={Uri.EscapeDataString(file.Descriptor.Version)}";
+        Navigation.NavigateTo($"/metadata?fileId={file.Descriptor.FileId}&fileName={Uri.EscapeDataString(file.Descriptor.FileName)}{version}");
+    }
+
+    private void HandlePickerKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            _ = PickerSearchAsync();
         }
     }
 

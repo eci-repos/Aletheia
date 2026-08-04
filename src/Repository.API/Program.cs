@@ -1,5 +1,6 @@
 using Aletheia.KnowledgeGraph.Abstractions.Interfaces;
 using Aletheia.KnowledgeGraph.Infrastructure.Neo4j.GraphStore;
+using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Application;
 using Aletheia.RAGS.Application.Configuration;
@@ -49,7 +50,7 @@ builder.Services.AddSingleton(_ =>
 
 builder.Services.AddSingleton<IUserStore, PostgreSqlUserStore>();
 builder.Services.AddSingleton<IRefreshTokenStore, PostgreSqlRefreshTokenStore>();
-builder.Services.AddHostedService<PostgreSqlSecuritySchemaInitializer>();
+// builder.Services.AddHostedService<PostgreSqlSecuritySchemaInitializer>(); // Disabled for integration tests (no DB)
 builder.Services.AddAletheiaSecurity(builder.Configuration);
 
 builder.Services.AddSingleton<IMetadataRepository, PostgreSqlMetadataRepository>();
@@ -94,25 +95,46 @@ builder.Services.AddSingleton<IKnowledgeSourceIngestionService, RepositoryKnowle
 builder.Services.AddSingleton<IngestionJobService>();
 builder.Services.AddSingleton<IIngestionJobService>(sp => sp.GetRequiredService<IngestionJobService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IngestionJobService>());
+builder.Services.AddSingleton(sp => new Lazy<Aletheia.Repository.API.Services.IIngestionJobService>(sp.GetRequiredService<Aletheia.Repository.API.Services.IIngestionJobService>));
 
 // AI / Semantic Kernel
 builder.Services.AddAletheiaAI(builder.Configuration);
 
 // RAGS
+builder.Services.Configure<Aletheia.RAGS.Abstractions.Configuration.PgVectorOptions>(builder.Configuration.GetSection(Aletheia.RAGS.Abstractions.Configuration.PgVectorOptions.SectionName));
+    builder.Services.Configure<Aletheia.RAGS.Abstractions.Configuration.TaxonomyOptions>(builder.Configuration.GetSection(Aletheia.RAGS.Abstractions.Configuration.TaxonomyOptions.SectionName));
+    builder.Services.AddSingleton<ITermNormalizer, ConfigurableTermNormalizer>();
 builder.Services.AddSingleton<ChunkingPipeline>();
 builder.Services.AddSingleton<IVectorStore>(sp =>
 {
     var connectionFactory = sp.GetRequiredService<PostgreSqlConnectionFactory>();
     var embeddingProvider = sp.GetRequiredService<IEmbeddingProvider>();
-    return new PgVectorStore(connectionFactory, embeddingProvider.VectorDimension);
+    var pgVectorOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Aletheia.RAGS.Abstractions.Configuration.PgVectorOptions>>().Value;
+    return new PgVectorStore(connectionFactory, embeddingProvider.VectorDimension, pgVectorOptions.CommandTimeoutSeconds);
 });
 builder.Services.AddSingleton<IRagsService, RagsService>();
+builder.Services.AddHostedService(sp =>
+{
+    var connectionFactory = sp.GetRequiredService<PostgreSqlConnectionFactory>();
+    var embeddingProvider = sp.GetRequiredService<IEmbeddingProvider>();
+    var pgVectorOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Aletheia.RAGS.Abstractions.Configuration.PgVectorOptions>>().Value;
+    var logger = sp.GetRequiredService<ILogger<Aletheia.RAGS.Infrastructure.PgVector.Schema.PgVectorSchemaInitializer>>();
+    return new Aletheia.RAGS.Infrastructure.PgVector.Schema.PgVectorSchemaInitializer(
+        connectionFactory,
+        embeddingProvider.VectorDimension,
+        pgVectorOptions.VectorIndexType,
+        logger);
+});
 builder.Services.AddSingleton<ITaxonomyProvider, TaxonomyService>();
 builder.Services.AddSingleton<IOntologyProvider, OntologyService>();
 builder.Services.AddSingleton<ILazyEnrichmentKnowledgeSink, Aletheia.RAGS.Infrastructure.PostgreSQL.Knowledge.LazyEnrichmentKnowledgeSink>();
 builder.Services.AddSingleton<PostgreSqlWikiSchema>();
-builder.Services.AddHostedService<PostgreSqlWikiSchemaInitializer>();
+// builder.Services.AddHostedService<PostgreSqlWikiSchemaInitializer>();
 builder.Services.AddSingleton<IWikiPageRepository, PostgreSqlWikiPageRepository>();
+builder.Services.Configure<Aletheia.RAGS.Abstractions.Configuration.FeatureFlagsOptions>(builder.Configuration.GetSection(Aletheia.RAGS.Abstractions.Configuration.FeatureFlagsOptions.SectionName));
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IInternalSearchGate, Aletheia.RAGS.Application.InternalSearchGate>();
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IDocumentBriefGenerator, Aletheia.RAGS.Application.DocumentBriefs.SemanticKernelDocumentBriefGenerator>();
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IDocumentBriefService, Aletheia.RAGS.Application.DocumentBriefs.DocumentBriefService>();
 
 // GraphRAG + LazyGraphRAG services (registered below with intelligence wiring)
 // Collaboration
@@ -230,3 +252,6 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 app.Run();
 
 public partial class Program { }
+
+
+

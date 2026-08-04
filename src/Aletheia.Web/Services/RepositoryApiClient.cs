@@ -304,6 +304,22 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<BackgroundJobClientSnapshot?> RegenerateDocumentBriefsAsync(Guid? sourceId = null, string? sourceName = null, CancellationToken cancellationToken = default)
+    {
+        var request = new DocumentBriefRegenerationRequest { SourceId = sourceId, SourceName = sourceName };
+        var response = await _httpClient.PostAsJsonAsync("/api/wiki/briefs/regenerate", request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(await BuildApiFailureAsync(
+                response,
+                "Document brief regeneration",
+                "POST /api/wiki/briefs/regenerate",
+                cancellationToken).ConfigureAwait(false));
+        }
+
+        return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<SearchResult>?> WragsRetrieveAsync(string query, int topK = 5, int expansion = 1, CancellationToken cancellationToken = default)
     {
         var response = await _httpClient.GetAsync($"/api/wiki/retrieve?query={Uri.EscapeDataString(query)}&mode=wrags&topK={topK}&expansion={expansion}", cancellationToken).ConfigureAwait(false);

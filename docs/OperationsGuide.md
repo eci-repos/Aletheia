@@ -116,6 +116,24 @@ docker compose exec neo4j neo4j-admin database check neo4j
 
 GraphRAG summaries can be generated during full enrichment and stored in graph metadata. File uploads now use lightweight graph seed indexing by default; query-time GraphRAG can lazily enrich relevant chunks when summaries are absent. If source content, extracted entities, relationships, or community assignments are regenerated, run a fresh full GraphRAG ingest or future summary refresh job so community/global answers do not rely on stale summaries.
 
+### Document Briefs (End-User Wiki)
+
+The user-facing Wiki (/wiki) shows document briefs: plain-language, per-document summaries that open with the document's nature/purpose and follow the canonical template's ordered sections, grounded and cited. Briefs are stored as wiki_pages rows with generated_from = 'document-brief'; community summaries (generated_from = 'graphrag') are excluded from end-user search/list output.
+
+Briefs are generated automatically after ingestion (after EnsureIngestedAsync succeeds and after upload ingestion jobs) and can be regenerated on demand:
+
+`ash
+# Regenerate briefs for all registered documents
+curl -X POST http://localhost:8080/api/wiki/briefs/regenerate -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{}'
+
+# Regenerate the brief for one document
+curl -X POST http://localhost:8080/api/wiki/briefs/regenerate -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"sourceId":"<source-id>","sourceName":"<file name>"}'
+`
+
+The response is an IngestionJobSnapshot (kind DocumentBriefs); watch progress in the Activity panel or GET /api/jobs. Documents without a canonical template are skipped (the ingestion gate already prevents them).
+
+Internal retrieval surfaces (raw Wiki/WRAGS modes, GraphRAG, LazyGraphRAG, global-graph search) are hidden from end users by default. Set FeatureFlags:ShowInternalSearch=true (or FeatureFlags__ShowInternalSearch=true) to re-enable them for admin/diagnostics work.
+
 ### WRAGS Page Lifecycle
 
 WRAGS pages are durable generated or edited knowledge snapshots. Operators can edit page bodies, view history, queue regeneration jobs, and mark pages `Reviewed`, `Approved`, `NeedsReview`, or `Stale` from `/wiki`; the API persists review metadata, stale flags, and revision history in PostgreSQL. Regeneration creates a fresh generated snapshot, stores the previous revision in history, and clears prior review metadata for the matching topic/title/mode. Pages are flagged stale when linked Repository source metadata is newer than the wiki page update time.

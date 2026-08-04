@@ -11,10 +11,12 @@ namespace Aletheia.Repository.API.Controllers;
 public class GraphRagController : ControllerBase
 {
     private readonly IGraphRagService _graphRagService;
+    private readonly IInternalSearchGate _internalSearchGate;
 
-    public GraphRagController(IGraphRagService graphRagService)
+    public GraphRagController(IGraphRagService graphRagService, IInternalSearchGate internalSearchGate)
     {
         _graphRagService = graphRagService ?? throw new ArgumentNullException(nameof(graphRagService));
+        _internalSearchGate = internalSearchGate ?? throw new ArgumentNullException(nameof(internalSearchGate));
     }
 
     [HttpPost("ingest")]
@@ -36,6 +38,7 @@ public class GraphRagController : ControllerBase
 
     [HttpGet("retrieve")]
     [ProducesResponseType(typeof(IReadOnlyList<Aletheia.RAGS.Abstractions.Models.SearchResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Retrieve(
         [FromQuery] string query,
@@ -43,6 +46,12 @@ public class GraphRagController : ControllerBase
         [FromQuery] int maxExpanded = 10,
         CancellationToken cancellationToken = default)
     {
+        var gate = GateInternalSearch();
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         var result = await _graphRagService.RetrieveAsync(query, topK, maxExpanded, cancellationToken).ConfigureAwait(false);
 
         if (result.IsFailure)
@@ -55,11 +64,18 @@ public class GraphRagController : ControllerBase
 
     [HttpGet("global")]
     [ProducesResponseType(typeof(GlobalSearchResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GlobalSearch(
         [FromQuery] string query,
         CancellationToken cancellationToken = default)
     {
+        var gate = GateInternalSearch();
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         var result = await _graphRagService.GlobalSearchAsync(query, cancellationToken).ConfigureAwait(false);
 
         if (result.IsFailure)
@@ -68,5 +84,12 @@ public class GraphRagController : ControllerBase
         }
 
         return Ok(result.Value);
+    }
+
+    private IActionResult? GateInternalSearch()
+    {
+        return _internalSearchGate.ShowInternalSearch
+            ? null
+            : NotFound(new { error = "Not found." });
     }
 }

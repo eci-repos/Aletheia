@@ -1,5 +1,7 @@
 @page "/graph"
+@using System.Text.Json
 @inject RepositoryApiClient ApiClient
+@inject RecentGraphContextService RecentContext
 @inject IJSRuntime JS
 
 <PageTitle>Graph Explorer - Aletheia</PageTitle>
@@ -10,7 +12,7 @@
             <h1>Knowledge Graph Explorer</h1>
             @if (_nodes is not null && _edges is not null)
             {
-                <span>@_nodes.Count nodes / @_edges.Count edges</span>
+                <span>@_nodes.Count / @(_allNodes?.Count ?? 0) nodes · @_edges.Count / @(_allEdges?.Count ?? 0) edges</span>
             }
         </div>
 
@@ -75,14 +77,69 @@
         </div>
     }
 
-    <div class="graph-canvas">
-        <div id="graph-container"></div>
+    <div class="graph-main">
+        <div class="graph-canvas">
+            <div id="graph-container"></div>
+        </div>
+
+        <aside class="graph-context-panel">
+            <div class="context-panel-header">
+                <div>
+                    <h2>Recent Context</h2>
+                    <span>@ContextSummary</span>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshRecentContextAsync">Refresh</button>
+            </div>
+
+            <div class="context-mode">
+                <label class="form-check">
+                    <input class="form-check-input" type="checkbox" checked="@_showFullGraph" @onchange="ToggleFullGraphAsync" />
+                    <span class="form-check-label">Explore full graph</span>
+                <label class="form-check">
+                    <input class="form-check-input" type="checkbox" checked="@_showChunkNodes" @onchange="ToggleChunkNodesAsync" />
+                    <span class="form-check-label">Show chunk nodes (technical)</span>
+                </label>
+                </label>
+            </div>
+
+            <div class="context-actions">
+                <button class="btn btn-sm btn-outline-primary" @onclick="SelectAllContextAsync" disabled="@(_recentContext.Count == 0)">Select all</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearContextAsync" disabled="@(_selectedContextKeys.Count == 0)">Clear</button>
+                <button class="btn btn-sm btn-outline-danger" @onclick="ClearRecentContextListAsync" disabled="@(_recentContext.Count == 0)">Clear list</button>
+            </div>
+
+            @if (_recentContext.Count == 0)
+            {
+                <p class="context-empty">Recent uploads and searches will appear here.</p>
+            }
+            else
+            {
+                <div class="context-list">
+                    @foreach (var item in _recentContext)
+                    {
+                        <label class="context-item">
+                            <input type="checkbox" checked="@_selectedContextKeys.Contains(item.Key)" @onchange="args => ToggleContextItemAsync(item.Key, args)" disabled="@_showFullGraph" />
+                            <span>
+                                <strong>@item.Label</strong>
+                                <small>@ContextKindLabel(item) · @item.Timestamp.ToLocalTime().ToString("g")</small>
+                            </span>
+                        </label>
+                    }
+                </div>
+            }
+        </aside>
     </div>
 </div>
 
 @code {
+    private List<GraphNode>? _allNodes;
+    private List<GraphEdge>? _allEdges;
     private List<GraphNode>? _nodes;
     private List<GraphEdge>? _edges;
+    private List<RecentGraphContextItem> _recentContext = new();
+    private HashSet<string> _selectedContextKeys = new(StringComparer.OrdinalIgnoreCase);
+    private bool _showFullGraph;
+    private bool _showChunkNodes;
     private bool _importing;
     private string _statusMessage = string.Empty;
     private bool _statusSuccess;
@@ -96,6 +153,7 @@
     {
         if (firstRender)
         {
+            await LoadRecentContextAsync(render: false);
             await LoadGraphAsync();
         }
 
@@ -109,24 +167,26 @@
     private async Task LoadGraphAsync()
     {
         _statusMessage = string.Empty;
-        _nodes = await ApiClient.GraphGetNodesAsync();
-        _edges = await ApiClient.GraphGetEdgesAsync();
+        _allNodes = await ApiClient.GraphGetNodesAsync();
+        _allEdges = await ApiClient.GraphGetEdgesAsync();
 
-        if (_nodes is null || _edges is null)
+        if (_allNodes is null || _allEdges is null)
         {
+            _nodes = null;
+            _edges = null;
             _statusSuccess = false;
             _statusMessage = "Graph load failed. Refresh the graph or check the API response.";
             StateHasChanged();
             return;
         }
 
-        if (_nodes.Count == 0)
+        if (_allNodes.Count == 0)
         {
             _statusSuccess = true;
             _statusMessage = "Graph is empty. Import from Ontology to populate it.";
         }
 
-        _renderGraphAfterRender = true;
+        ApplyGraphScope();
         StateHasChanged();
     }
 
@@ -168,5 +228,230 @@
     private async Task SpreadGraphAsync()
     {
         await JS.InvokeVoidAsync("spreadGraph");
+    }
+
+    private async Task LoadRecentContextAsync(bool render = true)
+    {
+        _recentContext = (await RecentContext.GetAsync()).ToList();
+        if (_selectedContextKeys.Count == 0 && _recentContext.Count > 0)
+        {
+            foreach (var item in _recentContext.Take(3))
+            {
+                _selectedContextKeys.Add(item.Key);
+            }
+        }
+
+        _showFullGraph = _recentContext.Count == 0 || _selectedContextKeys.Count == 0;
+        ApplyGraphScope();
+        if (render)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task RefreshRecentContextAsync()
+    {
+        return LoadRecentContextAsync();
+    }
+
+    private async Task ToggleFullGraphAsync(ChangeEventArgs args)
+    {
+        _showFullGraph = args.Value is bool value && value;
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
+    private async Task ToggleChunkNodesAsync(ChangeEventArgs args)
+    {
+        _showChunkNodes = args.Value is bool value && value;
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
+
+
+    private async Task ToggleContextItemAsync(string key, ChangeEventArgs args)
+    {
+        var selected = args.Value is bool value && value;
+        if (selected)
+        {
+            _selectedContextKeys.Add(key);
+            _showFullGraph = false;
+        }
+        else
+        {
+            _selectedContextKeys.Remove(key);
+        }
+
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SelectAllContextAsync()
+    {
+        _selectedContextKeys = _recentContext
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _showFullGraph = false;
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearContextAsync()
+    {
+        _selectedContextKeys.Clear();
+        _showFullGraph = true;
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
+    private async Task ClearRecentContextListAsync()
+    {
+        await RecentContext.ClearAsync();
+        _recentContext.Clear();
+        _selectedContextKeys.Clear();
+        _showFullGraph = true;
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
+
+
+    private void ApplyGraphScope()
+    {
+        if (_allNodes is null || _allEdges is null)
+        {
+            return;
+        }
+
+        if (_showFullGraph || _selectedContextKeys.Count == 0)
+        {
+            _nodes = _allNodes;
+            _edges = _allEdges;
+        }
+        else
+        {
+            var selectedItems = _recentContext
+                .Where(item => _selectedContextKeys.Contains(item.Key))
+                .ToList();
+            (_nodes, _edges) = FilterGraph(_allNodes, _allEdges, selectedItems);
+        }
+
+        ApplyChunkFilter();
+
+        _pathFrom = string.Empty;
+        _pathTo = string.Empty;
+        _pathResult = null;
+        _renderGraphAfterRender = true;
+    }
+
+    private void ApplyChunkFilter()
+    {
+        if (_nodes is null || _edges is null || _showChunkNodes)
+        {
+            return;
+        }
+
+        var keptIds = _nodes
+            .Where(node => !string.Equals(node.Type, "Chunk", StringComparison.OrdinalIgnoreCase))
+            .Select(node => node.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _nodes = _nodes.Where(node => keptIds.Contains(node.Id)).ToList();
+        _edges = _edges
+            .Where(edge => keptIds.Contains(edge.SourceId) && keptIds.Contains(edge.TargetId))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(_pathFrom) && !keptIds.Contains(_pathFrom))
+        {
+            _pathFrom = string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_pathTo) && !keptIds.Contains(_pathTo))
+        {
+            _pathTo = string.Empty;
+        }
+    }
+
+    public static (List<GraphNode> Nodes, List<GraphEdge> Edges) FilterGraph(
+        IReadOnlyList<GraphNode> allNodes,
+        IReadOnlyList<GraphEdge> allEdges,
+        IReadOnlyList<RecentGraphContextItem> selectedItems)
+    {
+        var matched = allNodes
+            .Where(node => selectedItems.Any(item => MatchesContext(node, item)))
+            .Select(node => node.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (matched.Count == 0)
+        {
+            return (new List<GraphNode>(), new List<GraphEdge>());
+        }
+
+        var scopedEdges = allEdges
+            .Where(edge => matched.Contains(edge.SourceId) || matched.Contains(edge.TargetId))
+            .ToList();
+        var scopedNodeIds = scopedEdges
+            .SelectMany(edge => new[] { edge.SourceId, edge.TargetId })
+            .Concat(matched)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var scopedNodes = allNodes
+            .Where(node => scopedNodeIds.Contains(node.Id))
+            .ToList();
+
+        return (scopedNodes, scopedEdges);
+    }
+
+    private static bool MatchesContext(GraphNode node, RecentGraphContextItem item)
+    {
+        var haystack = string.Join(" ", new[]
+        {
+            node.Id,
+            node.Label,
+            node.Type,
+            GetPropertyValue(node, "sourceId"),
+            GetPropertyValue(node, "sourceName"),
+            GetPropertyValue(node, "fileName")
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+        if (item.Kind.Equals("document", StringComparison.OrdinalIgnoreCase))
+        {
+            return (!string.IsNullOrWhiteSpace(item.SourceId) && haystack.Contains(item.SourceId, StringComparison.OrdinalIgnoreCase))
+                || haystack.Contains(item.Label, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.IsNullOrWhiteSpace(item.Query))
+        {
+            return false;
+        }
+
+        var terms = item.Query
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length > 2)
+            .Take(6)
+            .ToList();
+
+        return terms.Count > 0 && terms.Any(term => haystack.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? GetPropertyValue(GraphNode node, string key)
+    {
+        if (!node.Properties.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            JsonElement json => json.ValueKind == JsonValueKind.String ? json.GetString() : json.ToString(),
+            _ => value.ToString()
+        };
+    }
+
+    private string ContextSummary => _showFullGraph
+        ? "Full graph mode"
+        : $"{_selectedContextKeys.Count} selected";
+
+    private static string ContextKindLabel(RecentGraphContextItem item)
+    {
+        return item.Kind.Equals("document", StringComparison.OrdinalIgnoreCase)
+            ? "Document"
+            : $"{item.Mode?.ToUpperInvariant() ?? "SEARCH"} search";
     }
 }

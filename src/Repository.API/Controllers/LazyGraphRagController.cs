@@ -11,10 +11,12 @@ namespace Aletheia.Repository.API.Controllers;
 public class LazyGraphRagController : ControllerBase
 {
     private readonly ILazyGraphRagService _lazyGraphRagService;
+    private readonly IInternalSearchGate _internalSearchGate;
 
-    public LazyGraphRagController(ILazyGraphRagService lazyGraphRagService)
+    public LazyGraphRagController(ILazyGraphRagService lazyGraphRagService, IInternalSearchGate internalSearchGate)
     {
         _lazyGraphRagService = lazyGraphRagService ?? throw new ArgumentNullException(nameof(lazyGraphRagService));
+        _internalSearchGate = internalSearchGate ?? throw new ArgumentNullException(nameof(internalSearchGate));
     }
 
     [HttpPost("ingest")]
@@ -34,6 +36,7 @@ public class LazyGraphRagController : ControllerBase
 
     [HttpGet("retrieve")]
     [ProducesResponseType(typeof(IReadOnlyList<Aletheia.RAGS.Abstractions.Models.SearchResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Retrieve(
         [FromQuery] string query,
@@ -41,6 +44,12 @@ public class LazyGraphRagController : ControllerBase
         [FromQuery] int maxExpanded = 10,
         CancellationToken cancellationToken = default)
     {
+        var gate = GateInternalSearch();
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         var result = await _lazyGraphRagService.RetrieveAsync(query, topK, maxExpanded, cancellationToken).ConfigureAwait(false);
 
         if (result.IsFailure)
@@ -53,11 +62,18 @@ public class LazyGraphRagController : ControllerBase
 
     [HttpGet("global")]
     [ProducesResponseType(typeof(GlobalSearchResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GlobalSearch(
         [FromQuery] string query,
         CancellationToken cancellationToken = default)
     {
+        var gate = GateInternalSearch();
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         var result = await _lazyGraphRagService.GlobalSearchAsync(query, cancellationToken).ConfigureAwait(false);
 
         if (result.IsFailure)
@@ -66,5 +82,12 @@ public class LazyGraphRagController : ControllerBase
         }
 
         return Ok(result.Value);
+    }
+
+    private IActionResult? GateInternalSearch()
+    {
+        return _internalSearchGate.ShowInternalSearch
+            ? null
+            : NotFound(new { error = "Not found." });
     }
 }

@@ -1,6 +1,10 @@
 @page "/search"
+@using Microsoft.Extensions.Configuration
+@inject IConfiguration Config
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
+@inject RecentGraphContextService RecentGraphContext
+@inject NavigationManager Navigation
 
 <PageTitle>Search Center - Aletheia</PageTitle>
 
@@ -9,9 +13,12 @@
 <div class="mb-3">
     <div class="btn-group" role="group">
         <button type="button" class="btn @(_mode == "semantic" ? "btn-primary" : "btn-outline-primary")" @onclick="SetSemanticMode">Semantic</button>
-        <button type="button" class="btn @(_mode == "wrags" ? "btn-primary" : "btn-outline-primary")" @onclick="SetWragsMode">WRAGS</button>
-        <button type="button" class="btn @(_mode == "graphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetGraphRagMode">GraphRAG</button>
-        <button type="button" class="btn @(_mode == "lazygraphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetLazyGraphRagMode">LazyGraphRAG</button>
+        @if (ShowInternalSearch)
+        {
+            <button type="button" class="btn @(_mode == "wrags" ? "btn-primary" : "btn-outline-primary")" @onclick="SetWragsMode">WRAGS</button>
+            <button type="button" class="btn @(_mode == "graphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetGraphRagMode">GraphRAG</button>
+            <button type="button" class="btn @(_mode == "lazygraphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetLazyGraphRagMode">LazyGraphRAG</button>
+        }
     </div>
 </div>
 
@@ -19,16 +26,21 @@
     <input type="text" class="form-control" placeholder="Enter your query..." @bind="_query" @bind:event="oninput" @onkeydown="HandleKeyDown" />
     <button class="btn btn-primary" @onclick="SearchAsync">Search</button>
 </div>
+<p class="text-muted small mb-0">
+    Tip: semantic search matches by meaning across document chunks. For questions with conditions
+    (for example, "only if part of the project objectives"), ask <a href="copilot">Copilot</a> —
+    it scopes retrieval to specific documents and their template sections.
+</p>
 
 <div class="mb-3">
     <label class="form-label">Results to show: @_topK</label>
     <input type="range" class="form-range" min="1" max="20" @bind="_topK" />
 </div>
 
-@if (_mode is "wrags" or "graphrag" or "lazygraphrag")
+@if (ShowInternalSearch && UsesExpansion(_mode))
 {
     <div class="mb-3">
-        <label class="form-label">@(_mode == "lazygraphrag" ? "Expansion limit" : "Expansion hops"): @_expansionHops</label>
+        <label class="form-label">Expansion: @_expansionHops</label>
         <input type="range" class="form-range" min="0" max="3" @bind="_expansionHops" />
     </div>
 }
@@ -51,7 +63,7 @@
     }
     else
     {
-        <h3>@(_mode.ToUpperInvariant()) Results (@_results.Count)</h3>
+        <h3>@ModeLabel Results (@_results.Count)</h3>
         @foreach (var result in _results)
         {
             <div class="card mb-3">
@@ -87,8 +99,11 @@
 
 <hr />
 
+@if (ShowInternalSearch)
+{
+
 <h3>Ingest Content</h3>
-<p class="text-muted small">Content is ingested for @_mode retrieval. WRAGS regeneration is managed from the WRAGS page.</p>
+<p class="text-muted small">Admin: content pasted here is ingested without a canonical template and is not linked to a registered document. Prefer the Upload page for real documents. Wiki regeneration is managed from the Wiki page.</p>
 <div class="mb-3">
     <textarea class="form-control" rows="5" placeholder="Paste content to ingest..." @bind="_ingestContent" @bind:event="oninput"></textarea>
 </div>
@@ -99,6 +114,8 @@
 @if (!string.IsNullOrEmpty(_ingestStatus))
 {
     <div class="alert @( _ingestSuccess ? "alert-success" : "alert-danger") mt-3">@_ingestStatus</div>
+}
+
 }
 
 @code {
@@ -115,13 +132,69 @@
     private string _ingestStatus = string.Empty;
     private bool _ingestSuccess;
 
+    private bool ShowInternalSearch { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ShowInternalSearch = bool.TryParse(Config["FeatureFlags:ShowInternalSearch"], out var enabled) && enabled;
+        if (!ShowInternalSearch)
+        {
+            _mode = "semantic";
+        }
+
+        var query = ReadQueryParam("q");
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            _query = query;
+            await SearchAsync();
+        }
+    }
+
+    private string? ReadQueryParam(string key)
+    {
+        var query = Navigation.ToAbsoluteUri(Navigation.Uri).Query;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return null;
+        }
+
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            var name = separator < 0 ? pair : pair[..separator];
+            var value = separator < 0 ? string.Empty : pair[(separator + 1)..];
+            if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(value.Replace('+', ' '));
+            }
+        }
+
+        return null;
+    }
+
     private void SetSemanticMode() => SetMode("semantic");
     private void SetWragsMode() => SetMode("wrags");
     private void SetGraphRagMode() => SetMode("graphrag");
     private void SetLazyGraphRagMode() => SetMode("lazygraphrag");
 
+    private string ModeLabel => _mode switch
+    {
+        "semantic" => "Semantic",
+        "wrags" => "WRAGS",
+        "graphrag" => "GraphRAG",
+        "lazygraphrag" => "LazyGraphRAG",
+        _ => _mode
+    };
+
+    private static bool UsesExpansion(string mode) => mode is "wrags" or "graphrag" or "lazygraphrag";
+
     private void SetMode(string mode)
     {
+        if (!ShowInternalSearch && mode != "semantic")
+        {
+            return;
+        }
+
         _mode = mode;
         _results = null;
     }
@@ -133,7 +206,7 @@
             return;
         }
 
-        var activityId = ActivityLog.Begin("Search Center", $"{_mode.ToUpperInvariant()} search", $"Searching for \"{_query}\".");
+        var activityId = ActivityLog.Begin("Search Center", $"{ModeLabel} search", $"Searching for \"{_query}\".");
         _searching = true;
         _searchError = string.Empty;
         _results = null;
@@ -148,13 +221,13 @@
             }
             else if (_mode == "graphrag")
             {
-                ActivityLog.Trace(activityId, "Search Center", "GraphRAG search", "Reading entity/community summaries and graph context.");
+                ActivityLog.Trace(activityId, "Search Center", "GraphRAG search", "Reading graph summaries and expanded graph context.");
                 var results = await ApiClient.GraphRagRetrieveAsync(_query, _topK, _expansionHops);
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
             else if (_mode == "lazygraphrag")
             {
-                ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG search", "Running query-time discovery, traversal budgets, and pruning.");
+                ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG search", "Running budgeted query-time graph traversal.");
                 var results = await ApiClient.LazyGraphRagRetrieveAsync(_query, _topK, _expansionHops);
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
@@ -165,13 +238,14 @@
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
 
-            ActivityLog.Complete(activityId, "Search Center", $"{_mode.ToUpperInvariant()} search", $"Search completed with {_results.Count} results.");
+            ActivityLog.Complete(activityId, "Search Center", $"{ModeLabel} search", $"Search completed with {_results.Count} results.");
+            await RecentGraphContext.RecordSearchAsync(_query, _mode);
         }
         catch (Exception ex)
         {
             _results = new List<SearchResult>();
             _searchError = ex.Message;
-            ActivityLog.Fail(activityId, "Search Center", $"{_mode.ToUpperInvariant()} search", ex.Message);
+            ActivityLog.Fail(activityId, "Search Center", $"{ModeLabel} search", ex.Message);
         }
         finally
         {
@@ -186,7 +260,8 @@
             return;
         }
 
-        var activityId = ActivityLog.Begin("Search Center", $"{_mode.ToUpperInvariant()} ingest", "Submitting content to ingestion API.");
+        var effectiveMode = ShowInternalSearch ? _mode : "semantic";
+        var activityId = ActivityLog.Begin("Search Center", $"{effectiveMode} ingest", "Submitting content to ingestion API.");
         _ingesting = true;
         _ingestStatus = string.Empty;
         _ingestSuccess = false;
@@ -194,19 +269,14 @@
         try
         {
             BackgroundJobClientSnapshot? job;
-            if (_mode == "wrags")
+            if (effectiveMode == "graphrag")
             {
-                ActivityLog.Trace(activityId, "Search Center", "WRAGS ingest", "Queueing semantic ingestion; regenerate wiki pages from the WRAGS page after content is searchable.");
-                job = await ApiClient.RagsIngestJobAsync(Guid.NewGuid(), _ingestContent);
-            }
-            else if (_mode == "graphrag")
-            {
-                ActivityLog.Trace(activityId, "Search Center", "GraphRAG ingest", "Generating chunks, typed graph entities, relationships, communities, and summaries.");
+                ActivityLog.Trace(activityId, "Search Center", "GraphRAG ingest", "Queueing GraphRAG ingestion job.");
                 job = await ApiClient.GraphRagIngestJobAsync(Guid.NewGuid(), _ingestContent);
             }
-            else if (_mode == "lazygraphrag")
+            else if (effectiveMode == "lazygraphrag")
             {
-                ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG ingest", "Recording chunks and low-cost corpus statistics.");
+                ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG ingest", "Queueing LazyGraphRAG ingestion job.");
                 job = await ApiClient.LazyGraphRagIngestJobAsync(Guid.NewGuid(), _ingestContent);
             }
             else
@@ -220,20 +290,20 @@
 
             if (job is not null)
             {
-                ActivityLog.Complete(activityId, "Search Center", $"{_mode.ToUpperInvariant()} ingest", $"Background job {job.JobId:N} queued.");
+                ActivityLog.Complete(activityId, "Search Center", $"{effectiveMode} ingest", $"Background job {job.JobId:N} queued.");
                 ActivityLog.UpsertJob(job);
                 _ingestContent = string.Empty;
             }
             else
             {
-                ActivityLog.Fail(activityId, "Search Center", $"{_mode.ToUpperInvariant()} ingest", "Ingestion API did not return a job.");
+                ActivityLog.Fail(activityId, "Search Center", $"{effectiveMode} ingest", "Ingestion API did not return a job.");
             }
         }
         catch (Exception ex)
         {
             _ingestSuccess = false;
             _ingestStatus = $"Ingestion failed: {ex.Message}";
-            ActivityLog.Fail(activityId, "Search Center", $"{_mode.ToUpperInvariant()} ingest", ex.Message);
+            ActivityLog.Fail(activityId, "Search Center", $"{effectiveMode} ingest", ex.Message);
         }
         finally
         {

@@ -162,3 +162,20 @@ Recommended takeover targets remain subject to the active sprint:
 - Wiki search/recent exclude generated_from = 'graphrag' community summaries and order document briefs first; community summaries stay internal for graph answers/diagnostics.
 - Internal search surfaces (raw Wiki/WRAGS modes, GraphRAG, LazyGraphRAG, global-graph) are gated by FeatureFlags:ShowInternalSearch (default false) via IInternalSearchGate/InternalSearchGate. Gated endpoints return HTTP 404; the Search Center and Wiki UI hide the controls.
 - Tests: DocumentBriefServiceTests, InternalSearchGateTests, WikiControllerInternalSearchGateTests, and GraphRAG/LazyGraphRAG controller gating tests (RAGS.UnitTests).
+
+# Sprint 56 Notes (Duplicate Upload Detection / Document Update Flow)
+
+- Active sprint: `docs/sprints/Sprint-56 - Duplicate Upload Detection and Document Update Flow.md`. Sprint 55 is complete/committed (HEAD 8e4bcb4).
+- Uploads are fingerprinted server-side with SHA-256 before any storage write; `file_metadata.content_hash` (init.sql + idempotent migration) stores it; `FileMetadata.ContentHash` surfaces it.
+- Exact-duplicate posts (same content hash) are trapped: HTTP 409 `{ duplicate = true, message, existingFileId, existingFileName, existingUploadedAt, existingVersion }`, no blob/metadata/ingestion/brief. Web shows a "Duplicate - already exists" badge and an Activity warning.
+- Document updates use `POST /api/files/upload` with optional `existingFileId`: same-hash = no-change trap; changed file = new version under the same fileId, ingestion enqueued with the same sourceId, prior knowledge-index/graph rows replaced (reuse UploadedContentKnowledgeIndexer.DeleteSourceAsync + IVectorStore.DeleteBySourceAsync), and the Wiki brief regenerates (existing EnsureIngestedAsync trigger).
+- Keep existing synchronous RAGS/GraphRAG/LazyGraphRAG endpoints and the /api/jobs snapshot contract untouched.
+
+Implementation status (2026-08-05):
+- Content fingerprinting: SHA-256 computed in FilesController.Upload over the temp file; FileMetadata.ContentHash + UploadRequest.ContentHash; file_metadata.content_hash (init.sql + idempotent SQL migration under src/Repository.Infrastructure.PostgreSQL/Migrations/).
+- Duplicate trap: IDuplicateDetectionService (Repository.Application) + IMetadataRepository.FindByContentHashAsync (default no-op on interface; PostgreSQL implementation overrides); HTTP 409 payload contract; Web Upload page duplicate/no-change badges; RepositoryApiClient maps 409 -> UploadClientResult (IsDuplicate/NoChange/DuplicateMessage/ExistingFileId/ExistingFileName).
+- Document update: POST /api/files/upload optional existingFileId -> no-change 409 / 400 when missing / version snapshot via IVersioningUseCase.CreateVersionAsync + blob+metadata replace + ingestion job with same sourceId; Replace semantics in RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync (knowledge-index + graph DeleteSource before RAGS ingest; brief regenerates).
+- IGraphProvider.DeleteSourceAsync added with a default "not supported" implementation; Neo4jGraphProvider implements DETACH DELETE by n.sourceId.
+- Admin duplicate report: GET /api/files/duplicates [Authorize(Roles = Administrator)].
+- Web UI: Browse gains an update (↻) action linking to /upload?update=<fileId>&fileName=<name>; Upload page supports update mode.
+- Tests: Repository.UnitTests 102 (DuplicateDetectionServiceTests + FilesControllerTests); RAGS 225; Foundation 55. Web.UnitTests (RepositoryApiClientUploadTests) added but not runnable in this sandbox (WASM ComputeWasmBuildAssets task-host failure blocks building Aletheia.Web, pre-existing environment issue; CI does not run Web.UnitTests).

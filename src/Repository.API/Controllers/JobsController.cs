@@ -56,4 +56,11 @@ public sealed class JobsController : ControllerBase
     {
         return Accepted(_jobs.EnqueueContent(IngestionJobEngine.LazyGraphRag, request.SourceId, request.Content, request.SourceName));
     }
+
+    [HttpPost("rags/repair")]
+    [ProducesResponseType(typeof(IngestionJobSnapshot), StatusCodes.Status202Accepted)]
+    public IActionResult RepairRags([FromQuery] string? query = null)
+    {
+        return Accepted(_jobs.EnqueueRagsRepair(query));
+    }
 }

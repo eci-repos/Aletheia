@@ -2,7 +2,7 @@
 
 **Sprint:** Agentic Tooling for Domain-Specific Grounding
 
-**Status:** Planned
+**Status:** Completed
 
 #### Objective
 Formalize the **agentic tool-calling framework** for the Copilot by auditing and exposing existing service resources as **Semantic Kernel Plugins**. This ensures that domain-specific queries (e.g., "RFP") trigger a mandatory "fetch" from the local **Aletheia Knowledge Estate** instead of relying on model training data.
@@ -51,6 +51,14 @@ The repository is the source of truth. This sprint must utilize the existing **C
 *   **Success Metric:** The **Execution Plan** identifies a tool call to the local repository. The final response summarizes only the 2 RFPs in the WRAGS repository with accompanying citations.
 *   **Telemetry Metric:** The **Telemetry Panel** indicates that the response was generated using the "Repository Plugin" rather than general knowledge.
 *   **Build/Test:** Execute `dotnet test` on `RAGS.UnitTests` to ensure no regressions in the planning or execution engine.
+
+#### Completion Notes
+*   `AletheiaKnowledgePlugin` exposes RAGS, GraphRAG, LazyGraphRAG, global graph search, source resolution, and ingestion functions with `[KernelFunction]` metadata.
+*   `RepositoryToolPlugin` exposes repository-facing tool names for local knowledge search, GraphRAG search, and source resolution.
+*   `AIServiceCollectionExtensions.AddAletheiaAI` registers both plugins on the live Semantic Kernel instance.
+*   `SemanticKernelPluginRegistrationTests.AddAletheiaAI_registers_agentic_knowledge_plugins_on_kernel` verifies the Kernel contains the expected callable functions.
+*   `ChatPlanningServiceTests` verifies RFP prompts produce mandatory tool-call plans.
+*   `ChatExecutionEngine` preserves mandatory tool grounding even when the selected GraphRAG/global graph tool has no communities or summaries yet by falling back to `AletheiaKnowledgePlugin.SearchRags` and recording the effective tool in telemetry.
 
 ---
 

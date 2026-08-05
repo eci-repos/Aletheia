@@ -1,0 +1,98 @@
+@implements IDisposable
+@using Aletheia.RAGS.Abstractions.Models
+@inject CopilotStateService CopilotState
+
+<aside class="chats-panel @(isOpen ? "open" : "collapsed")" aria-label="Chat history">
+    <button class="chats-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle chat history">
+        <span>Chats</span>
+        @if (CopilotState.RecentSessions.Count > 0)
+        {
+            <span class="chats-count">@CopilotState.RecentSessions.Count</span>
+        }
+    </button>
+
+    @if (isOpen)
+    {
+        <div class="chats-shell">
+            <div class="chats-header">
+                <div>
+                    <h2>Chats</h2>
+                    <div class="chats-subtitle">Past conversations</div>
+                </div>
+                <div class="chats-actions">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="ClearAsync" disabled="@(!CopilotState.RecentSessions.Any())">
+                        Clear
+                    </button>
+                </div>
+            </div>
+            <div class="chats-list">
+                @if (!CopilotState.RecentSessions.Any())
+                {
+                    <div class="chats-empty">No past conversations yet.</div>
+                }
+                @foreach (var session in CopilotState.RecentSessions)
+                {
+                    <div class="chats-item">
+                        <button class="chats-open" type="button" @onclick="() => Open(session)">
+                            <span class="chats-title">@session.Title</span>
+                            <span class="chats-meta">@session.Messages.Count msg(s) · @session.LastActivity.ToLocalTime().ToString("g")</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary chats-delete" type="button" @onclick="() => RemoveAsync(session.Id)" aria-label="Delete conversation">
+                            &times;
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</aside>
+
+@code {
+    private bool isOpen;
+
+    protected override void OnInitialized()
+    {
+        CopilotState.RecentSessionsChanged += HandleChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await CopilotState.LoadRecentSessionsAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void HandleChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Toggle()
+    {
+        isOpen = !isOpen;
+    }
+
+    private void Open(ChatSession session)
+    {
+        CopilotState.OpenSession(session);
+    }
+
+    private async Task RemoveAsync(Guid sessionId)
+    {
+        await CopilotState.RemoveRecentSessionAsync(sessionId);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearAsync()
+    {
+        await CopilotState.ClearRecentSessionsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        CopilotState.RecentSessionsChanged -= HandleChanged;
+    }
+}

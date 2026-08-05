@@ -8,7 +8,7 @@
 <div class="copilot-progress-card card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Background Execution</span>
-        <span class="badge @StatusBadgeClass">@Progress.Status</span>
+        <span class="badge @StatusBadgeClass">@FormatJobStatus(Progress.Status)</span>
     </div>
     <div class="card-body">
         <div class="mb-3">
@@ -39,7 +39,7 @@
             @foreach (var step in Progress.Steps.OrderBy(s => s.Order))
             {
                 <li class="list-group-item py-1 d-flex align-items-center">
-                    <span class="badge @StepBadgeClass(step) me-2">@step.Status</span>
+                    <span class="badge @StepBadgeClass(step) me-2">@FormatStepStatus(step.Status)</span>
                     <span>@step.Name</span>
                     @if (!string.IsNullOrWhiteSpace(step.Detail) && step.Status == ChatProgressStepStatus.Running)
                     {
@@ -62,6 +62,14 @@
                     <p class="mb-1"><strong>Duration:</strong> @Telemetry.ElapsedSeconds.ToString("F1")s (estimate @Telemetry.EstimatedSecondsMin-@Telemetry.EstimatedSecondsMax s)</p>
                     <p class="mb-1"><strong>Tokens:</strong> @Telemetry.PromptTokens prompt + @Telemetry.CompletionTokens completion (@Telemetry.TokensPerSecond.ToString("F2")/s)</p>
                     <p class="mb-1"><strong>Retrieval:</strong> @Telemetry.RetrievalCount chunks (estimate @Telemetry.EstimatedRetrievalCount) | <strong>Citations:</strong> @Telemetry.CitationCount</p>
+                    @if (!string.IsNullOrWhiteSpace(Telemetry.RetrievalStrategy))
+                    {
+                        <p class="mb-1"><strong>Retrieval strategy:</strong> @Telemetry.RetrievalStrategy</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(Telemetry.ToolName))
+                    {
+                        <p class="mb-1"><strong>Tool:</strong> @Telemetry.ToolName (@Telemetry.ToolInvocationCount invocation@(Telemetry.ToolInvocationCount == 1 ? string.Empty : "s"))</p>
+                    }
                     <p class="mb-1"><strong>Model calls:</strong> @Telemetry.LlmCallCount (estimate @Telemetry.EstimatedLlmCalls)</p>
                     <p class="mb-1"><strong>Alignment confidence:</strong> @Telemetry.AlignmentConfidence.ToString("P0")</p>
                     <p class="mb-0 text-muted small">@Telemetry.ConfidenceBasis</p>
@@ -160,5 +168,25 @@
         ChatProgressStepStatus.Failed => "bg-danger",
         ChatProgressStepStatus.Skipped => "bg-secondary",
         _ => "bg-light text-dark"
+    };
+
+    public static string FormatJobStatus(ChatJobStatus status) => status switch
+    {
+        ChatJobStatus.Queued => "Queued",
+        ChatJobStatus.Running => "Running",
+        ChatJobStatus.Succeeded => "Completed",
+        ChatJobStatus.Failed => "Failed",
+        ChatJobStatus.Cancelled => "Cancelled",
+        _ => status.ToString()
+    };
+
+    public static string FormatStepStatus(ChatProgressStepStatus status) => status switch
+    {
+        ChatProgressStepStatus.Pending => "Pending",
+        ChatProgressStepStatus.Running => "Running",
+        ChatProgressStepStatus.Completed => "Done",
+        ChatProgressStepStatus.Failed => "Failed",
+        ChatProgressStepStatus.Skipped => "Skipped",
+        _ => status.ToString()
     };
 }

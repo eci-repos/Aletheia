@@ -13,4 +13,12 @@ public class AIProviderOptions
     public string? ApiKey { get; set; }
 
     public string DefaultModel { get; set; } = string.Empty;
+
+    public int? ContextLength { get; set; }
+
+    public int? MaxOutputTokens { get; set; }
+
+    public int? RequestTimeoutSeconds { get; set; }
+
+    public int? BatchSize { get; set; }
 }

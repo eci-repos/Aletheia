@@ -5,16 +5,27 @@
 @implements IDisposable
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
+@inject CopilotStateService CopilotState
+@inject IJSRuntime JS
 
 <PageTitle>AI Copilot</PageTitle>
 
 <div class="copilot-page">
     <h3>AI Copilot</h3>
 
-    <div class="copilot-layout">
+    <div class="copilot-layout @LayoutClass" style="@LayoutStyle">
         <div class="copilot-conversation-column">
             <div class="card copilot-conversation-card">
-                <div class="card-header bg-primary text-white">Conversation</div>
+                <div class="card-header bg-primary text-white d-flex align-items-center justify-content-between">
+                    <span>Conversation</span>
+                    <div class="copilot-header-actions">
+                        <button class="btn btn-sm btn-light" @onclick="ResetChatAsync">New chat</button>
+                        @if (_executionPanelCollapsed)
+                        {
+                            <button class="btn btn-sm btn-light" @onclick="RestoreExecutionPanelAsync">Show execution</button>
+                        }
+                    </div>
+                </div>
                 <div class="card-body copilot-conversation-body">
                     @if (_session.Messages.Count == 0)
                     {
@@ -60,27 +71,37 @@
                         <div class="alert alert-warning py-2 mb-2">@_chatError</div>
                     }
                     <div class="input-group copilot-input-group">
-                        <select class="form-select copilot-format-select" @bind="_outputFormat" disabled="@IsInputDisabled" aria-label="Response format">
+                        <select class="form-select copilot-format-select" value="@_outputFormat" @onchange="UpdateOutputFormatAsync" disabled="@IsInputDisabled" aria-label="Response format">
                             <option value="auto">Auto</option>
                             <option value="summary">Summary</option>
                             <option value="table">Table</option>
                             <option value="bullets">Bullets</option>
                             <option value="json">JSON</option>
                         </select>
-                        <input type="text" class="form-control" @bind="_userInput" @bind:event="oninput" placeholder="Ask a question..." @onkeydown="HandleKeyPress" />
+                        <input type="text" class="form-control" value="@_userInput" @oninput="UpdateUserInputAsync" placeholder="Ask a question..." @onkeydown="HandleKeyPress" />
                         <button class="btn btn-primary" @onclick="SendChat" disabled="@IsInputDisabled">Send</button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="copilot-plan-column">
-            @if (_pendingPlan is not null)
+        @if (!_executionPanelCollapsed)
+        {
+            <button class="copilot-resize-handle" title="Resize execution panel" aria-label="Resize execution panel" @onpointerdown="StartResizeAsync"></button>
+        }
+
+        <div class="copilot-plan-column" aria-hidden="@_executionPanelCollapsed">
+            <div class="copilot-side-header">
+                <span>Execution</span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CollapseExecutionPanelAsync">Close</button>
+            </div>
+
+            @if (IsPlanPreviewVisible)
             {
                 <PlanPreview
                     Plan="_pendingPlan"
                     IsBusy="_isBusy"
-                    StatusMessage="_planStatusMessage"
+                    StatusMessage="@_planStatusMessage"
                     OnApprove="ApprovePlan"
                     OnRevise="RevisePlan"
                     OnCancel="CancelPlan" />
@@ -93,6 +114,16 @@
                     Telemetry="_telemetry"
                     IsCancelling="_isCancelling"
                     OnCancel="CancelJob" />
+            }
+
+            @if (_pendingPlan is not null && !IsPlanPreviewVisible && _progress is null)
+            {
+                <div class="copilot-panel-empty text-muted">Execution queued. Progress will appear shortly.</div>
+            }
+
+            @if (_pendingPlan is null && _progress is null)
+            {
+                <div class="copilot-panel-empty text-muted">No active execution.</div>
             }
         </div>
     </div>
@@ -109,22 +140,90 @@
     private ChatProgressRecord? _progress;
     private ChatExecutionTelemetry? _telemetry;
     private Guid? _activeJobId;
+    private Action<ChatSession>? _sessionOpenedHandler;
     private bool _isBusy = false;
     private bool _isCancelling = false;
     private string _planStatusMessage = string.Empty;
     private CancellationTokenSource _pollingCts = new();
+    private bool _stateRestored;
+    private bool _executionPanelCollapsed;
+    private double _executionPanelWidth = 360;
+    private DotNetObjectReference<Index>? _dotNetRef;
+    private Guid? _chatActivityId;
+    private readonly HashSet<string> _loggedProgressMessages = new(StringComparer.Ordinal);
 
     private bool IsInputDisabled => _isChatting || _isBusy;
 
-    protected override void OnInitialized()
+    private bool IsPlanPreviewVisible => _pendingPlan is not null && !_activeJobId.HasValue && _progress is null;
+
+    private string LayoutClass => _executionPanelCollapsed ? "execution-collapsed" : string.Empty;
+
+    private string LayoutStyle => $"--copilot-side-width: {_executionPanelWidth:0}px;";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _ = RestoreActiveExecutionAsync();
+        if (firstRender)
+        {
+            _sessionOpenedHandler = session => _ = HandleSessionOpened(session);
+            CopilotState.SessionOpened += _sessionOpenedHandler;
+            await CopilotState.LoadRecentSessionsAsync();
+        }
+
+        if (!firstRender || _stateRestored)
+        {
+            return;
+        }
+
+        _stateRestored = true;
+        var state = await CopilotState.RestoreAsync();
+        ApplyState(state);
+        await InvokeAsync(StateHasChanged);
+
+        if (_pendingPlan is not null || _activeJobId.HasValue)
+        {
+            _ = StartProgressPollingAsync();
+        }
+        else
+        {
+            _ = RestoreActiveExecutionAsync();
+        }
     }
 
     public void Dispose()
     {
+        if (_sessionOpenedHandler is not null)
+        {
+            CopilotState.SessionOpened -= _sessionOpenedHandler;
+        }
         _pollingCts.Cancel();
         _pollingCts.Dispose();
+        _dotNetRef?.Dispose();
+    }
+
+    private async Task HandleSessionOpened(ChatSession session)
+    {
+        if (_session.Messages.Count > 0 && _session.Id != session.Id)
+        {
+            await CopilotState.SaveCurrentSessionToHistoryAsync(_session);
+        }
+
+        _pollingCts.Cancel();
+        _session = session;
+        _userInput = string.Empty;
+        _outputFormat = "auto";
+        _isChatting = false;
+        _isBusy = false;
+        _isCancelling = false;
+        _chatError = string.Empty;
+        _pendingPlan = null;
+        _progress = null;
+        _telemetry = null;
+        _activeJobId = null;
+        _planStatusMessage = string.Empty;
+        _loggedProgressMessages.Clear();
+
+        await CopilotState.SaveAsync(new CopilotClientState { Session = session });
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task HandleKeyPress(KeyboardEventArgs e)
@@ -143,6 +242,8 @@
         }
 
         var userMessage = _userInput.Trim();
+        ResetExecutionPanel();
+        _chatActivityId = ActivityLog.Begin("Copilot", "Chat request", $"Prompt sent for planning: {TrimForActivity(userMessage)}");
         _isChatting = true;
         _chatError = string.Empty;
         _userInput = string.Empty;
@@ -156,25 +257,42 @@
 
         try
         {
-            _pendingPlan = await ApiClient.PlanChatAsync(userMessage);
+            var history = _session.Messages.Count > 1
+                ? _session.Messages.Take(_session.Messages.Count - 1).ToList()
+                : new List<ChatMessage>();
+            _pendingPlan = await ApiClient.PlanChatAsync(userMessage, _session.Id, history);
             if (_pendingPlan is null)
             {
-                _chatError = "Unable to create execution plan.";
+                _chatError = "Planning failed: the API returned no execution plan.";
+                if (_chatActivityId.HasValue)
+                {
+                    ActivityLog.Fail(_chatActivityId.Value, "Copilot", "Planning failed", _chatError);
+                }
+
                 return;
             }
 
-            if (!_pendingPlan.RequiresApproval)
-            {
-                await ApprovePlan();
-            }
+            _planStatusMessage = _pendingPlan.RequiresApproval
+                ? "Review the plan and click Run to start."
+                : "Ready to run. Review the plan and click Run to start.";
+            ActivityLog.Trace(
+                _chatActivityId.Value,
+                "Copilot",
+                "Execution plan",
+                $"Plan ready. Mode: {_pendingPlan.Mode}; tool: {(_pendingPlan.RequiresToolCall ? _pendingPlan.ToolName : "repository lookup will be enforced if configured")}.");
         }
         catch (Exception ex)
         {
             _chatError = $"Planning failed: {ex.Message}";
+            if (_chatActivityId.HasValue)
+            {
+                ActivityLog.Fail(_chatActivityId.Value, "Copilot", "Planning failed", ex.Message);
+            }
         }
         finally
         {
             _isChatting = false;
+            await SaveStateAsync();
         }
     }
 
@@ -187,6 +305,9 @@
 
         _isBusy = true;
         _planStatusMessage = string.Empty;
+        _chatActivityId ??= ActivityLog.Begin("Copilot", "Chat request", $"Executing prompt: {TrimForActivity(_pendingPlan.Prompt)}");
+        ActivityLog.Trace(_chatActivityId.Value, "Copilot", "Approval accepted", "Execution plan approved; starting background chat job.");
+        await SaveStateAsync();
 
         try
         {
@@ -194,6 +315,7 @@
             if (approved is null)
             {
                 _planStatusMessage = "Approval failed.";
+                ActivityLog.Fail(_chatActivityId.Value, "Copilot", "Approval failed", "The API did not approve the chat plan.");
                 return;
             }
 
@@ -202,19 +324,26 @@
             if (job is null)
             {
                 _planStatusMessage = "Execution failed to start.";
+                ActivityLog.Fail(_chatActivityId.Value, "Copilot", "Execution failed to start", "The API did not return a chat job.");
                 return;
             }
 
             _activeJobId = job.JobId;
+            _chatActivityId = job.JobId;
+            ActivityLog.UpsertChatJob(job);
+            ActivityLog.Trace(_chatActivityId.Value, "Copilot", "Background execution", $"Job {job.JobId:N} queued. Stage: {job.Stage}.");
+            await SaveStateAsync();
             await StartProgressPollingAsync();
         }
         catch (Exception ex)
         {
             _planStatusMessage = $"Approval error: {ex.Message}";
+            ActivityLog.Fail(_chatActivityId.Value, "Copilot", "Approval error", ex.Message);
         }
         finally
         {
             _isBusy = false;
+            await SaveStateAsync();
         }
     }
 
@@ -222,6 +351,7 @@
     {
         _pendingPlan = null;
         _planStatusMessage = string.Empty;
+        await SaveStateAsync();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -239,11 +369,13 @@
             if (cancelled is not null)
             {
                 _pendingPlan = cancelled;
+                await SaveStateAsync();
             }
         }
         finally
         {
             _isBusy = false;
+            await SaveStateAsync();
         }
     }
 
@@ -262,6 +394,7 @@
         finally
         {
             _isCancelling = false;
+            await SaveStateAsync();
         }
     }
 
@@ -270,10 +403,11 @@
         _pollingCts.Cancel();
         _pollingCts.Dispose();
         _pollingCts = new CancellationTokenSource();
+        var pollingToken = _pollingCts.Token;
 
         try
         {
-            while (!_pollingCts.Token.IsCancellationRequested)
+            while (!pollingToken.IsCancellationRequested)
             {
                 await RefreshProgressAsync();
 
@@ -308,10 +442,11 @@
                     }
 
                     _pendingPlan = null;
+                    await SaveStateAsync();
                     break;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(2), _pollingCts.Token).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(2), pollingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -329,11 +464,19 @@
         var progress = await ApiClient.GetChatPlanProgressAsync(_pendingPlan.PlanId);
         if (progress is not null)
         {
+            if (progress.PlanId != _pendingPlan.PlanId)
+            {
+                return;
+            }
+
             _progress = progress;
             if (progress.JobId != Guid.Empty)
             {
                 _activeJobId = progress.JobId;
             }
+
+            ActivityLog.UpsertChatJob(ToChatJobSnapshot(progress));
+            MirrorProgressMessagesToActivity(progress);
 
             if (progress.Telemetry is not null)
             {
@@ -342,12 +485,14 @@
             else if (_activeJobId.HasValue && progress.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed)
             {
                 var telemetry = await ApiClient.GetChatJobTelemetryAsync(_activeJobId.Value);
-                if (telemetry is not null)
-                {
-                    _telemetry = telemetry;
-                }
+                _telemetry = telemetry;
+            }
+            else
+            {
+                _telemetry = null;
             }
 
+            await SaveStateAsync();
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -356,14 +501,16 @@
     {
         try
         {
-            var jobs = await ApiClient.GetIngestionJobsAsync(200);
-            var chatJob = jobs?.OfType<ChatJobSnapshot>().FirstOrDefault();
+            var jobs = await ApiClient.GetChatJobsAsync(200);
+            var chatJob = jobs?.FirstOrDefault(job => job.Status is ChatJobStatus.Queued or ChatJobStatus.Running);
             if (chatJob is null)
             {
                 return;
             }
 
             _activeJobId = chatJob.JobId;
+            _chatActivityId = chatJob.JobId;
+            ActivityLog.UpsertChatJob(chatJob);
             _progress = await ApiClient.GetChatPlanProgressAsync(chatJob.PlanId);
             if (_progress is not null)
             {
@@ -374,6 +521,7 @@
                 };
             }
 
+            await SaveStateAsync();
             await StartProgressPollingAsync();
         }
         catch
@@ -381,25 +529,190 @@
         }
     }
 
-    private static ChatSession CloneSession(ChatSession session)
+    private void ResetExecutionPanel()
     {
-        return new ChatSession
+        _pollingCts.Cancel();
+        _pendingPlan = null;
+        _progress = null;
+        _telemetry = null;
+        _activeJobId = null;
+        _isCancelling = false;
+        _planStatusMessage = string.Empty;
+        _chatActivityId = null;
+        _loggedProgressMessages.Clear();
+    }
+
+    private async Task ResetChatAsync()
+    {
+        _pollingCts.Cancel();
+        if (_session.Messages.Count > 0)
         {
-            Id = session.Id,
-            Title = session.Title,
-            CreatedAt = session.CreatedAt,
-            LastActivity = session.LastActivity,
-            Messages = session.Messages
-                .Select(message => new ChatMessage
-                {
-                    Id = message.Id,
-                    Role = message.Role,
-                    Content = message.Content,
-                    Timestamp = message.Timestamp,
-                    Stats = message.Stats
-                })
-                .ToList()
+            await CopilotState.SaveCurrentSessionToHistoryAsync(_session);
+        }
+
+        _session = new ChatSession();
+        _userInput = string.Empty;
+        _outputFormat = "auto";
+        _isChatting = false;
+        _isBusy = false;
+        _isCancelling = false;
+        _chatError = string.Empty;
+        _pendingPlan = null;
+        _progress = null;
+        _telemetry = null;
+        _activeJobId = null;
+        _planStatusMessage = string.Empty;
+        _executionPanelCollapsed = false;
+        _executionPanelWidth = 360;
+        _chatActivityId = null;
+        _loggedProgressMessages.Clear();
+
+        await CopilotState.ClearAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task UpdateUserInputAsync(ChangeEventArgs args)
+    {
+        _userInput = args.Value?.ToString() ?? string.Empty;
+        await SaveStateAsync();
+    }
+
+    private async Task UpdateOutputFormatAsync(ChangeEventArgs args)
+    {
+        _outputFormat = args.Value?.ToString() ?? "auto";
+        await SaveStateAsync();
+    }
+
+    private async Task CollapseExecutionPanelAsync()
+    {
+        _executionPanelCollapsed = true;
+        await SaveStateAsync();
+    }
+
+    private async Task RestoreExecutionPanelAsync()
+    {
+        _executionPanelCollapsed = false;
+        await SaveStateAsync();
+    }
+
+    private async Task StartResizeAsync(PointerEventArgs args)
+    {
+        _dotNetRef ??= DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("aletheia.startCopilotResize", _dotNetRef, args.ClientX, _executionPanelWidth);
+    }
+
+    [JSInvokable]
+    public async Task UpdateExecutionPanelWidth(double width)
+    {
+        _executionPanelWidth = CopilotStateService.ClampPanelWidth(width);
+        await SaveStateAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyState(CopilotClientState state)
+    {
+        _session = state.Session;
+        _userInput = state.UserInput;
+        _outputFormat = state.OutputFormat;
+        _pendingPlan = state.PendingPlan;
+        _progress = state.Progress;
+        _telemetry = state.Telemetry;
+        _activeJobId = state.ActiveJobId;
+        _isBusy = false;
+        _isCancelling = false;
+        _planStatusMessage = state.PlanStatusMessage;
+        _chatError = state.ChatError;
+        _executionPanelCollapsed = state.ExecutionPanelCollapsed;
+        _executionPanelWidth = CopilotStateService.ClampPanelWidth(state.ExecutionPanelWidth);
+    }
+
+    private Task SaveStateAsync()
+    {
+        return CopilotState.SaveAsync(new CopilotClientState
+        {
+            Session = _session,
+            UserInput = _userInput,
+            OutputFormat = _outputFormat,
+            PendingPlan = _pendingPlan,
+            Progress = _progress,
+            Telemetry = _telemetry,
+            ActiveJobId = _activeJobId,
+            IsBusy = _isBusy,
+            IsCancelling = _isCancelling,
+            PlanStatusMessage = _planStatusMessage,
+            ChatError = _chatError,
+            ExecutionPanelCollapsed = _executionPanelCollapsed,
+            ExecutionPanelWidth = _executionPanelWidth
+        });
+    }
+
+    private void MirrorProgressMessagesToActivity(ChatProgressRecord progress)
+    {
+        if (!progress.Messages.Any())
+        {
+            return;
+        }
+
+        _chatActivityId ??= ActivityLog.Begin("Copilot", "Chat request", $"Restored chat progress: {TrimForActivity(progress.Prompt)}");
+        foreach (var message in progress.Messages.OrderBy(message => message.Timestamp))
+        {
+            var key = $"{progress.JobId:N}|{message.Timestamp:O}|{message.Stage}|{message.Message}";
+            if (!_loggedProgressMessages.Add(key))
+            {
+                continue;
+            }
+
+            ActivityLog.Trace(_chatActivityId.Value, "Copilot", message.Stage, message.Message);
+        }
+
+        if (progress.Status == ChatJobStatus.Succeeded)
+        {
+            ActivityLog.Complete(_chatActivityId.Value, "Copilot", "Chat completed", "Background chat execution completed.");
+        }
+        else if (progress.Status == ChatJobStatus.Failed)
+        {
+            ActivityLog.Fail(_chatActivityId.Value, "Copilot", "Chat failed", progress.Error ?? "Background chat execution failed.");
+        }
+        else if (progress.Status == ChatJobStatus.Cancelled)
+        {
+            ActivityLog.Warn(_chatActivityId.Value, "Copilot", "Chat cancelled", progress.Error ?? "Background chat execution was cancelled.");
+        }
+    }
+
+    private static ChatJobSnapshot ToChatJobSnapshot(ChatProgressRecord progress)
+    {
+        var latestHeartbeat = progress.Heartbeats
+            .OrderByDescending(heartbeat => heartbeat.Timestamp)
+            .FirstOrDefault();
+
+        var latestStep = progress.Steps
+            .OrderByDescending(step => step.Status == ChatProgressStepStatus.Running)
+            .ThenByDescending(step => step.Order)
+            .FirstOrDefault();
+
+        return new ChatJobSnapshot
+        {
+            JobId = progress.JobId,
+            PlanId = progress.PlanId,
+            Prompt = progress.Prompt,
+            Status = progress.Status,
+            Stage = latestHeartbeat?.Stage ?? latestStep?.Name ?? "Chat",
+            PercentComplete = progress.PercentComplete,
+            Detail = latestHeartbeat?.Detail ?? latestStep?.Detail ?? progress.PartialResult ?? string.Empty,
+            CreatedAt = progress.CreatedAt,
+            StartedAt = progress.StartedAt,
+            LastHeartbeatAt = latestHeartbeat?.Timestamp ?? progress.CompletedAt ?? progress.StartedAt ?? progress.CreatedAt,
+            CompletedAt = progress.CompletedAt,
+            Result = progress.FinalResult,
+            Error = progress.Error
         };
+    }
+
+    private static string TrimForActivity(string value)
+    {
+        const int maxLength = 220;
+        var compact = value.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+        return compact.Length <= maxLength ? compact : $"{compact[..maxLength]}...";
     }
 
     private static MarkupString RenderMarkdown(string content)

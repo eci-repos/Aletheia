@@ -1,5 +1,6 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
+using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.Repository.Infrastructure.PostgreSQL.Connections;
 using Dapper;
 using Npgsql;
@@ -56,7 +57,13 @@ public sealed class TaxonomyService : ITaxonomyProvider
         try
         {
             var names = await connection.QueryAsync<string>(sql, new { CategoryName = category }).ConfigureAwait(false);
-            return Result<IReadOnlyCollection<string>>.Success(names.ToList());
+            var normalized = names
+                .Select(KnowledgeTermNormalizer.NormalizeLabel)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return Result<IReadOnlyCollection<string>>.Success(normalized);
         }
         catch (Exception ex)
         {

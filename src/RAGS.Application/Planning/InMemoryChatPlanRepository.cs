@@ -51,6 +51,11 @@ public sealed class InMemoryChatPlanRepository : IChatPlanRepository
             EstimatedOutputTokens = existing.EstimatedOutputTokens,
             EstimatedRetrievalCount = existing.EstimatedRetrievalCount,
             RequiresApproval = existing.RequiresApproval,
+            RequiresToolCall = existing.RequiresToolCall,
+            ToolName = existing.ToolName,
+            ToolArguments = existing.ToolArguments,
+            SessionId = existing.SessionId,
+            HistoryMessages = existing.HistoryMessages,
             ReviewedBy = reviewedBy ?? existing.ReviewedBy,
             ReviewedAt = status is ChatPlanStatus.Approved or ChatPlanStatus.Cancelled
                 ? DateTimeOffset.UtcNow

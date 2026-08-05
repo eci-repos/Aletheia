@@ -26,12 +26,14 @@ COPY ["src/KnowledgeGraph.Application/KnowledgeGraph.Application.csproj", "src/K
 COPY ["src/KnowledgeGraph.Infrastructure.Neo4j/KnowledgeGraph.Infrastructure.Neo4j.csproj", "src/KnowledgeGraph.Infrastructure.Neo4j/"]
 RUN dotnet restore "src/Repository.API/Repository.API.csproj"
 COPY . .
-RUN dotnet build "src/Repository.API/Repository.API.csproj" -c Release -o /app/build
+WORKDIR /src/src/Repository.API
+RUN dotnet publish "Repository.API.csproj" -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
 FROM build AS publish
-RUN dotnet publish "src/Repository.API/Repository.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Repository.API.csproj" -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+COPY docs/doc-templates /app/docs/doc-templates
 ENTRYPOINT ["dotnet", "Repository.API.dll"]

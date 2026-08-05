@@ -16,6 +16,15 @@
 - Internal search surfaces (raw Wiki/WRAGS modes, GraphRAG, LazyGraphRAG, global-graph) are gated by FeatureFlags:ShowInternalSearch (default false). Gated endpoints return HTTP 404; the Web UI hides the controls. InternalSearchGate (RAGS.Application) is the single source of truth for the flag.
 - DocumentBriefService depends on IDocumentBriefGenerator; register both as singletons with the other RAGS services.
 
+## Duplicate Uploads / Document Updates (Sprint 56)
+
+- Uploads are fingerprinted server-side with SHA-256 before any storage write; the hash is persisted in `file_metadata.content_hash` (`init.sql` + idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql`).
+- `IDuplicateDetectionService` (singleton, `Aletheia.Repository.Application`) resolves the newest row with the same content hash. Exact-duplicate new uploads return HTTP 409 `{ duplicate, noChange, message, existingFileId, existingFileName, existingUploadedAt, existingVersion }`; nothing is stored or ingested. The Web Upload page shows "Duplicate - already exists" and skips ingestion tracking.
+- Document updates use `POST /api/files/upload` with optional `existingFileId`: same hash = no-change 409; changed file = named version snapshot (IVersioningUseCase), blob + unversioned metadata row replaced (same fileId), ingestion job enqueued with the same sourceId.
+- Replace semantics live in `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync`: before RAGS ingestion it calls `IUploadedContentKnowledgeIndexer.DeleteSourceAsync` and `IGraphProvider.DeleteSourceAsync` (Neo4j: DETACH DELETE on `n.sourceId`); `RagsService.IngestAsync` already replaces embeddings. The document-brief trigger then regenerates the Wiki brief.
+- `GET /api/files/duplicates` (role Administrator) lists rows sharing a content hash for manual cleanup; no automatic deletion.
+- Versioning is metadata-level: `GET /api/versions` lists history, but all versions share the single MinIO blob per fileId (documented limitation).
+
 ## Build & Test
 
 - Build: `dotnet build Aletheia.slnx`
@@ -70,3 +79,4 @@ Current-Sprint.md takes precedence.
 
 Do not request clarification if Current-Sprint.md clearly identifies
 the authorized work.
+

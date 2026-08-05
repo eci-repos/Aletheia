@@ -36,4 +36,10 @@ public interface IGraphProvider
     Task<Result<bool>> GraphExistsAsync(CancellationToken cancellationToken = default);
 
     Task<Result> ClearAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Removes all nodes and relationships attributed to the given source (nodes whose sourceId property matches), including source/chunk/entity nodes.</summary>
+    Task<Result> DeleteSourceAsync(string sourceId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure("DeleteSourceAsync is not supported by this provider."));
+    }
 }

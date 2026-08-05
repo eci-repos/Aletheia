@@ -2,7 +2,7 @@
 
 **Sprint:** Chat State Fidelity and Grounding Hardening
 
-**Status:** Active
+**Status:** Completed
 
 #### Objective
 Resolve UI reporting discrepancies where successful execution steps are erroneously marked as "Failed" and harden the **Copilot's** system instructions to ensure strict grounding within the **Aletheia Knowledge Estate (WRAGS/Repository)**, eliminating external model hallucinations.
@@ -52,6 +52,13 @@ The repository is the source of truth. This sprint is a remediation effort for t
 *   **Success Metric:** The response must contain **zero** general internet facts and at least one citation from the internal Repository or WRAGS Wiki.
 *   **UI Metric:** All steps in the Progress Panel (Planning, Retrieving Context, Synthesizing, Completed) must show green "Completed" indicators upon a successful answer.
 *   **State Metric:** Confirm `GET /api/copilot/jobs/chat/{id}` returns `Succeeded` and the `ChatProgressRecord` steps are all `Completed`.
+
+#### Completion Notes
+*   `ChatExecutionEngineTests.Engine_marks_all_successful_steps_completed` verifies successful jobs do not leave `Planning` or `Completed` steps in `Failed` state.
+*   `ProgressPanelTests.Completed_step_renders_success_badge` verifies completed steps render as success badges.
+*   `ChatExecutionEngineTests.Engine_executes_rfp_ten_year_scenario_with_mandatory_tool_and_grounding_telemetry` verifies the RFP scenario completes with mandatory internal tool context and citation telemetry.
+*   Follow-up hardening: mandatory GraphRAG tool failures caused by missing communities now fall back to semantic RAGS, and actual tool errors mark the `Call repository tool` step failed instead of showing a false completed tool step.
+*   RAGS and Web unit tests pass after remediation.
 
 ---
 

@@ -52,6 +52,7 @@ MINIO_ROOT_PASSWORD=UseASecurePasswordInProduction
 ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_URLS=http://+:8080
 ALETHEIA_ADMIN_PASSWORD=UseASecureAdminPasswordInProduction
+ChatAgent__OrchestrationScriptPath=Prompts/copilot-rags-orchestration.md
 ```
 
 > **Security Note**: Change all default passwords before deploying to any non-local environment.
@@ -120,18 +121,16 @@ curl -u neo4j:<password> http://localhost:7474/dbms/health
 3. Open Search Center.
 4. Ingest a short test note and confirm the page reports a queued ingestion job.
 5. Search for the note topic in Semantic mode.
-6. Search for the same topic in GraphRAG mode and confirm the expansion-hop control is visible.
-7. Search for the same topic in LazyGraphRAG mode and confirm the expansion-limit control is visible.
-8. Confirm that results render with rank, score, retrieval strategy, citations, and source/chunk details. GraphRAG may show strategies such as `summary-entity` or `summary-community` when summaries are available.
-9. Open Search Center in WRAGS mode and confirm saved wiki pages can be returned as retrieval results.
-10. Open WRAGS and search the same topic; confirm durable wiki entries render with citations, version, lifecycle status, retrieval strategy, related topics/pages, history, and source/chunk details.
-11. Edit one WRAGS page, confirm the version/history updates, queue regeneration, then mark the page Reviewed/Approved/Stale and confirm lifecycle changes appear.
+6. Open Search Center in WRAGS mode and confirm saved wiki pages can be returned as retrieval results.
+7. Confirm that results render with rank, score, retrieval strategy, citations, and source/chunk details.
+8. Open WRAGS and search the same topic; confirm durable wiki entries render with citations, version, lifecycle status, retrieval strategy, related topics/pages, history, and source/chunk details.
+9. Edit one WRAGS page, confirm the version/history updates, queue regeneration, then mark the page Reviewed/Approved/Stale and confirm lifecycle changes appear.
 
-GraphRAG summary generation can be slower than standard RAG ingestion. Long upload/Search Center ingestion paths now queue background jobs and expose status through `/api/jobs`.
+GraphRAG and LazyGraphRAG are active Web UI workflows in Search Center and WRAGS Wiki. Broad Copilot retrieval can use GraphRAG first and LazyGraphRAG second before falling back to Semantic RAGS.
 
 The Web UI and nginx `/api` proxy are configured with 30-minute timeouts for long-running Copilot chat responses. Ingestion should normally return quickly with a job id while enrichment continues in the API worker.
 
-LazyGraphRAG traversal budgets are expected to stop optional graph expansion, not fail the whole query. Treat Search Center traversal-budget errors as regressions unless the request hit a hard timeout.
+LazyGraphRAG traversal budgets are expected to stop optional graph expansion, not fail the whole query, when testing the backend APIs directly.
 
 ## Troubleshooting
 

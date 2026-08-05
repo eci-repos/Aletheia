@@ -1,6 +1,8 @@
 @implements IDisposable
+@using System.Text
 @inject ActivityLogService ActivityLog
 @inject RepositoryApiClient ApiClient
+@inject IJSRuntime JS
 
 <aside class="activity-panel @(isOpen ? "open" : "collapsed")" aria-label="Activity log">
     <button class="activity-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle activity log">
@@ -19,10 +21,19 @@
                     <h2>Activity</h2>
                     <div class="activity-subtitle">@Subtitle</div>
                 </div>
-                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="ActivityLog.Clear" disabled="@(!ActivityLog.Entries.Any())">
-                    Clear
-                </button>
+                <div class="activity-actions">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="CopyAllTraceAsync" disabled="@(!ActivityLog.Entries.Any() && !ActivityLog.Jobs.Any())">
+                        Copy all
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="ActivityLog.Clear" disabled="@(!ActivityLog.Entries.Any())">
+                        Clear
+                    </button>
+                </div>
             </div>
+            @if (!string.IsNullOrWhiteSpace(copyStatus))
+            {
+                <div class="activity-copy-status">@copyStatus</div>
+            }
 
             <div class="activity-list">
                 @if (ActivityLog.Jobs.Any())
@@ -34,6 +45,11 @@
                             <div class="job-card-top">
                                 <span class="job-status">@job.Status</span>
                                 <time>@FormatHeartbeat(job.LastHeartbeatAt)</time>
+                            </div>
+                            <div class="job-card-actions">
+                                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => CopyJobTraceAsync(job)">
+                                    Copy trace
+                                </button>
                             </div>
                             <div class="job-title">@job.Title</div>
                             <div class="job-stage">@job.Stage</div>
@@ -78,6 +94,7 @@
     private bool isOpen;
     private Timer? timer;
     private bool polling;
+    private string copyStatus = string.Empty;
 
     private string Subtitle => ActivityLog.RunningCount == 0
         ? $"{ActivityLog.Jobs.Count} jobs · {ActivityLog.Entries.Count} events"
@@ -99,6 +116,38 @@
         _ = InvokeAsync(StateHasChanged);
     }
 
+    private async Task CopyAllTraceAsync()
+    {
+        var text = BuildTraceText(null);
+        await JS.InvokeVoidAsync("aletheia.copyText", text);
+        copyStatus = "Trace copied.";
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await InvokeAsync(() =>
+            {
+                copyStatus = string.Empty;
+                StateHasChanged();
+            });
+        });
+    }
+
+    private async Task CopyJobTraceAsync(BackgroundJobClientSnapshot job)
+    {
+        var text = BuildTraceText(job);
+        await JS.InvokeVoidAsync("aletheia.copyText", text);
+        copyStatus = $"Trace copied for {job.Title}.";
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await InvokeAsync(() =>
+            {
+                copyStatus = string.Empty;
+                StateHasChanged();
+            });
+        });
+    }
+
     private async Task PollJobsAsync()
     {
         if (polling)
@@ -115,6 +164,15 @@
                 foreach (var job in jobs)
                 {
                     ActivityLog.UpsertJob(job);
+                }
+            }
+
+            var chatJobs = await ApiClient.GetChatJobsAsync(25);
+            if (chatJobs is not null)
+            {
+                foreach (var chatJob in chatJobs)
+                {
+                    ActivityLog.UpsertChatJob(chatJob);
                 }
             }
         }
@@ -164,6 +222,59 @@
         }
 
         return $"{(int)elapsed.TotalMinutes}m ago";
+    }
+
+    private string BuildTraceText(BackgroundJobClientSnapshot? selectedJob)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Aletheia Activity Trace");
+        builder.AppendLine($"Generated: {DateTimeOffset.Now:O}");
+        builder.AppendLine();
+
+        var jobs = selectedJob is null
+            ? ActivityLog.Jobs
+            : new[] { selectedJob };
+        var entries = selectedJob is null
+            ? ActivityLog.Entries
+            : ActivityLog.Entries
+                .Where(entry => entry.ActivityId == selectedJob.JobId
+                    || entry.Message.Contains(selectedJob.JobId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    || entry.Message.Contains(selectedJob.JobId.ToString("N"), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+        if (jobs.Any())
+        {
+            builder.AppendLine("Jobs");
+            foreach (var job in jobs)
+            {
+                builder.AppendLine($"- [{job.Status}] {job.Title}");
+                builder.AppendLine($"  JobId: {job.JobId}");
+                builder.AppendLine($"  Kind: {job.Kind}");
+                builder.AppendLine($"  Stage: {job.Stage}");
+                builder.AppendLine($"  Progress: {job.PercentComplete}%");
+                builder.AppendLine($"  Detail: {job.Detail}");
+                if (!string.IsNullOrWhiteSpace(job.Error))
+                {
+                    builder.AppendLine($"  Error: {job.Error}");
+                }
+
+                builder.AppendLine($"  Created: {job.CreatedAt:O}");
+                builder.AppendLine($"  LastHeartbeat: {job.LastHeartbeatAt:O}");
+                builder.AppendLine();
+            }
+        }
+
+        if (entries.Any())
+        {
+            builder.AppendLine("Trace");
+            foreach (var entry in entries.OrderBy(entry => entry.Timestamp))
+            {
+                builder.AppendLine($"- [{StatusText(entry.Status)}] {entry.Timestamp:HH:mm:ss} {entry.Title} ({entry.Area})");
+                builder.AppendLine($"  {entry.Message}");
+            }
+        }
+
+        return builder.ToString();
     }
 
     public void Dispose()

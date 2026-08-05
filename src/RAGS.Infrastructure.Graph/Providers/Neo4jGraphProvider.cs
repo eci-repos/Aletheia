@@ -393,6 +393,30 @@ public sealed class Neo4jGraphProvider : IGraphProvider, IAsyncDisposable
         }
     }
 
+    public async Task<Result> DeleteSourceAsync(string sourceId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return Result.Failure("Source ID is required.");
+        }
+
+        const string query = @"
+            MATCH (n)
+            WHERE n.sourceId = $sourceId
+            DETACH DELETE n";
+
+        try
+        {
+            await using var session = _driver.AsyncSession();
+            await session.RunAsync(query, new { sourceId }).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"Failed to delete source graph data: {ex.Message}");
+        }
+    }
+
     private static Dictionary<string, object> BuildNodeProperties(GraphNode node)
     {
         var props = new Dictionary<string, object>(node.Properties)
@@ -516,3 +540,4 @@ public sealed class Neo4jGraphProvider : IGraphProvider, IAsyncDisposable
         await _driver.DisposeAsync().ConfigureAwait(false);
     }
 }
+

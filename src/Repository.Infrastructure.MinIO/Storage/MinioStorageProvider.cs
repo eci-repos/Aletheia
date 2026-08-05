@@ -54,7 +54,8 @@ public sealed class MinioStorageProvider : IStorageProvider
                 request.ContentType,
                 request.SizeBytes,
                 DateTimeOffset.UtcNow,
-                request.Tags);
+                request.Tags,
+                contentHash: request.ContentHash);
 
             return Result<UploadResponse>.Success(new UploadResponse(metadata));
         }
@@ -124,3 +125,4 @@ public sealed class MinioStorageProvider : IStorageProvider
         return $"{descriptor.FileId}/{descriptor.FileName}";
     }
 }
+

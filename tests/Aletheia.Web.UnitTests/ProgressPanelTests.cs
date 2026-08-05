@@ -148,6 +148,9 @@ public class ProgressPanelTests : TestContext
                 EstimatedLlmCalls = 1,
                 AlignmentConfidence = 0.92,
                 ConfidenceBasis = "Provider-reported metrics.",
+                ToolName = "AletheiaKnowledgePlugin.SearchRags",
+                ToolInvocationCount = 1,
+                RetrievalStrategy = "semantic",
                 EstimateComparisonSummary = "Duration: actual 3.5s within estimate 1-5s."
             }
         };
@@ -160,6 +163,11 @@ public class ProgressPanelTests : TestContext
         Assert.Contains("3.5s", cut.Markup);
         Assert.Contains("120", cut.Markup);
         Assert.Contains("12 chunks", cut.Markup);
+        Assert.Contains("Retrieval strategy", cut.Markup);
+        Assert.Contains("semantic", cut.Markup);
+        Assert.Contains("Tool:", cut.Markup);
+        Assert.Contains("AletheiaKnowledgePlugin.SearchRags", cut.Markup);
+        Assert.Contains("1 invocation", cut.Markup);
         Assert.Contains("Provider-reported metrics.", cut.Markup);
         Assert.Contains("Duration: actual 3.5s within estimate 1-5s.", cut.Markup);
     }

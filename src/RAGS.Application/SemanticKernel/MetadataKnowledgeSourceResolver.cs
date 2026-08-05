@@ -22,6 +22,11 @@ public sealed class MetadataKnowledgeSourceResolver : IKnowledgeSourceResolver
         "recent", "related", "requirements", "requirement", "the", "to", "what", "which", "with", "within"
     };
 
+    private static readonly HashSet<string> PrioritizedAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "rfp", "rfps", "request for proposal", "request for proposals"
+    };
+
     private readonly IMetadataRepository _metadataRepository;
     private readonly CopilotOptions _options;
 
@@ -44,6 +49,8 @@ public sealed class MetadataKnowledgeSourceResolver : IKnowledgeSourceResolver
             return Result<KnowledgeSource?>.Success(null);
         }
 
+        var prioritizedTerm = DetectPrioritizedAlias(userMessage);
+
         var result = await _metadataRepository
             .SearchAsync(new SearchRequest(null, 1, CandidateLimit), cancellationToken)
             .ConfigureAwait(false);
@@ -57,7 +64,7 @@ public sealed class MetadataKnowledgeSourceResolver : IKnowledgeSourceResolver
             .Select(metadata => new
             {
                 Metadata = metadata,
-                Score = Score(metadata.Descriptor.FileName, tokens)
+                Score = Score(metadata.Descriptor.FileName, tokens, prioritizedTerm)
             })
             .Where(candidate => candidate.Score > 0)
             .OrderByDescending(candidate => candidate.Score)
@@ -135,9 +142,10 @@ public sealed class MetadataKnowledgeSourceResolver : IKnowledgeSourceResolver
         }
     }
 
-    private static int Score(string fileName, IReadOnlyList<string> tokens)
+    private static int Score(string fileName, IReadOnlyList<string> tokens, string? prioritizedTerm = null)
     {
         var score = 0;
+        var fileNameLower = fileName.ToLowerInvariant();
         foreach (var token in tokens)
         {
             if (fileName.Contains(token, StringComparison.OrdinalIgnoreCase))
@@ -146,6 +154,25 @@ public sealed class MetadataKnowledgeSourceResolver : IKnowledgeSourceResolver
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(prioritizedTerm) && fileNameLower.Contains(prioritizedTerm.ToLowerInvariant()))
+        {
+            score += 10;
+        }
+
         return score;
+    }
+
+    private static string? DetectPrioritizedAlias(string userMessage)
+    {
+        var normalized = userMessage.Replace("-", " ", StringComparison.OrdinalIgnoreCase);
+        foreach (var alias in PrioritizedAliases)
+        {
+            if (normalized.Contains(alias, StringComparison.OrdinalIgnoreCase))
+            {
+                return alias;
+            }
+        }
+
+        return null;
     }
 }

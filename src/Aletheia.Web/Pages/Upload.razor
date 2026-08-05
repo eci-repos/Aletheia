@@ -2,17 +2,34 @@
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
 @inject RecentGraphContextService RecentGraphContext
+@inject NavigationManager Navigation
 
 <PageTitle>Upload - Aletheia</PageTitle>
 
 <h1>Upload Files</h1>
 
-<div class="upload-container">
+@if (_updateFileId.HasValue)
+{
+    <div class="alert alert-primary">
+        <strong>Update mode:</strong> the file you select will replace <em>@_updateFileName</em> as a new version of that
+        document. The existing document keeps its identity, prior versions stay in its history, and search/Wiki content is replaced after ingestion.
+    </div>
+}
+else
+{
     <div class="alert alert-info">
         Uploads are processed in the background. When a file finishes ingesting you will see its status change to
         <strong>Ready</strong> and a notification entry in the Activity panel — at that point the document is searchable
         and a Wiki brief is generated automatically.
     </div>
+}
+
+@if (_notice is not null)
+{
+    <div class="alert @_notice.Value.Class">@_notice.Value.Text</div>
+}
+
+<div class="upload-container">
     <InputFile OnChange="LoadFiles" class="form-control" multiple />
 
     @if (_filesToUpload.Any())
@@ -31,7 +48,7 @@
         </ul>
 
         <button class="btn btn-primary mt-3" @onclick="UploadFilesAsync" disabled="@_isUploading">
-            @(_isUploading ? "Uploading..." : "Upload All")
+            @(_isUploading ? "Uploading..." : (_updateFileId.HasValue ? "Upload New Version" : "Upload All"))
         </button>
     }
 </div>
@@ -42,11 +59,41 @@
     private List<IBrowserFile> _filesToUpload = new();
     private Dictionary<string, (string Text, string Class)> _statuses = new();
     private bool _isUploading;
+    private Guid? _updateFileId;
+    private string? _updateFileName;
+    private (string Text, string Class)? _notice;
+
+    protected override void OnInitialized()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var update = GetQueryParam(uri, "update");
+        if (Guid.TryParse(update, out var updateFileId))
+        {
+            _updateFileId = updateFileId;
+            _updateFileName = GetQueryParam(uri, "fileName") ?? string.Empty;
+        }
+    }
+
+    private static string? GetQueryParam(Uri uri, string name)
+    {
+        var query = uri.Query.TrimStart('?');
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (parts.Length == 2 && parts[0].Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(parts[1]);
+            }
+        }
+
+        return null;
+    }
 
     private void LoadFiles(InputFileChangeEventArgs e)
     {
         _filesToUpload = e.GetMultipleFiles().ToList();
         _statuses.Clear();
+        _notice = null;
         foreach (var file in _filesToUpload)
         {
             var activityId = ActivityLog.Begin("Upload", file.Name, $"Queued {file.Size:N0} bytes for upload.");
@@ -57,13 +104,14 @@
     private async Task UploadFilesAsync()
     {
         _isUploading = true;
+        _notice = null;
 
         foreach (var file in _filesToUpload)
         {
             var activityId = ActivityLog.Begin("Upload", file.Name, "Opening browser file stream.");
             try
             {
-                var fileId = Guid.NewGuid();
+                var fileId = _updateFileId ?? Guid.NewGuid();
                 if (file.Size > MaxUploadSizeBytes)
                 {
                     throw new InvalidOperationException(
@@ -72,10 +120,18 @@
 
                 using var stream = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes);
                 ActivityLog.Trace(activityId, "Upload", file.Name, "Sending file to API. Repository storage runs now; RAGS enrichment is queued as a background job.");
-                var upload = await ApiClient.UploadAsync(fileId, file.Name, file.ContentType, stream, file.Size);
+                var upload = await ApiClient.UploadAsync(
+                    fileId,
+                    file.Name,
+                    file.ContentType,
+                    stream,
+                    file.Size,
+                    existingFileId: _updateFileId);
 
                 _statuses[file.Name] = upload switch
                 {
+                    { IsDuplicate: true, NoChange: true } => ("Already current - no changes", "bg-secondary"),
+                    { IsDuplicate: true } => ("Duplicate - already exists", "bg-warning text-dark"),
                     { Uploaded: false } => ($"Upload failed: {SummarizeUploadError(upload.Error)}", "bg-danger"),
                     { IngestionJobId: not null } => ("Uploaded; ingestion queued", "bg-info text-dark"),
                     { RagsIngested: true, KnowledgeIndexed: true } => ("Uploaded + RAGS + knowledge indexed", "bg-success"),
@@ -84,16 +140,22 @@
                     _ => ("Uploaded; RAGS failed", "bg-warning text-dark")
                 };
 
+                if (upload.IsDuplicate)
+                {
+                    _notice = (upload.DuplicateMessage ?? "A file with identical content already exists.", "alert alert-warning");
+                    ActivityLog.Warn(activityId, "Upload", file.Name, upload.DuplicateMessage ?? "Duplicate upload blocked; nothing was stored.");
+                    continue;
+                }
+
                 if (!upload.Uploaded)
                 {
                     ActivityLog.Fail(activityId, "Upload", file.Name, upload.Error ?? "Upload failed without API error detail.");
-                }
-                else
-                {
-                    await RecentGraphContext.RecordDocumentAsync(fileId, file.Name);
+                    continue;
                 }
 
-                if (upload.Uploaded && upload.IngestionJobId is Guid jobId)
+                await RecentGraphContext.RecordDocumentAsync(fileId, file.Name);
+
+                if (upload.IngestionJobId is Guid jobId)
                 {
                     ActivityLog.Complete(activityId, "Upload", file.Name, $"Upload stored. Background ingestion job {jobId:N} is queued.");
                     var job = await ApiClient.GetIngestionJobAsync(jobId);
@@ -104,15 +166,15 @@
 
                     _ = TrackIngestionAsync(file.Name, jobId);
                 }
-                else if (upload.Uploaded && upload.RagsIngested && upload.KnowledgeIndexed)
+                else if (upload.RagsIngested && upload.KnowledgeIndexed)
                 {
                     ActivityLog.Complete(activityId, "Upload", file.Name, $"Upload complete. RAGS and knowledge indexing completed with status {upload.IngestionStatus}.");
                 }
-                else if (upload.Uploaded && upload.RagsIngested)
+                else if (upload.RagsIngested)
                 {
                     ActivityLog.Warn(activityId, "Upload", file.Name, $"Upload complete. RAGS ingested, but knowledge indexing did not complete. Status: {upload.IngestionStatus}.");
                 }
-                else if (upload.Uploaded)
+                else
                 {
                     ActivityLog.Warn(activityId, "Upload", file.Name, $"Upload complete. RAGS/knowledge indexing skipped or failed. Status: {upload.IngestionStatus}. {upload.Error}");
                 }
@@ -181,3 +243,5 @@
         return error.Length <= maxLength ? error : $"{error[..maxLength]}...";
     }
 }
+
+

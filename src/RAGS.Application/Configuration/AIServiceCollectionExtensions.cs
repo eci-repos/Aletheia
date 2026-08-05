@@ -27,7 +27,7 @@ public static class AIServiceCollectionExtensions
                 Type = "Ollama",
                 Enabled = true,
                 Endpoint = "http://localhost:11434",
-                DefaultModel = "kimi-k2.7-code:cloud"
+                DefaultModel = "gpt-oss:120b-cloud"
             };
         }
 
@@ -35,6 +35,7 @@ public static class AIServiceCollectionExtensions
         services.Configure<CopilotOptions>(configuration.GetSection(CopilotOptions.SectionName));
         services.Configure<ChatPlanningOptions>(configuration.GetSection(ChatPlanningOptions.SectionName));
         services.Configure<ChatExecutionEngineOptions>(configuration.GetSection(ChatExecutionEngineOptions.SectionName));
+        services.Configure<ChatAgentOptions>(configuration.GetSection(ChatAgentOptions.SectionName));
 
         // Chat planning abstractions
         services.AddSingleton<IChatPlanningService, ChatPlanningService>();
@@ -42,6 +43,7 @@ public static class AIServiceCollectionExtensions
         services.AddSingleton<IChatPlanApprovalService, ChatPlanApprovalService>();
         services.AddSingleton<IChatProgressStore, InMemoryChatProgressStore>();
         services.AddSingleton<IChatTelemetryService, ChatTelemetryService>();
+        services.AddSingleton<IDocumentTemplateRegistry, DocumentTemplateRegistry>();
         services.AddSingleton<ChatExecutionEngine>();
         services.AddSingleton<IChatExecutionService>(sp => sp.GetRequiredService<ChatExecutionEngine>());
         services.AddSingleton<IChatExecutionEngine>(sp => sp.GetRequiredService<ChatExecutionEngine>());
@@ -57,9 +59,40 @@ public static class AIServiceCollectionExtensions
                 modelId: provider.DefaultModel,
                 endpoint: new Uri(provider.Endpoint ?? "http://localhost:11434"));
 #pragma warning restore SKEXP0070
+
+            services.Configure<Microsoft.SemanticKernel.Connectors.Ollama.OllamaPromptExecutionSettings>(settings =>
+            {
+                settings.Temperature = 0.3f;
+                settings.TopP = 0.9f;
+                settings.NumPredict = provider.MaxOutputTokens ?? 8_192;
+                settings.ExtensionData ??= new Dictionary<string, object>();
+                settings.ExtensionData["num_ctx"] = provider.ContextLength ?? 128_000;
+                if (provider.RequestTimeoutSeconds.HasValue)
+                {
+                    settings.ExtensionData["timeout"] = provider.RequestTimeoutSeconds.Value;
+                }
+            });
         }
 
-        services.AddSingleton(kernelBuilder.Build());
+        // Agentic knowledge tools / plugins
+        services.AddSingleton<Aletheia.RAGS.Application.SemanticKernel.AletheiaKnowledgePlugin>();
+        services.AddSingleton<Aletheia.RAGS.Application.SemanticKernel.RepositoryToolPlugin>(
+            sp => new Aletheia.RAGS.Application.SemanticKernel.RepositoryToolPlugin(
+                sp.GetRequiredService<Aletheia.RAGS.Application.SemanticKernel.AletheiaKnowledgePlugin>()));
+        services.AddSingleton(sp =>
+        {
+            var kernel = kernelBuilder.Build();
+            kernel.Plugins.AddFromObject(
+                sp.GetRequiredService<Aletheia.RAGS.Application.SemanticKernel.AletheiaKnowledgePlugin>(),
+                "AletheiaKnowledgePlugin");
+            kernel.Plugins.AddFromObject(
+                sp.GetRequiredService<Aletheia.RAGS.Application.SemanticKernel.RepositoryToolPlugin>(),
+                "RepositoryTool");
+            return kernel;
+        });
+
+        // Tool invoker used by the chat execution engine to call registered repository tools.
+        services.AddSingleton<IChatToolInvoker, Aletheia.RAGS.Application.Planning.KernelChatToolInvoker>();
 
         // Embedding: keep deterministic provider for 128-dim pgvector compatibility
         services.AddSingleton<SimpleEmbeddingProvider>();
@@ -67,6 +100,7 @@ public static class AIServiceCollectionExtensions
         services.AddSingleton<IEmbeddingService>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
 
         // Semantic Kernel AI services
+        services.AddSingleton<IChatAgentInstructionProvider, FileChatAgentInstructionProvider>();
         services.AddSingleton<IKnowledgeSourceResolver, MetadataKnowledgeSourceResolver>();
         services.AddSingleton<IChatService, SemanticKernelChatService>();
         services.AddSingleton<IAgentService, SemanticKernelAgentService>();
@@ -74,12 +108,6 @@ public static class AIServiceCollectionExtensions
 
         // Backward-compatible Copilot service via Semantic Kernel
         services.AddSingleton<ICopilotService, SemanticKernelCopilotService>();
-
-        // Agentic knowledge tools / plugins
-        services.AddSingleton<Aletheia.RAGS.Application.SemanticKernel.AletheiaKnowledgePlugin>();
-        services.AddSingleton<Aletheia.RAGS.Application.SemanticKernel.RepositoryToolPlugin>(
-            sp => new Aletheia.RAGS.Application.SemanticKernel.RepositoryToolPlugin(
-                sp.GetRequiredService<Aletheia.RAGS.Application.SemanticKernel.AletheiaKnowledgePlugin>()));
 
         return services;
     }

@@ -495,6 +495,12 @@ internal sealed class FakeMetadataRepository : IMetadataRepository
     public SearchRequest? LastSearchRequest { get; private set; }
 
     public FileDescriptor? LastDeletedDescriptor { get; private set; }
+    public Result<FileMetadata?> FindByContentHashResult { get; set; } = Result<FileMetadata?>.Success(null);
+
+    public Result<IReadOnlyList<FileMetadata>> ListContentHashDuplicatesResult { get; set; }
+        = Result<IReadOnlyList<FileMetadata>>.Success(new List<FileMetadata>());
+
+    public string? LastFindByContentHash { get; private set; }
 
     public Task<Result<FileMetadata>> GetAsync(FileDescriptor descriptor, CancellationToken cancellationToken = default)
     {
@@ -518,6 +524,17 @@ internal sealed class FakeMetadataRepository : IMetadataRepository
     {
         LastDeletedDescriptor = descriptor;
         return Task.FromResult(DeleteResult);
+    }
+
+    public Task<Result<FileMetadata?>> FindByContentHashAsync(string contentHash, CancellationToken cancellationToken = default)
+    {
+        LastFindByContentHash = contentHash;
+        return Task.FromResult(FindByContentHashResult);
+    }
+
+    public Task<Result<IReadOnlyList<FileMetadata>>> ListContentHashDuplicatesAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(ListContentHashDuplicatesResult);
     }
 }
 
@@ -600,3 +617,5 @@ internal sealed class FakeSearchUseCase : ISearchUseCase
         return Task.FromResult(Result);
     }
 }
+
+

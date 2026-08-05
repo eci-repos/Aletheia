@@ -43,6 +43,8 @@ public sealed class ChatExecutionTelemetry
     public string ToolName { get; init; } = string.Empty;
 
     public int ToolInvocationCount { get; init; }
+
+    public string RetrievalStrategy { get; init; } = string.Empty;
 }
 
 public sealed class ChatEstimateComparison

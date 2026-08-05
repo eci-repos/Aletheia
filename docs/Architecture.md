@@ -177,3 +177,26 @@ Operationally important runtime fixes are part of the current codebase:
 - **Ingestion gate**: `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` requires a canonical template match; ingestion stops with a clear error when no canonical is found. The gate covers upload ingestion jobs, hydration, and plugin-triggered ingestion.
 - Summaries for template documents open with the document's nature/purpose (deterministic first-chunk injection) and follow the template's section order, each section grounded by its own retrieved evidence (Sprint 53).
 - Adding a new document kind requires adding a template under `docs/doc-templates` **before** documents of that kind can be ingested.
+
+## Duplicate Upload Detection and Document Update Flow (Sprint 56)
+
+### Content fingerprinting
+Every upload is hashed server-side (SHA-256 of the raw bytes, computed over the temporary upload file in `FilesController`) **before** any storage write. The hash is carried on `UploadRequest.ContentHash` -> `FileMetadata.ContentHash` and persisted in the `file_metadata.content_hash` column (`init.sql` + idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql`). A b-tree index (`idx_file_metadata_content_hash`) supports duplicate lookups.
+
+### Duplicate trap
+`IDuplicateDetectionService` (RAGS-adjacent application service in `Aletheia.Repository.Application`, registered as a singleton) resolves the most recent row with the same content hash via `IMetadataRepository.FindByContentHashAsync`. When a new upload's hash matches an existing row, the API returns **HTTP 409 Conflict** with a structured payload (`duplicate`, `noChange`, `message`, `existingFileId`, `existingFileName`, `existingUploadedAt`, `existingVersion`) and stores/ingests nothing. The Web Upload page renders a "Duplicate - already exists" badge and an Activity warning and skips ingestion tracking. The same hash posted to the same document via the update path is reported as a no-change conflict.
+
+### Document update (new version of an existing document)
+`POST /api/files/upload` accepts an optional `existingFileId`. When present:
+1. The current (unversioned) metadata row is resolved; if missing, the API returns 400.
+2. If the new content hash equals the current row's hash, the upload is trapped as a no-change conflict (no new version).
+3. Otherwise `IVersioningUseCase.CreateVersionAsync` snapshots the current state into a named version row, then the new blob is stored under the same `fileId` (MinIO object name is `fileId/fileName`; the blob is replaced) and the unversioned metadata row is upserted with the new content hash, size, and content type.
+4. An ingestion job is enqueued with the **same sourceId**. `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` now applies replace semantics: before ingestion it clears prior knowledge-index rows (`UploadedContentKnowledgeIndexer.DeleteSourceAsync`) and graph nodes (`IGraphProvider.DeleteSourceAsync`, implemented for Neo4j as a DETACH DELETE on `n.sourceId`), and `RagsService.IngestAsync` already replaces embeddings. The automatic document-brief trigger regenerates the Wiki brief for the updated content.
+5. Version history (`GET /api/versions`) lists the prior versions; versioned downloads share the single blob per `fileId` (metadata-level versioning - a documented limitation).
+
+### Existing duplicate cleanup (admin)
+`GET /api/files/duplicates` (role-gated to Administrator) returns every `file_metadata` row whose `content_hash` is shared by more than one row, newest first, so operators can review and manually remove duplicate artifacts with the existing DELETE flow. No automatic deletion.
+
+### API contract notes
+- 409 payload is machine-readable; the Web client (`RepositoryApiClient.UploadAsync`) maps it to `UploadClientResult` (`IsDuplicate`, `NoChange`, `DuplicateMessage`, `ExistingFileId`, `ExistingFileName`).
+- Existing synchronous RAGS/GraphRAG/LazyGraphRAG endpoints and the `/api/jobs` snapshot contract are unchanged.

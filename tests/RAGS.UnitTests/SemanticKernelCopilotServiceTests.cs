@@ -33,8 +33,9 @@ public class SemanticKernelCopilotServiceTests
         var result = await service.ChatAsync(session, "What does CMP say?");
 
         Assert.True(result.IsSuccess);
-        Assert.Contains("You are an agent of the Aletheia platform.", chatService.LastUserMessage);
-        Assert.Contains("Do not use general internet knowledge", chatService.LastUserMessage);
+        Assert.Contains("Aletheia, a research assistant", chatService.LastUserMessage);
+        Assert.Contains("repository contains documents", chatService.LastUserMessage);
+        Assert.Contains("ground your answers", chatService.LastUserMessage);
         Assert.Contains("Retrieved context:", chatService.LastUserMessage);
         Assert.Contains("[1] Rank: 1; Score: 0.91; Strategy: semantic", chatService.LastUserMessage);
         Assert.Contains($"SourceId: {sourceId}; ChunkId: {chunkId}; ChunkIndex: 3", chatService.LastUserMessage);
@@ -141,6 +142,81 @@ public class SemanticKernelCopilotServiceTests
     }
 
     [Fact]
+    public async Task ChatAsync_uses_provided_scoped_context_without_retrieving_again()
+    {
+        var sourceA = Guid.NewGuid();
+        var sourceB = Guid.NewGuid();
+        var chatService = new CapturingChatService();
+        var ragsService = new FakeRagsService(Array.Empty<SearchResult>(), throwOnRetrieve: true);
+        var service = new SemanticKernelCopilotService(chatService, new FakeAgentService(), ragsService);
+
+        var result = await service.ChatAsync(
+            new ChatSession(),
+            "Provide a summary list of all RFPs.",
+            new ChatRequestOptions
+            {
+                UseProvidedRetrievalOnly = true,
+                ScopeInstruction = "The retrieved context below is the lazy scoped WRAGS coverage.",
+                RetrievalResults = new[]
+                {
+                    new SearchResult(
+                        new Chunk(Guid.NewGuid(), sourceA, "RFP Alpha context.", 0),
+                        0.95f,
+                        new[] { "RFP Alpha.docx" },
+                        retrievalStrategy: "semantic",
+                        rank: 1),
+                    new SearchResult(
+                        new Chunk(Guid.NewGuid(), sourceB, "RFP Beta context.", 0),
+                        0.94f,
+                        new[] { "RFP Beta.pdf" },
+                        retrievalStrategy: "semantic",
+                        rank: 2)
+                }
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(ragsService.LastRetrievalRequest);
+        Assert.Contains("lazy scoped WRAGS coverage", chatService.LastUserMessage);
+        Assert.Contains($"SourceId: {sourceA}", chatService.LastUserMessage);
+        Assert.Contains($"SourceId: {sourceB}", chatService.LastUserMessage);
+        Assert.NotNull(result.Value!.Stats);
+        Assert.Equal(2, result.Value.Stats.RetrievedContextCount);
+        Assert.Equal(2, result.Value.Stats.CitationCount);
+    }
+
+    [Fact]
+    public void RetrievalAugmentedPromptBuilder_partitions_context_by_source_identity()
+    {
+        var cmp2022 = Guid.NewGuid();
+        var cmp2026 = Guid.NewGuid();
+        var prompt = RetrievalAugmentedPromptBuilder.Build(
+            "summarize CMP RFP projects",
+            new[]
+            {
+                new SearchResult(
+                    new Chunk(Guid.NewGuid(), cmp2022, "CMP 2022 project is a data warehouse engagement.", 0),
+                    0.95f,
+                    new[] { "CMP 2022 - 3. RFP Analysis.docx" },
+                    retrievalStrategy: "semantic",
+                    rank: 1),
+                new SearchResult(
+                    new Chunk(Guid.NewGuid(), cmp2026, "CMP 2026 project is an AI engagement.", 0),
+                    0.94f,
+                    new[] { "CMP 2026 - 3. RFP Analysis.docx" },
+                    retrievalStrategy: "semantic",
+                    rank: 2)
+            },
+            maxResults: 10);
+
+        Assert.Contains("context for 2 distinct document source(s)", prompt);
+        Assert.Contains("Facts from one source must never be used to describe another source.", prompt);
+        Assert.Contains($"--- START SOURCE: CMP 2022 - 3. RFP Analysis.docx (ID: {cmp2022}) ---", prompt);
+        Assert.Contains($"--- START SOURCE: CMP 2026 - 3. RFP Analysis.docx (ID: {cmp2026}) ---", prompt);
+        Assert.Contains("Boundary rule: use only the evidence inside this source block for this source's section.", prompt);
+        Assert.Contains("Your response must contain 2 separate source section(s)", prompt);
+    }
+
+    [Fact]
     public async Task ChatAsync_ingests_resolved_source_when_retrieval_is_empty()
     {
         var sourceId = Guid.NewGuid();
@@ -205,6 +281,33 @@ public class SemanticKernelCopilotServiceTests
     }
 
     [Fact]
+    public async Task MetadataKnowledgeSourceResolver_prioritizes_rfp_alias_over_newer_unrelated_source()
+    {
+        var rfpId = Guid.NewGuid();
+        var unrelatedId = Guid.NewGuid();
+        var resolver = new MetadataKnowledgeSourceResolver(
+            new FakeMetadataRepository(new[]
+        {
+            new FileMetadata(new FileDescriptor(rfpId, "CMP Draft RFP.docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 100, DateTimeOffset.UtcNow.AddDays(-10)),
+            new FileMetadata(new FileDescriptor(unrelatedId, "CMP Latest Proposal.docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 100, DateTimeOffset.UtcNow.AddDays(-1))
+        }),
+            Options.Create(new CopilotOptions
+            {
+                KnowledgeAliases =
+                {
+                    ["cmp"] = new[] { "Cleveland Metroparks" }
+                }
+            }));
+
+        var result = await resolver.ResolveAsync("what does the CMP RFP require?");
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Value);
+        Assert.Equal(rfpId, result.Value.SourceId);
+        Assert.Equal("CMP Draft RFP.docx", result.Value.SourceName);
+    }
+
+    [Fact]
     public void RetrievalAugmentedPromptBuilder_orders_by_rank_and_trims_content()
     {
         var first = new SearchResult(
@@ -224,8 +327,8 @@ public class SemanticKernelCopilotServiceTests
 
         Assert.True(prompt.IndexOf("[1] Rank: 1", StringComparison.Ordinal) < prompt.IndexOf("[2] Rank: 2", StringComparison.Ordinal));
         Assert.Contains("first by r...", prompt);
-        Assert.Contains("You are an agent of the Aletheia platform", prompt);
-        Assert.Contains("Do not use general internet knowledge", prompt);
+        Assert.Contains("Aletheia, a research assistant", prompt);
+        Assert.Contains("repository contains documents", prompt);
         Assert.Contains("question", prompt);
     }
 
@@ -251,6 +354,73 @@ public class SemanticKernelCopilotServiceTests
         Assert.Contains("Cover these configured focus areas when relevant: activities, pricing.", prompt);
         Assert.Contains("Format the answer as Markdown table.", prompt);
         Assert.Contains("Mark missing areas as not found.", prompt);
+        Assert.Contains("Aletheia, a research assistant", prompt);
+    }
+
+    [Fact]
+    public void RetrievalAugmentedPromptBuilder_instructs_model_not_to_surface_graph_internals()
+    {
+        var prompt = RetrievalAugmentedPromptBuilder.Build(
+            "Base on CMP 2026 list required features for this engagement",
+            new[]
+            {
+                new SearchResult(
+                    new Chunk(Guid.NewGuid(), Guid.NewGuid(), "Community L1 summary says detailed feature requirements are in the document.", 0),
+                    0.75f,
+                    retrievalStrategy: "summary-community",
+                    rank: 1)
+            });
+
+        Assert.Contains("Do not expose internal retrieval implementation details", prompt);
+        Assert.Contains("graph communities", prompt);
+        Assert.Contains("do not present that summary as a substitute", prompt);
+        Assert.Contains("Aletheia, a research assistant", prompt);
+    }
+
+    [Fact]
+    public void RetrievalAugmentedPromptBuilder_uses_chat_agent_options_when_provided()
+    {
+        var options = new ChatAgentOptions
+        {
+            Role = "You are a test role.",
+            RepositoryDescription = "The repository contains test documents.",
+            Mandate = "Only cite test documents.",
+            BehaviorFlags = new ChatAgentBehaviorFlags { CiteSources = false }
+        };
+
+        var prompt = RetrievalAugmentedPromptBuilder.Build(
+            "question",
+            new[]
+            {
+                new SearchResult(
+                    new Chunk(Guid.NewGuid(), Guid.NewGuid(), "content", 0),
+                    0.75f,
+                    rank: 1)
+            },
+            chatAgentOptions: options);
+
+        Assert.Contains("You are a test role.", prompt);
+        Assert.Contains("The repository contains test documents.", prompt);
+        Assert.Contains("Only cite test documents.", prompt);
+        Assert.DoesNotContain("Cite supporting evidence with bracketed citation numbers", prompt);
+    }
+
+    [Fact]
+    public void RetrievalAugmentedPromptBuilder_includes_external_orchestration_instructions()
+    {
+        var prompt = RetrievalAugmentedPromptBuilder.Build(
+            "summarize RFP opportunities",
+            new[]
+            {
+                new SearchResult(
+                    new Chunk(Guid.NewGuid(), Guid.NewGuid(), "RFP opportunity evidence.", 0),
+                    0.75f,
+                    rank: 1)
+            },
+            orchestrationInstructions: "If RFP exists in taxonomy but chunks are missing, request RAGS index repair.");
+
+        Assert.Contains("Repository orchestration playbook:", prompt);
+        Assert.Contains("If RFP exists in taxonomy but chunks are missing", prompt);
     }
 
     private sealed class CapturingChatService : IChatService

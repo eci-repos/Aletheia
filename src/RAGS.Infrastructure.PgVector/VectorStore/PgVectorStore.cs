@@ -15,12 +15,18 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
 
     private readonly PostgreSqlConnectionFactory _connectionFactory;
     private readonly int _vectorDimension;
+    private readonly int _commandTimeoutSeconds;
 
-    public PgVectorStore(PostgreSqlConnectionFactory connectionFactory, int vectorDimension)
+    public PgVectorStore(PostgreSqlConnectionFactory connectionFactory, int vectorDimension, int commandTimeoutSeconds = 30)
     {
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _vectorDimension = vectorDimension > 0 ? vectorDimension : throw new ArgumentOutOfRangeException(nameof(vectorDimension));
+        _commandTimeoutSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : throw new ArgumentOutOfRangeException(nameof(commandTimeoutSeconds));
     }
+
+    public int CommandTimeoutSeconds => _commandTimeoutSeconds;
+
+
 
     public async Task<Result> StoreAsync(Guid chunkId, ReadOnlyMemory<float> vector, Chunk chunk, CancellationToken cancellationToken = default)
     {
@@ -51,7 +57,9 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 Embedding = VectorToString(vector)
             };
 
-            await connection.ExecuteAsync(sql, parameters).ConfigureAwait(false);
+            await connection.ExecuteAsync(
+                new CommandDefinition(sql, parameters, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
             return Result.Success();
         }
         catch (Exception ex)
@@ -94,7 +102,9 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                     Embedding = VectorToString(vector)
                 };
 
-                await connection.ExecuteAsync(sql, parameters, transaction).ConfigureAwait(false);
+                await connection.ExecuteAsync(
+                    new CommandDefinition(sql, parameters, transaction: transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                    .ConfigureAwait(false);
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -115,6 +125,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.source_id as ""SourceId"",
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
+                e.chunk_index as ""ChunkIndex"",
                 1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -132,15 +143,59 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
 
         try
         {
-            var rows = await connection.QueryAsync<EmbeddingRow>(sql, new
-            {
-                QueryEmbedding = VectorToString(vector),
-                TopK = topK
-            }).ConfigureAwait(false);
+            var rows = await connection.QueryAsync<EmbeddingRow>(
+                new CommandDefinition(sql, new
+                {
+                    QueryEmbedding = VectorToString(vector),
+                    TopK = topK
+                }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
 
             var results = rows.Select(MapToSearchResult).ToList();
 
             return Result<IReadOnlyList<SearchResult>>.Success(results);
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<SearchResult>>> GetSourceChunksAsync(
+        Guid sourceId,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                e.chunk_id as ""ChunkId"",
+                e.source_id as ""SourceId"",
+                e.content as ""Content"",
+                m.file_name as ""SourceName"",
+                e.chunk_index as ""ChunkIndex"",
+                0.0 as ""Score""
+            FROM embeddings e
+            LEFT JOIN LATERAL (
+                SELECT file_name
+                FROM file_metadata
+                WHERE file_id = e.source_id
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            ) m ON true
+            WHERE e.source_id = @SourceId
+            ORDER BY e.chunk_index ASC NULLS LAST, e.chunk_id
+            LIMIT @Take";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<EmbeddingRow>(
+                new CommandDefinition(sql, new { SourceId = sourceId, Take = take }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
+
+            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(MapToSearchResult).ToList());
         }
         catch (Exception ex)
         {
@@ -157,7 +212,9 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
 
         try
         {
-            await connection.ExecuteAsync(sql, new { SourceId = sourceId }).ConfigureAwait(false);
+            await connection.ExecuteAsync(
+                new CommandDefinition(sql, new { SourceId = sourceId }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
             return Result.Success();
         }
         catch (Exception ex)
@@ -178,6 +235,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.source_id as ""SourceId"",
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
+                e.chunk_index as ""ChunkIndex"",
                 1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -196,12 +254,14 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
 
         try
         {
-            var rows = await connection.QueryAsync<EmbeddingRow>(sql, new
-            {
-                QueryEmbedding = VectorToString(vector),
-                TopK = topK,
-                SourceId = sourceId
-            }).ConfigureAwait(false);
+            var rows = await connection.QueryAsync<EmbeddingRow>(
+                new CommandDefinition(sql, new
+                {
+                    QueryEmbedding = VectorToString(vector),
+                    TopK = topK,
+                    SourceId = sourceId
+                }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
 
             return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(MapToSearchResult).ToList());
         }
@@ -223,7 +283,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
             : new[] { row.SourceName };
 
         return new SearchResult(
-            new Chunk(row.ChunkId, row.SourceId, row.Content, 0),
+            new Chunk(row.ChunkId, row.SourceId, row.Content, row.ChunkIndex),
             (float)row.Score,
             citations);
     }
@@ -235,5 +295,6 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         public string Content { get; set; } = string.Empty;
         public string? SourceName { get; set; }
         public double Score { get; set; }
+        public int ChunkIndex { get; set; }
     }
 }

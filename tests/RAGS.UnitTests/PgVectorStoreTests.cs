@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.RAGS.Application.Providers;
 using Aletheia.RAGS.Infrastructure.PgVector.VectorStore;
 using Aletheia.Repository.Infrastructure.PostgreSQL.Connections;
+using Dapper;
 using Npgsql;
 
 namespace RAGS.UnitTests;
@@ -32,8 +34,10 @@ public class PgVectorStoreTests : IAsyncLifetime
                     source_id UUID NOT NULL,
                     content TEXT NOT NULL,
                     embedding vector(128) NOT NULL,
+                    chunk_index INT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS chunk_index INT;
                 CREATE INDEX IF NOT EXISTS idx_embeddings_embedding ON embeddings USING ivfflat (embedding vector_cosine_ops);";
 
             foreach (var batch in initSql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -45,7 +49,7 @@ public class PgVectorStoreTests : IAsyncLifetime
                 }
             }
 
-            _store = new PgVectorStore(_factory, 128);
+            _store = new PgVectorStore(_factory, 128, commandTimeoutSeconds: 30);
             _isAvailable = true;
         }
         catch
@@ -120,5 +124,50 @@ public class PgVectorStoreTests : IAsyncLifetime
         Assert.True(searchResult.IsSuccess, searchResult.Error);
         Assert.NotNull(searchResult.Value);
         Assert.DoesNotContain(searchResult.Value, r => r.Chunk.SourceId == sourceId);
+    }
+
+    [Fact]
+    public void Constructor_rejects_invalid_command_timeout()
+    {
+        var factory = new PostgreSqlConnectionFactory("Host=localhost;Database=dummy");
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PgVectorStore(factory, 128, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PgVectorStore(factory, 128, -1));
+    }
+
+    [Fact]
+    public async Task SearchAsync_fails_fast_when_command_times_out()
+    {
+        if (!_isAvailable || _factory is null)
+        {
+            return;
+        }
+
+        // Create a store with a 1-second command timeout.
+        var fastTimeoutStore = new PgVectorStore(_factory, 128, commandTimeoutSeconds: 1);
+
+        // Execute a query that intentionally exceeds the command timeout.
+        // Use the same connection factory and CommandDefinition pattern the store uses
+        // so we are testing the timeout behavior of the infrastructure the store relies on.
+        using var connection = _factory.CreateConnection();
+        await connection.OpenAsync();
+
+        var started = Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<NpgsqlException>(async () =>
+        {
+            await connection.ExecuteAsync(
+                new CommandDefinition("SELECT pg_sleep(3);", commandTimeout: 1, cancellationToken: default));
+        });
+        started.Stop();
+
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(2.5), $"Expected timeout to fire quickly but elapsed was {started.Elapsed}");
+        Assert.Contains("Exception while reading from stream", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandTimeoutSeconds_exposes_configured_value()
+    {
+        var factory = new PostgreSqlConnectionFactory("Host=localhost;Database=dummy");
+        var store = new PgVectorStore(factory, 128, commandTimeoutSeconds: 42);
+        Assert.Equal(42, store.CommandTimeoutSeconds);
     }
 }

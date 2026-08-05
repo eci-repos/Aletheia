@@ -71,13 +71,13 @@ public static class ServiceCollectionExtensions
 
     private static string ResolveSecret(IConfiguration configuration, string configKey, string envKey)
     {
-        var value = configuration[configKey];
+        var value = Environment.GetEnvironmentVariable(envKey);
         if (!string.IsNullOrWhiteSpace(value))
         {
             return value;
         }
 
-        value = Environment.GetEnvironmentVariable(envKey);
+        value = configuration[configKey];
         if (!string.IsNullOrWhiteSpace(value))
         {
             return value;

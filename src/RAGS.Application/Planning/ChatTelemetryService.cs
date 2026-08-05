@@ -39,6 +39,10 @@ public sealed class ChatTelemetryService : IChatTelemetryService
         var confidence = stats?.AlignmentConfidence ?? 0d;
         var basis = stats?.ConfidenceBasis ?? "No provider metrics were available; estimates are heuristic.";
 
+        var retrievalStrategy = stats?.ConfidenceBasis is not null && stats.ConfidenceBasis.Contains("retrieval")
+            ? ExtractRetrievalStrategy(stats.ConfidenceBasis)
+            : "none";
+
         var telemetry = new ChatExecutionTelemetry
         {
             JobId = jobId,
@@ -61,6 +65,7 @@ public sealed class ChatTelemetryService : IChatTelemetryService
             UsedProviderMetrics = usedProviderMetrics,
             ToolName = toolName ?? string.Empty,
             ToolInvocationCount = toolInvocationCount,
+            RetrievalStrategy = retrievalStrategy,
             EstimateComparisonSummary = BuildComparisonSummary(
                 plan,
                 new ChatExecutionTelemetry
@@ -164,5 +169,11 @@ public sealed class ChatTelemetryService : IChatTelemetryService
 
         var ratio = telemetry.LlmCallCount / (double)plan.EstimatedLlmCalls;
         return $"actual {telemetry.LlmCallCount} vs estimated {plan.EstimatedLlmCalls} ({ratio:P0})";
+    }
+
+    private static string ExtractRetrievalStrategy(string confidenceBasis)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(confidenceBasis, @"based on\s+([\w\-]+(?:,\s*[\w\-]+)*)\s+retrieval");
+        return match.Success ? match.Groups[1].Value : "semantic";
     }
 }

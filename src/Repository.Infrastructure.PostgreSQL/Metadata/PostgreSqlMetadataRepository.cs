@@ -24,6 +24,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
                 size_bytes AS ""SizeBytes"",
                 uploaded_at AS ""UploadedAt"",
                 tags AS ""Tags"",
+                content_hash AS ""ContentHash"",
                 created_at AS ""CreatedAt"",
                 created_by_id AS ""CreatedById"",
                 created_by_type AS ""CreatedByType"",
@@ -78,10 +79,10 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         }
 
         var sql = $@"
-            INSERT INTO file_metadata (file_id, file_name, version, content_type, size_bytes, uploaded_at, tags,
+            INSERT INTO file_metadata (file_id, file_name, version, content_type, size_bytes, uploaded_at, tags, content_hash,
                                        created_at, created_by_id, created_by_type, created_by_name,
                                        last_modified_at, last_modified_by_id, last_modified_by_type, last_modified_by_name)
-            VALUES (@FileId, @FileName, @Version, @ContentType, @SizeBytes, @UploadedAt, @Tags::jsonb,
+            VALUES (@FileId, @FileName, @Version, @ContentType, @SizeBytes, @UploadedAt, @Tags::jsonb, @ContentHash,
                     @CreatedAt, @CreatedById, @CreatedByType, @CreatedByName,
                     @LastModifiedAt, @LastModifiedById, @LastModifiedByType, @LastModifiedByName)
             ON CONFLICT (file_id, COALESCE(version, ''))
@@ -91,6 +92,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
                 size_bytes = EXCLUDED.size_bytes,
                 uploaded_at = EXCLUDED.uploaded_at,
                 tags = EXCLUDED.tags,
+                content_hash = EXCLUDED.content_hash,
                 last_modified_at = EXCLUDED.last_modified_at,
                 last_modified_by_id = EXCLUDED.last_modified_by_id,
                 last_modified_by_type = EXCLUDED.last_modified_by_type,
@@ -192,6 +194,64 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         }
     }
 
+    public async Task<Result<FileMetadata?>> FindByContentHashAsync(string contentHash, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(contentHash))
+        {
+            return Result<FileMetadata?>.Success(null);
+        }
+
+        var sql = $@"
+            SELECT {MetadataSelectColumns}
+            FROM file_metadata
+            WHERE content_hash = @ContentHash
+            ORDER BY uploaded_at DESC
+            LIMIT 1";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var row = await connection.QueryFirstOrDefaultAsync<MetadataRow>(sql, new { ContentHash = contentHash }).ConfigureAwait(false);
+            return Result<FileMetadata?>.Success(row is null ? null : MapToMetadata(row));
+        }
+        catch (PostgresException ex)
+        {
+            return Result<FileMetadata?>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<FileMetadata>>> ListContentHashDuplicatesAsync(CancellationToken cancellationToken = default)
+    {
+        var sql = $@"
+            SELECT {MetadataSelectColumns}
+            FROM file_metadata
+            WHERE content_hash IS NOT NULL
+              AND content_hash IN (
+                  SELECT content_hash
+                  FROM file_metadata
+                  WHERE content_hash IS NOT NULL
+                  GROUP BY content_hash
+                  HAVING COUNT(*) > 1
+              )
+            ORDER BY content_hash, uploaded_at DESC";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<MetadataRow>(sql).ConfigureAwait(false);
+            var items = rows.Select(MapToMetadata).ToList();
+            return Result<IReadOnlyList<FileMetadata>>.Success(items);
+        }
+        catch (PostgresException ex)
+        {
+            return Result<IReadOnlyList<FileMetadata>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
     private static FileMetadata MapToMetadata(MetadataRow row)
     {
         var descriptor = new FileDescriptor(row.FileId, row.FileName, row.Version);
@@ -212,7 +272,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
             auditInfo = new AuditInfo(row.CreatedAt!.Value, createdBy, row.LastModifiedAt, lastModifiedBy);
         }
 
-        return new FileMetadata(descriptor, row.ContentType, row.SizeBytes, row.UploadedAt, tags, auditInfo);
+        return new FileMetadata(descriptor, row.ContentType, row.SizeBytes, row.UploadedAt, tags, auditInfo, row.ContentHash);
     }
 
     private static MetadataRow MapToRow(FileMetadata metadata)
@@ -228,6 +288,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
             SizeBytes = metadata.SizeBytes,
             UploadedAt = metadata.UploadedAt,
             Tags = JsonSerializer.Serialize(metadata.Tags),
+            ContentHash = metadata.ContentHash,
             CreatedAt = audit?.CreatedAt,
             CreatedById = audit?.CreatedBy.ActorId,
             CreatedByType = audit?.CreatedBy.ActorType,
@@ -248,6 +309,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         public long SizeBytes { get; set; }
         public DateTimeOffset UploadedAt { get; set; }
         public string Tags { get; set; } = "{}";
+        public string? ContentHash { get; set; }
         public DateTimeOffset? CreatedAt { get; set; }
         public string? CreatedById { get; set; }
         public string? CreatedByType { get; set; }

@@ -56,6 +56,12 @@ else if (_results is not null)
                                 <a class="btn btn-sm btn-outline-primary action-button" title="Download" aria-label="Download" href="download?fileId=@file.Descriptor.FileId&fileName=@Uri.EscapeDataString(file.Descriptor.FileName)&version=@file.Descriptor.Version">
                                     <span aria-hidden="true">&#8681;</span>
                                 </a>
+                                @if (file.Descriptor.Version is null)
+                                {
+                                    <a class="btn btn-sm btn-outline-success action-button" title="Upload new version" aria-label="Upload new version" href="upload?update=@file.Descriptor.FileId&fileName=@Uri.EscapeDataString(file.Descriptor.FileName)">
+                                        <span aria-hidden="true">&#8635;</span>
+                                    </a>
+                                }
                                 <button class="btn btn-sm btn-outline-danger action-button" title="Delete" aria-label="Delete" @onclick="() => DeleteAsync(file)" disabled="@_isDeleting">
                                     <span aria-hidden="true">&#128465;</span>
                                 </button>
@@ -172,3 +178,4 @@ else if (_results is not null)
         }
     }
 }
+

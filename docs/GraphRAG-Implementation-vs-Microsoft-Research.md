@@ -97,8 +97,8 @@ Microsoft LazyGraphRAG shifts cost from indexing to retrieval.
 | Standard RAG | Production-ready baseline semantic retrieval with citations |
 | GraphRAG | Close architectural alignment for index-heavy graph summarization and local/global summary retrieval |
 | LazyGraphRAG | Close architectural alignment for low-cost indexing and budgeted query-time graph exploration |
-| WRAGS Wiki | Durable LLM Wiki surface over the GraphRAG/LazyGraphRAG/RAGS retrieval stack with PostgreSQL-backed generated/edited pages, version history, lifecycle controls, related topics/pages, stale warnings, retrieval participation, and queued regeneration controls |
-| Search Center | Web UI exposes Semantic, WRAGS, GraphRAG, and LazyGraphRAG modes over the same corpus, with queued direct ingestion, expansion controls, retrieval strategies, citations, and technical failure details |
+| WRAGS Wiki | Durable LLM Wiki surface over the RAGS-first retrieval stack with PostgreSQL-backed generated/edited pages, version history, lifecycle controls, related topics/pages, stale warnings, retrieval participation, and queued regeneration controls |
+| Search Center | Web UI exposes Semantic, WRAGS, GraphRAG, and LazyGraphRAG modes over the same corpus. Graph modes participate in broad/global retrieval with Semantic fallback; scoped document prompts continue using source-scoped Semantic RAGS evidence. |
 | Community detection | Functional hierarchical implementation, but not a direct dependency on Microsoft GraphRAG's Python/igraph Leiden stack |
 | Evaluation | Needs a larger benchmark set to quantify answer quality, recall, latency, and cost against Microsoft-style baselines |
 | Operations | Docker stack validated; long-running upload/Search Center ingestion now queues background jobs with `/api/jobs` progress |

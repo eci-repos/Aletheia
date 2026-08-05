@@ -102,11 +102,11 @@ The Copilot page includes a response format selector:
 Search Center is the quickest way to compare retrieval strategies over the same content:
 
 - Semantic mode validates chunk/vector search.
-- GraphRAG mode validates summary-based entity/community retrieval and graph expansion.
-- LazyGraphRAG mode validates query-time candidate discovery, budgeted traversal, and pruning.
+- WRAGS mode validates durable wiki retrieval over the same knowledge estate.
+- GraphRAG and LazyGraphRAG are active product modes. Demo them as graph-backed retrieval options after Semantic RAGS and WRAGS, and explain that scoped document questions still prefer Semantic RAGS evidence.
 - The Activity panel should be open during ingestion demos so queued jobs, heartbeat, progress, and failures are visible.
 
-WRAGS is the LLM Wiki surface. `/wiki` renders durable PostgreSQL-backed wiki pages with citations, version, lifecycle status, stale warnings, related topics, related pages, history, retrieval strategy, and source/chunk details. WRAGS mode searches saved pages first, generates from GraphRAG summaries and graph context on first miss, then falls back to LazyGraphRAG and Semantic retrieval when needed. Saved WRAGS pages also participate in Search Center and Copilot retrieval context.
+WRAGS is the LLM Wiki surface. `/wiki` renders durable PostgreSQL-backed wiki pages with citations, version, lifecycle status, stale warnings, related topics, related pages, history, retrieval strategy, and source/chunk details. WRAGS mode searches saved pages first and uses Semantic/Vector RAG as the supported fallback. Saved WRAGS pages also participate in Search Center and Copilot retrieval context.
 
 ## API Surface
 
@@ -361,11 +361,11 @@ A strong demo for a technical audience:
    IngestionJobId = <job id>
    ```
 
-6. Open the Activity panel and watch the background job move through extraction, chunks/embeddings, graph persistence, enrichment, community summaries, and completion.
+6. Open the Activity panel and watch the background job move through extraction, chunks/embeddings, lightweight graph seed persistence, and completion.
 
-7. Query in Search Center using Semantic, GraphRAG, and LazyGraphRAG modes.
+7. Query in Search Center using Semantic and WRAGS modes.
 
-   A recent Docker UI smoke test validated all three Search Center modes. Semantic returned standard ranked chunk results, GraphRAG returned summary-based results labeled `summary-entity`, and LazyGraphRAG returned budgeted lazy expansion results without console errors.
+   The current product demo validates fast Semantic/Vector RAG first, then WRAGS durable wiki retrieval, then GraphRAG and LazyGraphRAG graph-backed retrieval with Semantic fallback.
 
 8. Open Graph Explorer and show nodes, edges, or paths.
 

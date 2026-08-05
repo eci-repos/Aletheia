@@ -92,7 +92,7 @@ public class CopilotController : ControllerBase
         }
 
         var result = await _planApprovalService
-            .CreatePlanAsync(payload.Prompt, cancellationToken)
+            .CreatePlanAsync(payload.Prompt, payload.SessionId, payload.HistoryMessages, cancellationToken)
             .ConfigureAwait(false);
 
         return result.IsSuccess
@@ -273,6 +273,10 @@ public class CopilotController : ControllerBase
     public class PlanPayload
     {
         public string Prompt { get; set; } = string.Empty;
+
+        public Guid? SessionId { get; set; }
+
+        public IReadOnlyList<ChatMessage>? HistoryMessages { get; set; }
     }
 
     public class CancelPayload

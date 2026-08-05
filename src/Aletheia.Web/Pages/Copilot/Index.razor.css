@@ -6,16 +6,22 @@
 }
 
 .copilot-layout {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(22rem, 1fr) 0.55rem var(--copilot-side-width, 360px);
+    gap: 0.6rem;
     flex: 1 1 auto;
     min-height: 0;
 }
 
+.copilot-layout.execution-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .copilot-conversation-column {
     display: flex;
-    flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
 }
 
 .copilot-conversation-card {
@@ -25,10 +31,66 @@
     min-height: 0;
 }
 
+.copilot-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .copilot-conversation-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+}
+
+.copilot-resize-handle {
+    align-self: stretch;
+    width: 0.55rem;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: linear-gradient(90deg, transparent 0, transparent 35%, #cbd5e1 35%, #cbd5e1 65%, transparent 65%);
+    cursor: col-resize;
+}
+
+.copilot-resize-handle:hover,
+.copilot-resize-handle:focus-visible {
+    background: #dbeafe;
+    outline: 2px solid #93c5fd;
+    outline-offset: 0;
+}
+
+.copilot-plan-column {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.copilot-layout.execution-collapsed .copilot-plan-column,
+.copilot-layout.execution-collapsed .copilot-resize-handle {
+    display: none;
+}
+
+.copilot-side-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    color: #374151;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.copilot-panel-empty {
+    padding: 0.75rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    background: #ffffff;
+    font-size: 0.9rem;
 }
 
 .copilot-message {
@@ -93,6 +155,25 @@
     .copilot-page {
         height: auto;
         min-height: calc(100vh - 5.7rem);
+    }
+
+    .copilot-layout,
+    .copilot-layout.execution-collapsed {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .copilot-resize-handle {
+        display: none;
+    }
+
+    .copilot-plan-column {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .copilot-layout.execution-collapsed .copilot-plan-column {
+        display: none;
     }
 
     .copilot-conversation-card {

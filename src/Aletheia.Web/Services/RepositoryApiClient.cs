@@ -48,7 +48,14 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<FileMetadata>(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<UploadClientResult> UploadAsync(Guid fileId, string fileName, string contentType, Stream content, long sizeBytes, CancellationToken cancellationToken = default)
+    public async Task<UploadClientResult> UploadAsync(
+        Guid fileId,
+        string fileName,
+        string contentType,
+        Stream content,
+        long sizeBytes,
+        Guid? existingFileId = null,
+        CancellationToken cancellationToken = default)
     {
         var form = new MultipartFormDataContent
         {
@@ -58,8 +65,28 @@ public sealed class RepositoryApiClient
             { new StringContent(contentType), "contentType" },
             { new StringContent(sizeBytes.ToString()), "sizeBytes" }
         };
+        if (existingFileId.HasValue)
+        {
+            form.Add(new StringContent(existingFileId.Value.ToString()), "existingFileId");
+        }
 
         var response = await _httpClient.PostAsync("/api/files/upload", form, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var duplicate = await response.Content.ReadFromJsonAsync<DuplicateUploadApiResult>(cancellationToken).ConfigureAwait(false);
+            return new UploadClientResult(
+                false,
+                false,
+                false,
+                duplicate?.NoChange == true ? "NoChange" : "Duplicate",
+                duplicate?.Message ?? "A file with identical content already exists.",
+                IsDuplicate: true,
+                DuplicateMessage: duplicate?.Message,
+                NoChange: duplicate?.NoChange == true,
+                ExistingFileId: duplicate?.ExistingFileId,
+                ExistingFileName: duplicate?.ExistingFileName);
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             var error = await BuildApiFailureAsync(
@@ -535,16 +562,39 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
     }
 
-    // Copilot planning
-    public async Task<ChatPlanRecord?> PlanChatAsync(string prompt, CancellationToken cancellationToken = default)
+    public async Task<BackgroundJobClientSnapshot?> RepairRagsIndexAsync(string? query = null, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.PostAsJsonAsync("/api/copilot/plan", new { Prompt = prompt }, cancellationToken).ConfigureAwait(false);
+        var endpoint = string.IsNullOrWhiteSpace(query)
+            ? "/api/jobs/rags/repair"
+            : $"/api/jobs/rags/repair?query={Uri.EscapeDataString(query)}";
+        var response = await _httpClient.PostAsync(endpoint, content: null, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            throw new HttpRequestException(await BuildApiFailureAsync(
+                response,
+                "RAGS index repair",
+                $"POST {endpoint}",
+                cancellationToken).ConfigureAwait(false));
         }
 
-        return await response.Content.ReadFromJsonAsync<ChatPlanRecord>(cancellationToken).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Copilot planning
+    public async Task<ChatPlanRecord?> PlanChatAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsJsonAsync("/api/copilot/plan", new { Prompt = prompt, SessionId = sessionId, HistoryMessages = history }, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(await BuildApiFailureAsync(
+                response,
+                "Copilot plan creation",
+                "POST /api/copilot/plan",
+                cancellationToken).ConfigureAwait(false));
+        }
+
+        return await response.Content.ReadFromJsonAsync<ChatPlanRecord>(cancellationToken).ConfigureAwait(false)
+            ?? throw new HttpRequestException("Copilot plan creation failed. The API returned an empty plan response. Endpoint: POST /api/copilot/plan.");
     }
 
     public async Task<ChatPlanRecord?> ApproveChatPlanAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -552,10 +602,15 @@ public sealed class RepositoryApiClient
         var response = await _httpClient.PostAsync($"/api/copilot/plans/{planId}/approve", null, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            throw new HttpRequestException(await BuildApiFailureAsync(
+                response,
+                "Copilot plan approval",
+                $"POST /api/copilot/plans/{planId}/approve",
+                cancellationToken).ConfigureAwait(false));
         }
 
-        return await response.Content.ReadFromJsonAsync<ChatPlanRecord>(cancellationToken).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<ChatPlanRecord>(cancellationToken).ConfigureAwait(false)
+            ?? throw new HttpRequestException($"Copilot plan approval failed. The API returned an empty plan response. Endpoint: POST /api/copilot/plans/{planId}/approve.");
     }
 
     public async Task<ChatPlanRecord?> CancelChatPlanAsync(Guid planId, string? reason = null, CancellationToken cancellationToken = default)
@@ -574,10 +629,15 @@ public sealed class RepositoryApiClient
         var response = await _httpClient.PostAsync($"/api/copilot/plans/{planId}/execute", null, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            throw new HttpRequestException(await BuildApiFailureAsync(
+                response,
+                "Copilot plan execution",
+                $"POST /api/copilot/plans/{planId}/execute",
+                cancellationToken).ConfigureAwait(false));
         }
 
-        return await response.Content.ReadFromJsonAsync<ChatJobSnapshot>(cancellationToken).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<ChatJobSnapshot>(cancellationToken).ConfigureAwait(false)
+            ?? throw new HttpRequestException($"Copilot plan execution failed. The API returned an empty job response. Endpoint: POST /api/copilot/plans/{planId}/execute.");
     }
 
     public async Task<ChatJobSnapshot?> GetChatJobAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -589,6 +649,17 @@ public sealed class RepositoryApiClient
         }
 
         return await response.Content.ReadFromJsonAsync<ChatJobSnapshot>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<ChatJobSnapshot>?> GetChatJobsAsync(int take = 50, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync($"/api/copilot/jobs/chat?take={take}", cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<IReadOnlyList<ChatJobSnapshot>>(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> CancelChatJobAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -861,6 +932,15 @@ public sealed class RepositoryApiClient
 
     private sealed record UploadApiResult(bool RagsIngested, bool KnowledgeIndexed, string IngestionStatus, string? IngestionError, Guid? IngestionJobId);
 
+    private sealed record DuplicateUploadApiResult(
+        bool Duplicate,
+        bool NoChange,
+        string? Message,
+        Guid? ExistingFileId,
+        string? ExistingFileName,
+        DateTimeOffset? ExistingUploadedAt,
+        string? ExistingVersion);
+
     private static async Task<string> BuildApiFailureAsync(
         HttpResponseMessage response,
         string operation,
@@ -946,7 +1026,18 @@ public sealed class RepositoryApiClient
     }
 }
 
-public sealed record UploadClientResult(bool Uploaded, bool RagsIngested, bool KnowledgeIndexed, string IngestionStatus, string? Error, Guid? IngestionJobId = null);
+public sealed record UploadClientResult(
+    bool Uploaded,
+    bool RagsIngested,
+    bool KnowledgeIndexed,
+    string IngestionStatus,
+    string? Error,
+    Guid? IngestionJobId = null,
+    bool IsDuplicate = false,
+    string? DuplicateMessage = null,
+    bool NoChange = false,
+    Guid? ExistingFileId = null,
+    string? ExistingFileName = null);
 public sealed record GraphImportResult(bool IsSuccess, string? Error);
 public sealed record BackgroundJobClientSnapshot(
     Guid JobId,
@@ -965,3 +1056,5 @@ public sealed record BackgroundJobClientSnapshot(
     DateTimeOffset LastHeartbeatAt,
     DateTimeOffset? CompletedAt,
     string? Error);
+
+

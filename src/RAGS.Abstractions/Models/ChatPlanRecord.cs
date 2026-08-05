@@ -40,5 +40,9 @@ public sealed class ChatPlanRecord
 
     public DateTimeOffset ExpiresAt { get; init; }
 
+    public Guid? SessionId { get; init; }
+
+    public IReadOnlyList<ChatMessage>? HistoryMessages { get; init; }
+
     public string? CancellationReason { get; init; }
 }

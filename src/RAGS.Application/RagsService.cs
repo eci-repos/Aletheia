@@ -2,6 +2,7 @@ using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.RAGS.Application.Pipelines;
+using Microsoft.Extensions.Logging;
 
 namespace Aletheia.RAGS.Application;
 
@@ -13,15 +14,18 @@ public sealed class RagsService : IRagsService
     private readonly ChunkingPipeline _chunkingPipeline;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IVectorStore _vectorStore;
+    private readonly Microsoft.Extensions.Logging.ILogger<RagsService> _logger;
 
     public RagsService(
         ChunkingPipeline chunkingPipeline,
         IEmbeddingProvider embeddingProvider,
-        IVectorStore vectorStore)
+        IVectorStore vectorStore,
+        Microsoft.Extensions.Logging.ILogger<RagsService>? logger = null)
     {
         _chunkingPipeline = chunkingPipeline ?? throw new ArgumentNullException(nameof(chunkingPipeline));
         _embeddingProvider = embeddingProvider ?? throw new ArgumentNullException(nameof(embeddingProvider));
         _vectorStore = vectorStore ?? throw new ArgumentNullException(nameof(vectorStore));
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RagsService>.Instance;
     }
 
     public async Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
@@ -74,22 +78,29 @@ public sealed class RagsService : IRagsService
             throw new ArgumentNullException(nameof(request));
         }
 
+        _logger.LogInformation("RAGS retrieval started for query '{Query}' (topK={TopK}, sourceId={SourceId}).", request.Query, request.TopK, request.SourceId);
+
         var embeddingResult = await _embeddingProvider.GenerateAsync(request.Query, cancellationToken).ConfigureAwait(false);
         if (embeddingResult.IsFailure || embeddingResult.Value.IsEmpty)
         {
+            _logger.LogWarning("RAGS embedding generation failed for query '{Query}': {Error}.", request.Query, embeddingResult.Error);
             return Result<IReadOnlyList<SearchResult>>.Failure(embeddingResult.Error ?? RetrievalFailedMessage);
         }
+
+        _logger.LogInformation("RAGS embedding generated for query '{Query}'; querying vector store.", request.Query);
 
         var searchResult = request.SourceId.HasValue && _vectorStore is ISourceFilteredVectorStore sourceFilteredVectorStore
             ? await sourceFilteredVectorStore.SearchBySourceAsync(embeddingResult.Value, request.TopK, request.SourceId.Value, cancellationToken).ConfigureAwait(false)
             : await _vectorStore.SearchAsync(embeddingResult.Value, request.TopK, cancellationToken).ConfigureAwait(false);
         if (searchResult.IsFailure)
         {
+            _logger.LogWarning("RAGS vector search failed for query '{Query}': {Error}.", request.Query, searchResult.Error);
             return Result<IReadOnlyList<SearchResult>>.Failure(searchResult.Error ?? RetrievalFailedMessage);
         }
 
         if (searchResult.Value is null)
         {
+            _logger.LogWarning("RAGS vector search returned null results for query '{Query}'.", request.Query);
             return Result<IReadOnlyList<SearchResult>>.Failure(RetrievalFailedMessage);
         }
 
@@ -102,6 +113,20 @@ public sealed class RagsService : IRagsService
                 .ToList();
         }
 
+        _logger.LogInformation("RAGS retrieval completed for query '{Query}'; returned {Count} result(s).", request.Query, results.Count);
         return Result<IReadOnlyList<SearchResult>>.Success(results);
+    }
+
+    public async Task<Result<IReadOnlyList<SearchResult>>> RetrieveSourceChunksAsync(
+        Guid sourceId,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _vectorStore
+            .GetSourceChunksAsync(sourceId, Math.Clamp(take, 1, 50), cancellationToken)
+            .ConfigureAwait(false);
+        return result.IsSuccess && result.Value is not null
+            ? result
+            : Result<IReadOnlyList<SearchResult>>.Failure(result.Error ?? "Source chunk retrieval failed.");
     }
 }

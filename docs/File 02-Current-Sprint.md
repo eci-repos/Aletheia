@@ -1,65 +1,46 @@
-# Sprint 55 - Document Briefs and the End-User Wiki (Hide Internal Search Options)
+# Sprint 56 - Duplicate Upload Detection and Document Update Flow
 
 **Status:** Active
 
+Full authority: `docs/sprints/Sprint-56 - Duplicate Upload Detection and Document Update Flow.md` (created 2026-08-05). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+
+Sprint 55 (Document Briefs and the End-User Wiki) is **complete and committed** (HEAD `8e4bcb4`); see `docs/sprints/Sprint-55 - Document Briefs and End-User Wiki.md` and `docs/sprints/Sprint-55 - Session Handoff 2026-08-04.md`. Remaining Sprint 55 verification (GitHub Actions CI run, Docker smoke test) is carried in the Sprint 56 handoff notes as verification work, not new feature work.
+
 ## Objective
 
-Make the Wiki genuinely useful for end users and stop exposing internal retrieval surfaces. User-facing naming: call it **Wiki** (drop "WRAGS" - too technical); "WRAGS" is reserved for internal/technical contexts only.
+1. **Trap duplicate uploads** of the exact same file: notify the user, store/ingest nothing a second time.
+2. **Explicit document update path**: submit a changed file against an existing document, keep its identity (fileId), create a new version, replace old content in search/graph/Wiki, regenerate the Wiki brief, and list prior versions.
 
-1. **Document Briefs** - replace community-summary wiki pages with readable, per-document "briefs": nature/purpose first, then the canonical template's ordered sections, grounded and cited, with no chunk/community/graph jargon.
-2. **Hide technical options** - remove (or gate behind an admin/diagnostics flag) the raw Wiki, GraphRAG, LazyGraphRAG, and global-graph search controls under the search form so end users are not exposed to internal summaries.
-3. Keep Copilot and Search Center semantic search as the primary user paths.
+## Authorized Work (summary - see sprint file for details)
 
-## Background
-
-- `wiki_pages` today contains GraphRAG community summaries (`generated_from` = graphrag), e.g., "Community Summary: Community L0 7712a139 - Composition: 54 members, each a distinct text chunk..." - internal provenance, not end-user content (confirmed in field testing).
-- Sprint 53 built the machinery for user-friendly content: `DocumentTemplateRegistry` (ordered sections per canonical), deterministic opening-chunk injection, and the ordered-section summary scaffold in `RetrievalAugmentedPromptBuilder`.
-- The search/WRAGS form exposes Wiki/GraphRAG/LazyGraphRAG/global-graph search; these are internal surfaces. End users see a surface labeled **Wiki** (never "WRAGS").
-
-## Deliverables
-
-1. **Document Brief generation**
-   - New background job (pattern: `IngestionJobService` / wiki regeneration) that, per registered document, generates a **Document Brief**: nature/purpose first (opening/Project Summary), then the canonical template's sections in order, each grounded in per-section retrieved evidence; cited; plain language.
-   - Store as `wiki_pages` rows with `generated_from = 'document-brief'`, `primary_source_id` = the document, and `source_ids` = [document id]; replace/augment the existing community-summary pages for the user-facing Wiki.
-   - Trigger on ingestion (after `EnsureIngestedAsync` succeeds) and via a regeneration endpoint/action.
-   - Skip documents with no canonical template (ingestion gate already prevents them).
-
-2. **Wiki surface shows briefs**
-   - Wiki search/list returns document briefs first (or only); community summaries are excluded from end-user output (kept internally for graph answers / diagnostics).
-
-3. **Hide technical options (user-facing name: Wiki)**
-   - Under the search/Wiki form: hide Wiki/GraphRAG/LazyGraphRAG/global-graph search controls from end users behind an admin flag (`FeatureFlags:ShowInternalSearch` in appsettings, default false). Copilot and semantic search remain visible.
-   - Remove or gate the corresponding API endpoints for non-admin users (authorization check on the wiki/global-graph controllers or a feature gate).
-   - Rename user-facing labels: "Wiki" everywhere the end user sees it; keep "WRAGS" only in internal code/logs/docs.
-
-4. **Tests**
-   - Brief generation unit tests (prompt built from template + opening chunks; wiki row written with `generated_from=document-brief`).
-   - Feature-flag gating tests (internal search hidden when flag false).
-   - Existing suites remain green.
-
-5. **Docs**
-   - `docs/Architecture.md`: Document Briefs section (generation, storage, end-user wiki vs internal summaries).
-   - `docs/AdministratorGuide.md` / `OperationsGuide.md`: the `FeatureFlags:ShowInternalSearch` flag; how to regenerate briefs.
-   - AGENTS / handoff notes updated.
+1. **Content fingerprinting** - server-side SHA-256 of uploaded bytes; `ContentHash` on `FileMetadata`; `content_hash` column + index in `init.sql` plus an idempotent migration for existing deployments.
+2. **Duplicate trap** - `IMetadataRepository.FindByContentHashAsync` (or `IDuplicateDetectionService`); on match, block storage/metadata/ingestion and return HTTP 409 with `{ duplicate, message, existingFileId, existingFileName, existingUploadedAt, existingVersion }`; Web Upload page shows "Duplicate - already exists", Activity warning, no ingestion tracking.
+3. **Document update flow** - optional `existingFileId` on `POST /api/files/upload`; same-hash update trapped; else new version under same fileId, new blob + metadata + content_hash, ingestion job with the same sourceId, prior knowledge/graph rows replaced (reuse `DeleteSourceAsync` paths), brief regenerated; Web "Update existing document" / "Upload new version" UI; `RepositoryApiClient.UpdateDocumentAsync`.
+4. **Tests** - hash persistence; duplicate blocks storage/ingestion; update creates version with same sourceId; identical-content update trapped; 409/400 shapes; Web mapping; existing suites green.
+5. **Existing duplicate cleanup** - admin-gated duplicate report (content_hash matches) + documented manual removal using the existing DELETE flow; no automatic deletion.
+6. **Docs** - Architecture, Administrator/Operations guides, AGENTS/handoff notes.
 
 ## Acceptance Criteria
 
-- The Wiki (user-facing label, not "WRAGS") shows readable document briefs (nature first, template sections in order, cited) and no community/chunk jargon.
-- Raw Wiki/GraphRAG/LazyGraphRAG/global-graph controls are hidden from end users (flag default false); the visible surface is labeled "Wiki".
-- Briefs regenerate on ingestion and via the regeneration action.
-- RAGS.UnitTests / Foundation / Repository suites green; web C# compiles.
+- Same-file re-post: trapped, user notified, zero new artifacts (blob, metadata, job, chunks, graph, brief).
+- Update: new version under same fileId, old content replaced in search/graph/Wiki, version history lists prior versions, brief regenerated.
+- No-change update: notified, nothing stored, no new version.
+- RAGS / Foundation / Repository suites green; Web C#/Razor compiles.
 
 ## Out of Scope
 
-- Improving graph algorithms or community summaries themselves (they remain internal).
-- Server-side multi-tenant wiki history.
-
+- Cross-tenant hash matching; blob dedup across unrelated fileIds; graph algorithm improvements; server-side multi-tenant wiki history.
 
 ---
 
-## Progress (2026-08-04)
+## Progress (2026-08-05)
 
-- **Document Briefs implemented**: IDocumentBriefService/DocumentBriefService and IDocumentBriefGenerator/SemanticKernelDocumentBriefGenerator (RAGS.Application); RetrievalAugmentedPromptBuilder.BuildDocumentBrief; IngestionJobService kind DocumentBriefs with POST /api/wiki/briefs/regenerate; triggers after EnsureIngestedAsync and after upload ingestion.
-- **Wiki surface shows briefs**: PostgreSqlWikiPageRepository search/recent exclude generated_from = 'graphrag' and order document-brief first.
-- **Internal search gated**: FeatureFlags:ShowInternalSearch (default false), IInternalSearchGate/InternalSearchGate; GraphRAG/LazyGraphRAG/GraphQuery controllers and the internal wiki modes return 404 when hidden; Search Center and Wiki UI hide the internal controls; user-facing labels renamed to **Wiki** (NavMenu, Wiki page).
-- **Tests**: DocumentBriefServiceTests, InternalSearchGateTests, WikiControllerInternalSearchGateTests, GraphRAG/LazyGraphRAG controller gating tests; RAGS (225), Foundation (55), Repository (91) suites green. Web C#/Razor compiles (full WASM build blocked locally by an environment task-host issue, pre-existing).
+- Sprint 56 sprint file created (`docs/sprints/Sprint-56 - Duplicate Upload Detection and Document Update Flow.md`).
+- **Content fingerprinting**: SHA-256 computed server-side in `FilesController.Upload`; `FileMetadata.ContentHash` + `UploadRequest.ContentHash`; `file_metadata.content_hash` column + `idx_file_metadata_content_hash` in `init.sql` and idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql`; `PostgreSqlMetadataRepository` persists/loads the hash.
+- **Duplicate trap**: `IDuplicateDetectionService`/`DuplicateDetectionService` (Repository.Application, singleton) + `IMetadataRepository.FindByContentHashAsync` (default no-op on the interface; PostgreSQL override). Exact duplicates return HTTP 409 with the structured payload; Web Upload page shows "Duplicate - already exists" / "Already current - no changes" badges, Activity warnings, and skips ingestion tracking.
+- **Document update flow**: `POST /api/files/upload` optional `existingFileId` -> no-change 409, 400 for missing document, version snapshot via `IVersioningUseCase`, blob + unversioned metadata row replaced (same fileId), ingestion job with the same sourceId; replace semantics in `EnsureIngestedAsync` (knowledge-index + graph `DeleteSourceAsync` before RAGS ingest; brief regenerates). Web: Browse update (↻) action + Upload update mode.
+- **Admin cleanup report**: `GET /api/files/duplicates` (`[Authorize(Roles = Administrator)]`) lists rows sharing a content hash; manual DELETE flow documented; no automatic deletion.
+- **Tests**: Repository.UnitTests 102 passed (new DuplicateDetectionServiceTests + FilesControllerTests: 409 shapes, no-change, update versioning, ingestion enqueue, 400s). RAGS 225 and Foundation 55 still green. `RepositoryApiClientUploadTests` (Web) added; Web.UnitTests not runnable in this sandbox (pre-existing WASM task-host failure; CI does not run Web.UnitTests).
+- **Docs**: Architecture, AdministratorGuide, OperationsGuide, AGENTS.md, File 03-openhands.md updated.
+
+

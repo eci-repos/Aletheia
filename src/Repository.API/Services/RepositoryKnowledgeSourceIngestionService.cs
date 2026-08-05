@@ -15,6 +15,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
     private readonly IRagsService _ragsService;
     private readonly IUploadedContentKnowledgeIndexer _knowledgeIndexer;
     private readonly IDocumentTemplateRegistry? _templateRegistry;
+    private readonly IGraphProvider? _graphProvider;
     private readonly Lazy<IIngestionJobService>? _ingestionJobs;
     private readonly ILogger<RepositoryKnowledgeSourceIngestionService> _logger;
 
@@ -24,6 +25,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         IRagsService ragsService,
         IUploadedContentKnowledgeIndexer knowledgeIndexer,
         IDocumentTemplateRegistry? templateRegistry = null,
+        IGraphProvider? graphProvider = null,
         ILogger<RepositoryKnowledgeSourceIngestionService>? logger = null,
         Lazy<IIngestionJobService>? ingestionJobs = null)
     {
@@ -32,6 +34,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         _ragsService = ragsService ?? throw new ArgumentNullException(nameof(ragsService));
         _knowledgeIndexer = knowledgeIndexer ?? throw new ArgumentNullException(nameof(knowledgeIndexer));
         _templateRegistry = templateRegistry;
+        _graphProvider = graphProvider;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RepositoryKnowledgeSourceIngestionService>.Instance;
         _ingestionJobs = ingestionJobs;
     }
@@ -88,6 +91,27 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
 
         _logger.LogInformation("Knowledge source {SourceName} text extracted ({TextLength} chars); running RAGS ingestion.", source.SourceName, extraction.Value.Text.Length);
 
+        // Sprint 56 replace semantics: clear prior knowledge-index rows and graph nodes for this
+        // source so re-ingestion (document updates, repairs) replaces content instead of accumulating.
+        var knowledgeCleanup = await _knowledgeIndexer
+            .DeleteSourceAsync(source.SourceId, cancellationToken)
+            .ConfigureAwait(false);
+        if (knowledgeCleanup is not null && knowledgeCleanup.IsFailure)
+        {
+            _logger.LogWarning("Knowledge source cleanup failed for {SourceName}: {Error}.", source.SourceName, knowledgeCleanup.Error);
+        }
+
+        if (_graphProvider is not null)
+        {
+            var graphCleanup = await _graphProvider
+                .DeleteSourceAsync(source.SourceId.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+            if (graphCleanup is not null && graphCleanup.IsFailure)
+            {
+                _logger.LogWarning("Graph source cleanup failed for {SourceName}: {Error}.", source.SourceName, graphCleanup.Error);
+            }
+        }
+
         var ingestion = await _ragsService
             .IngestAsync(new IngestionRequest(source.SourceId, extraction.Value.Text, source.SourceName), cancellationToken)
             .ConfigureAwait(false);
@@ -121,3 +145,6 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         return Result<bool>.Success(true);
     }
 }
+
+
+

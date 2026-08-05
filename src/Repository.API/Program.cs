@@ -54,6 +54,7 @@ builder.Services.AddSingleton<IRefreshTokenStore, PostgreSqlRefreshTokenStore>()
 builder.Services.AddAletheiaSecurity(builder.Configuration);
 
 builder.Services.AddSingleton<IMetadataRepository, PostgreSqlMetadataRepository>();
+builder.Services.AddSingleton<Aletheia.Repository.Application.IDuplicateDetectionService, Aletheia.Repository.Application.DuplicateDetectionService>();
 builder.Services.AddSingleton<IVersioningService, PostgreSqlVersioningService>();
 builder.Services.AddSingleton<ISearchProvider, PostgreSqlSearchProvider>();
 
@@ -252,6 +253,7 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 app.Run();
 
 public partial class Program { }
+
 
 
 

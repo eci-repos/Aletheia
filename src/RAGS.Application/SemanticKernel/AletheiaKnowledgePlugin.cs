@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 
 namespace Aletheia.RAGS.Application.SemanticKernel;
@@ -12,27 +13,11 @@ namespace Aletheia.RAGS.Application.SemanticKernel;
 /// </summary>
 public sealed class AletheiaKnowledgePlugin
 {
-    private readonly IRagsService _ragsService;
-    private readonly IGraphRagService _graphRagService;
-    private readonly ILazyGraphRagService _lazyGraphRagService;
-    private readonly IGlobalGraphSearchService _globalGraphSearchService;
-    private readonly IKnowledgeSourceResolver? _knowledgeSourceResolver;
-    private readonly IKnowledgeSourceIngestionService? _knowledgeSourceIngestionService;
+    private readonly IServiceProvider _serviceProvider;
 
-    public AletheiaKnowledgePlugin(
-        IRagsService ragsService,
-        IGraphRagService graphRagService,
-        ILazyGraphRagService lazyGraphRagService,
-        IGlobalGraphSearchService globalGraphSearchService,
-        IKnowledgeSourceResolver? knowledgeSourceResolver = null,
-        IKnowledgeSourceIngestionService? knowledgeSourceIngestionService = null)
+    public AletheiaKnowledgePlugin(IServiceProvider serviceProvider)
     {
-        _ragsService = ragsService ?? throw new ArgumentNullException(nameof(ragsService));
-        _graphRagService = graphRagService ?? throw new ArgumentNullException(nameof(graphRagService));
-        _lazyGraphRagService = lazyGraphRagService ?? throw new ArgumentNullException(nameof(lazyGraphRagService));
-        _globalGraphSearchService = globalGraphSearchService ?? throw new ArgumentNullException(nameof(globalGraphSearchService));
-        _knowledgeSourceResolver = knowledgeSourceResolver;
-        _knowledgeSourceIngestionService = knowledgeSourceIngestionService;
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
 
     /// <summary>
@@ -57,7 +42,8 @@ public sealed class AletheiaKnowledgePlugin
             resolvedSourceId = parsed;
         }
 
-        var result = await _ragsService.RetrieveAsync(
+        var ragsService = _serviceProvider.GetRequiredService<IRagsService>();
+        var result = await ragsService.RetrieveAsync(
             new RetrievalRequest(query, Math.Clamp(topK, 1, 50), resolvedSourceId),
             cancellationToken).ConfigureAwait(false);
 
@@ -80,7 +66,8 @@ public sealed class AletheiaKnowledgePlugin
             return new GlobalSearchResult("Query is required.", Array.Empty<string>(), Array.Empty<SearchResult>());
         }
 
-        var result = await _graphRagService.GlobalSearchAsync(query, cancellationToken).ConfigureAwait(false);
+        var graphRagService = _serviceProvider.GetRequiredService<IGraphRagService>();
+        var result = await graphRagService.GlobalSearchAsync(query, cancellationToken).ConfigureAwait(false);
         return result.IsSuccess && result.Value is not null
             ? result.Value
             : new GlobalSearchResult(result.Error ?? "GraphRAG search returned no results.", Array.Empty<string>(), Array.Empty<SearchResult>());
@@ -100,7 +87,8 @@ public sealed class AletheiaKnowledgePlugin
             return new GlobalSearchResult("Query is required.", Array.Empty<string>(), Array.Empty<SearchResult>());
         }
 
-        var result = await _lazyGraphRagService.GlobalSearchAsync(query, cancellationToken).ConfigureAwait(false);
+        var lazyGraphRagService = _serviceProvider.GetRequiredService<ILazyGraphRagService>();
+        var result = await lazyGraphRagService.GlobalSearchAsync(query, cancellationToken).ConfigureAwait(false);
         return result.IsSuccess && result.Value is not null
             ? result.Value
             : new GlobalSearchResult(result.Error ?? "LazyGraphRAG search returned no results.", Array.Empty<string>(), Array.Empty<SearchResult>());
@@ -120,7 +108,8 @@ public sealed class AletheiaKnowledgePlugin
             return new GlobalSearchResult("Query is required.", Array.Empty<string>(), Array.Empty<SearchResult>());
         }
 
-        var result = await _globalGraphSearchService.SearchAsync(query, cancellationToken).ConfigureAwait(false);
+        var globalGraphSearchService = _serviceProvider.GetRequiredService<IGlobalGraphSearchService>();
+        var result = await globalGraphSearchService.SearchAsync(query, cancellationToken).ConfigureAwait(false);
         return result.IsSuccess && result.Value is not null
             ? result.Value
             : new GlobalSearchResult(result.Error ?? "Global graph search returned no results.", Array.Empty<string>(), Array.Empty<SearchResult>());
@@ -135,12 +124,13 @@ public sealed class AletheiaKnowledgePlugin
         [Description("The user's question.")] string userMessage,
         CancellationToken cancellationToken = default)
     {
-        if (_knowledgeSourceResolver is null || string.IsNullOrWhiteSpace(userMessage))
+        var knowledgeSourceResolver = _serviceProvider.GetService<IKnowledgeSourceResolver>();
+        if (knowledgeSourceResolver is null || string.IsNullOrWhiteSpace(userMessage))
         {
             return null;
         }
 
-        var result = await _knowledgeSourceResolver.ResolveAsync(userMessage, cancellationToken).ConfigureAwait(false);
+        var result = await knowledgeSourceResolver.ResolveAsync(userMessage, cancellationToken).ConfigureAwait(false);
         return result.IsSuccess ? result.Value : null;
     }
 
@@ -153,13 +143,14 @@ public sealed class AletheiaKnowledgePlugin
         [Description("The source ID of the artifact to ingest."), DefaultValue("00000000-0000-0000-0000-000000000000")] string sourceId,
         CancellationToken cancellationToken = default)
     {
-        if (_knowledgeSourceIngestionService is null || !Guid.TryParse(sourceId, out var parsed) || parsed == Guid.Empty)
+        var knowledgeSourceIngestionService = _serviceProvider.GetService<IKnowledgeSourceIngestionService>();
+        if (knowledgeSourceIngestionService is null || !Guid.TryParse(sourceId, out var parsed) || parsed == Guid.Empty)
         {
             return false;
         }
 
         var source = new KnowledgeSource(parsed, "resolved-source", DateTimeOffset.UtcNow);
-        var result = await _knowledgeSourceIngestionService.EnsureIngestedAsync(source, cancellationToken).ConfigureAwait(false);
+        var result = await knowledgeSourceIngestionService.EnsureIngestedAsync(source, cancellationToken).ConfigureAwait(false);
         return result.IsSuccess && result.Value;
     }
 }

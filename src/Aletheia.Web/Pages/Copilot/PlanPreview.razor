@@ -18,7 +18,8 @@
         }
     </div>
     <div class="card-body">
-        <p class="mb-2"><strong>Mode:</strong> @Plan.Mode</p>
+        <p class="mb-2"><strong>Mode:</strong> @FormatMode(Plan.Mode)</p>
+        <p class="mb-2"><strong>Status:</strong> @FormatPlanStatus(Plan.Status)</p>
         <p class="mb-2"><strong>Estimated duration:</strong> @Plan.EstimatedSecondsMin - @Plan.EstimatedSecondsMax seconds</p>
         <p class="mb-2"><strong>Estimated model calls:</strong> @Plan.EstimatedLlmCalls</p>
         <p class="mb-2"><strong>Estimated retrieval:</strong> @Plan.EstimatedRetrievalCount chunks</p>
@@ -71,4 +72,25 @@
 
     [Parameter]
     public EventCallback OnCancel { get; set; }
+
+    public static string FormatMode(ChatExecutionMode mode) => mode switch
+    {
+        ChatExecutionMode.FastPath => "Fast path",
+        ChatExecutionMode.Retrieval => "Retrieval",
+        ChatExecutionMode.CorpusAnalysis => "Corpus analysis",
+        ChatExecutionMode.ComparativeAnalysis => "Comparative analysis",
+        ChatExecutionMode.TimelineAnalysis => "Timeline analysis",
+        ChatExecutionMode.StructuredSynthesis => "Structured synthesis",
+        _ => mode.ToString()
+    };
+
+    public static string FormatPlanStatus(ChatPlanStatus status) => status switch
+    {
+        ChatPlanStatus.Proposed => "Ready for review",
+        ChatPlanStatus.Approved => "Approved",
+        ChatPlanStatus.Cancelled => "Cancelled",
+        ChatPlanStatus.Expired => "Expired",
+        ChatPlanStatus.Executed => "Executed",
+        _ => status.ToString()
+    };
 }

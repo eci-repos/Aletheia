@@ -16,7 +16,7 @@ Authorized Phases:
 - Phase 2 - Repository Contracts
 - Phase 3 - Repository Core
 
-No other phases are authorized.
+Historical note: this archived sprint limited work while it was active. It is not a current repository-wide authorization rule; current scope comes from `docs/File 02-Current-Sprint.md`.
 
 ---
 

@@ -72,6 +72,15 @@
     font-size: 0.9rem;
 }
 
+.graph-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+    gap: 0.75rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .graph-canvas {
     flex: 1 1 auto;
     min-height: 0;
@@ -86,6 +95,105 @@
     background: #ffffff;
 }
 
+.graph-context-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0.75rem;
+    border: 1px solid #d8dde6;
+    border-radius: 4px;
+    background: #ffffff;
+}
+
+.context-panel-header {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.context-panel-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.25;
+}
+
+.context-panel-header span {
+    display: block;
+    margin-top: 0.2rem;
+    color: #4b5563;
+    font-size: 0.82rem;
+}
+
+.context-mode {
+    padding: 0.7rem 0;
+    border-bottom: 1px solid #eef0f4;
+}
+
+.context-mode .form-check {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0;
+}
+
+.context-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    padding: 0.7rem 0;
+}
+
+.context-empty {
+    margin: 0.25rem 0 0;
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+
+.context-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-height: 0;
+    overflow: auto;
+}
+
+.context-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.5rem;
+    align-items: start;
+    padding: 0.45rem 0.35rem;
+    border-radius: 4px;
+}
+
+.context-item:hover {
+    background: #f6f8fb;
+}
+
+.context-item strong,
+.context-item small {
+    display: block;
+}
+
+.context-item strong {
+    overflow: hidden;
+    color: #111827;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.context-item small {
+    margin-top: 0.15rem;
+    color: #6b7280;
+    font-size: 0.78rem;
+}
+
 @media (max-width: 1200px) {
     .graph-toolbar {
         grid-template-columns: 1fr;
@@ -94,6 +202,15 @@
 
     .graph-actions {
         flex-wrap: wrap;
+    }
+
+    .graph-main {
+        grid-template-columns: minmax(0, 1fr);
+        overflow: visible;
+    }
+
+    .graph-context-panel {
+        max-height: 16rem;
     }
 }
 
@@ -116,5 +233,9 @@
 
     .graph-canvas {
         min-height: 45vh;
+    }
+
+    .graph-context-panel {
+        max-height: none;
     }
 }

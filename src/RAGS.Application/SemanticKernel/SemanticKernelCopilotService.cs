@@ -16,6 +16,8 @@ public sealed class SemanticKernelCopilotService : ICopilotService
     private readonly IKnowledgeSourceResolver? _knowledgeSourceResolver;
     private readonly IKnowledgeSourceIngestionService? _knowledgeSourceIngestionService;
     private readonly CopilotOptions _options;
+    private readonly ChatAgentOptions _chatAgentOptions;
+    private readonly IChatAgentInstructionProvider? _instructionProvider;
 
     public SemanticKernelCopilotService(
         IChatService chatService,
@@ -24,7 +26,9 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         IKnowledgeSourceResolver? knowledgeSourceResolver = null,
         IKnowledgeSourceIngestionService? knowledgeSourceIngestionService = null,
         IOptions<CopilotOptions>? options = null,
-        IWragsWikiService? wikiService = null)
+        IWragsWikiService? wikiService = null,
+        IOptions<ChatAgentOptions>? chatAgentOptions = null,
+        IChatAgentInstructionProvider? instructionProvider = null)
     {
         _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
         _agentService = agentService ?? throw new ArgumentNullException(nameof(agentService));
@@ -33,6 +37,8 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         _knowledgeSourceResolver = knowledgeSourceResolver;
         _knowledgeSourceIngestionService = knowledgeSourceIngestionService;
         _options = options?.Value ?? new CopilotOptions();
+        _chatAgentOptions = chatAgentOptions?.Value ?? new ChatAgentOptions();
+        _instructionProvider = instructionProvider;
     }
 
     public async Task<Result<ChatMessage>> ChatAsync(
@@ -90,8 +96,28 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         Result<IReadOnlyList<SearchResult>> retrieval;
         KnowledgeSource? source;
         var answerProfile = SelectAnswerProfile(userMessage, requestOptions);
+        var orchestrationInstructions = _instructionProvider?.GetInstructions();
         var topK = Math.Clamp(_options.RetrievalTopK, 1, 20);
         var retrievalQuery = BuildRetrievalQuery(userMessage, answerProfile);
+        if (requestOptions?.RetrievalResults is { Count: > 0 } providedResults)
+        {
+            var providedTopK = Math.Clamp(Math.Max(topK, providedResults.Count), 1, 50);
+            var providedStrategies = DetectRetrievalStrategies(providedResults);
+            var providedPrompt = RetrievalAugmentedPromptBuilder.Build(
+                userMessage,
+                providedResults,
+                providedTopK,
+                source: null,
+                answerProfile: answerProfile,
+                defaultAreas: _options.DefaultAreas,
+                scopeInstruction: requestOptions.ScopeInstruction,
+                sectionOutline: requestOptions.SectionOutline,
+                chatAgentOptions: _chatAgentOptions,
+                orchestrationInstructions: orchestrationInstructions);
+
+            return new AugmentedPrompt(providedPrompt, providedResults, null, providedTopK, RetrievalUsed: true, providedStrategies);
+        }
+
         try
         {
             source = await ResolveSourceAsync(userMessage, cancellationToken).ConfigureAwait(false);
@@ -120,6 +146,11 @@ public sealed class SemanticKernelCopilotService : ICopilotService
 
         if (retrieval.IsFailure || retrieval.Value is null || retrieval.Value.Count == 0)
         {
+            if (_chatAgentOptions.BehaviorFlags.RefuseWhenNoContext)
+            {
+                return AugmentedPrompt.Empty(_chatAgentOptions.NoInformationResponse, topK, source);
+            }
+
             return AugmentedPrompt.Empty(userMessage, topK, source);
         }
 
@@ -131,7 +162,11 @@ public sealed class SemanticKernelCopilotService : ICopilotService
             topK,
             source: source,
             answerProfile: answerProfile,
-            defaultAreas: _options.DefaultAreas);
+            defaultAreas: _options.DefaultAreas,
+            scopeInstruction: requestOptions?.ScopeInstruction,
+            sectionOutline: requestOptions?.SectionOutline,
+            chatAgentOptions: _chatAgentOptions,
+            orchestrationInstructions: orchestrationInstructions);
 
         return new AugmentedPrompt(prompt, retrievalResults, source, topK, RetrievalUsed: true, strategies);
     }

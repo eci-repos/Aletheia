@@ -44,14 +44,6 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
     private const int MaxGraphChunks = 250;
 
     private static readonly Regex WordPattern = new(@"\b[\p{L}\p{N}][\p{L}\p{N}\-]{2,}\b", RegexOptions.Compiled);
-    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "about", "after", "again", "against", "also", "because", "before", "being", "between", "both",
-        "could", "during", "each", "from", "have", "into", "more", "must", "only", "other", "over",
-        "should", "some", "such", "than", "that", "their", "there", "these", "this", "those", "through",
-        "under", "using", "were", "when", "where", "which", "while", "with", "would", "your"
-    };
-
     private readonly PostgreSqlConnectionFactory _connectionFactory;
     private readonly IEntityExtractionService _entityExtraction;
     private readonly IRelationshipExtractionService _relationshipExtraction;
@@ -59,6 +51,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
     private readonly IGraphSummaryService _graphSummary;
     private readonly ICommunityDetectionService _communityDetection;
     private readonly ChunkingPipeline _chunkingPipeline;
+    private readonly ITermNormalizer _termNormalizer;
 
     public UploadedContentKnowledgeIndexer(
         PostgreSqlConnectionFactory connectionFactory,
@@ -67,7 +60,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
         IGraphProvider graphProvider,
         IGraphSummaryService graphSummary,
         ICommunityDetectionService communityDetection,
-        ChunkingPipeline chunkingPipeline)
+        ChunkingPipeline chunkingPipeline,        ITermNormalizer termNormalizer)
     {
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _entityExtraction = entityExtraction ?? throw new ArgumentNullException(nameof(entityExtraction));
@@ -75,7 +68,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
         _graphProvider = graphProvider ?? throw new ArgumentNullException(nameof(graphProvider));
         _graphSummary = graphSummary ?? throw new ArgumentNullException(nameof(graphSummary));
         _communityDetection = communityDetection ?? throw new ArgumentNullException(nameof(communityDetection));
-        _chunkingPipeline = chunkingPipeline ?? throw new ArgumentNullException(nameof(chunkingPipeline));
+        _chunkingPipeline = chunkingPipeline ?? throw new ArgumentNullException(nameof(chunkingPipeline));        _termNormalizer = termNormalizer ?? throw new ArgumentNullException(nameof(termNormalizer));
     }
 
     public async Task<Result> IndexAsync(
@@ -115,8 +108,9 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
             await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
 
             progress?.Report("Entity discovery", "Discovering document-level entities and topics.", 60, force: true);
-            var extractedEntities = await DiscoverEntitiesAsync(content, cancellationToken).ConfigureAwait(false);
-            var topics = ExtractTopics(content, extractedEntities.Select(e => e.Name));
+            var indexedText = $"{sourceName} {content}";
+            var extractedEntities = await DiscoverEntitiesAsync(indexedText, cancellationToken).ConfigureAwait(false);
+            var topics = ExtractTopics(indexedText, extractedEntities.Select(e => e.Name));
 
             progress?.Report("Taxonomy and ontology", "Persisting extracted topics, entities, and relationships.", 64, force: true);
             await using var connection = _connectionFactory.CreateConnection();
@@ -231,7 +225,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
             progress?.Report("Knowledge seed", "Recording searchable topics and graph seed nodes without LLM enrichment.", 58, force: true);
             await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
 
-            var topics = ExtractTopics(content, Array.Empty<string>());
+            var topics = ExtractTopics($"{sourceName} {content}", Array.Empty<string>());
             await using var connection = _connectionFactory.CreateConnection();
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -243,7 +237,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
                 await UpsertTagSourceAsync(connection, transaction, tagId, sourceId, sourceName).ConfigureAwait(false);
             }
 
-            await UpsertOntologyEntityAsync(
+            var sourceEntityId = await UpsertOntologyEntityAsync(
                 connection,
                 transaction,
                 GetSourceEntityName(sourceId, sourceName),
@@ -255,6 +249,34 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
                     ["ingestionMode"] = "lazy-enrichment-seed",
                     ["lazyEnrichmentStatus"] = "Pending"
                 }).ConfigureAwait(false);
+
+            foreach (var topic in topics)
+            {
+                var topicEntityId = await UpsertOntologyEntityAsync(
+                    connection,
+                    transaction,
+                    topic,
+                    "Topic",
+                    new Dictionary<string, object>
+                    {
+                        ["sourceId"] = sourceId,
+                        ["sourceName"] = sourceName,
+                        ["ingestionMode"] = "lazy-enrichment-seed",
+                        ["lazyEnrichmentStatus"] = "Pending"
+                    }).ConfigureAwait(false);
+
+                await UpsertOntologyRelationshipAsync(
+                    connection,
+                    transaction,
+                    topicEntityId,
+                    sourceEntityId,
+                    "found_in",
+                    new Dictionary<string, object>
+                    {
+                        ["sourceId"] = sourceId,
+                        ["sourceName"] = sourceName
+                    }).ConfigureAwait(false);
+            }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -618,34 +640,37 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
         }
     }
 
-    private async Task<IReadOnlyList<ExtractedEntity>> DiscoverEntitiesAsync(string content, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<ExtractedEntity>> DiscoverEntitiesAsync(string content, CancellationToken cancellationToken)
     {
         var result = await _entityExtraction.DiscoverAsync(content, cancellationToken).ConfigureAwait(false);
         if (result.IsSuccess && result.Value is not null && result.Value.Count > 0)
         {
-            return result.Value
+            var normalized = result.Value
                 .Where(e => !string.IsNullOrWhiteSpace(e.Name))
-                .GroupBy(e => NormalizeLabel(e.Name), StringComparer.OrdinalIgnoreCase)
+                .Select(e => new { Original = e, Normalized = _termNormalizer.Normalize(e.Name) })
+                .Where(x => x.Normalized != null)
+                .GroupBy(x => x.Normalized, StringComparer.OrdinalIgnoreCase)
                 .Select(g =>
                 {
-                    var first = g.First();
+                    var first = g.First().Original;
                     return new ExtractedEntity
                     {
                         Id = first.Id,
-                        Name = NormalizeLabel(first.Name),
+                        Name = g.Key,
                         Type = first.Type,
                         Description = first.Description,
                         Confidence = first.Confidence,
                         Properties = first.Properties
                     };
                 })
-                .Where(e => !StopWords.Contains(e.Name))
                 .Take(MaxEntities)
                 .ToList();
+
+            return normalized;
         }
 
-        return ExtractTopics(content, Array.Empty<string>())
-            .Take(MaxEntities)
+        var topics = ExtractTopics(content, Array.Empty<string>());
+        return topics.Take(MaxEntities)
             .Select(topic => new ExtractedEntity
             {
                 Name = topic,
@@ -655,18 +680,50 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
             .ToList();
     }
 
-    private static IReadOnlyList<string> ExtractTopics(string content, IEnumerable<string> excludedTerms)
+    private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
     {
-        var excluded = new HashSet<string>(excludedTerms.Select(NormalizeLabel), StringComparer.OrdinalIgnoreCase);
-        return WordPattern.Matches(content)
-            .Select(match => NormalizeLabel(match.Value))
-            .Where(term => term.Length > 2 && !StopWords.Contains(term) && !excluded.Contains(term))
-            .GroupBy(term => term, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(group => group.Count())
-            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Key)
-            .Take(MaxTopics)
-            .ToList();
+        const string sql = @"
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+            CREATE TABLE IF NOT EXISTS categories (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS taxonomy_tags (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                category_id UUID NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                UNIQUE(category_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_entities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL UNIQUE,
+                entity_type TEXT NOT NULL,
+                properties JSONB NOT NULL DEFAULT '{}'::jsonb
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_relationships (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_entity_id UUID NOT NULL REFERENCES ontology_entities(id) ON DELETE CASCADE,
+                target_entity_id UUID NOT NULL REFERENCES ontology_entities(id) ON DELETE CASCADE,
+                relationship_type TEXT NOT NULL,
+                properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+                UNIQUE(source_entity_id, target_entity_id, relationship_type)
+            );
+
+            CREATE TABLE IF NOT EXISTS taxonomy_tag_sources (
+                tag_id UUID NOT NULL REFERENCES taxonomy_tags(id) ON DELETE CASCADE,
+                source_id UUID NOT NULL,
+                source_name TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY(tag_id, source_id)
+            );";
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.ExecuteAsync(sql).ConfigureAwait(false);
     }
 
     private static async Task<Guid> UpsertCategoryAsync(
@@ -681,22 +738,6 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
             RETURNING id";
 
         return await connection.ExecuteScalarAsync<Guid>(sql, new { Name = name }, transaction).ConfigureAwait(false);
-    }
-
-    private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            CREATE TABLE IF NOT EXISTS taxonomy_tag_sources (
-                tag_id UUID NOT NULL REFERENCES taxonomy_tags(id) ON DELETE CASCADE,
-                source_id UUID NOT NULL,
-                source_name TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY(tag_id, source_id)
-            );";
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await connection.ExecuteAsync(sql).ConfigureAwait(false);
     }
 
     private static async Task<Guid> UpsertTagAsync(
@@ -792,12 +833,20 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
         }
     }
 
-    private static string NormalizeLabel(string value)
+    
+
+    private IEnumerable<string> ExtractTopics(string text, IEnumerable<string> entityNames)
     {
-        var trimmed = Regex.Replace(value.Trim(), @"\s+", " ");
-        return trimmed.Length == 0
-            ? trimmed
-            : char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
+        // Use regex to find candidate words (minimum 3 characters) and normalize them via the configured term normalizer.
+        var rawTokens = WordPattern.Matches(text).Select(m => m.Value);
+        var normalized = rawTokens
+            .Select(t => _termNormalizer.Normalize(t))
+            .Where(t => t != null)
+            .Except(entityNames, StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxTopics)
+            .ToList();
+        return normalized;
     }
 
     private static string GetSourceEntityName(Guid sourceId, string sourceName)
@@ -846,3 +895,11 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
         return $"{source} {NormalizeRelationshipType(relationship.Type).Replace('_', ' ')} {target} in chunk {chunkIndex}.";
     }
 }
+
+
+
+
+
+
+
+

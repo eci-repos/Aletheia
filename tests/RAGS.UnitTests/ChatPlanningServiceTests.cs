@@ -31,7 +31,7 @@ namespace RAGS.UnitTests;
         }
 
         [Fact]
-        public async Task CreatePlanAsync_emits_tool_call_for_rfp_timeline_query()
+    public async Task CreatePlanAsync_emits_tool_call_for_rfp_timeline_query()
         {
             var service = new ChatPlanningService();
 
@@ -40,11 +40,24 @@ namespace RAGS.UnitTests;
             Assert.True(result.IsSuccess);
             var plan = result.Value!;
             Assert.True(plan.RequiresToolCall);
-            Assert.Equal("AletheiaKnowledgePlugin.SearchGraphRag", plan.ToolName);
+            Assert.Equal("AletheiaKnowledgePlugin.SearchRags", plan.ToolName);
             Assert.Contains("query", plan.ToolArguments.Keys);
             Assert.Contains("topK", plan.ToolArguments.Keys);
             Assert.Contains(plan.Steps, s => s.StartsWith("Call repository tool", StringComparison.OrdinalIgnoreCase));
-        }
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_routes_broad_non_rfp_corpus_query_to_graphrag()
+    {
+        var service = new ChatPlanningService();
+
+        var result = await service.CreatePlanAsync("summarize the corpus");
+
+        Assert.True(result.IsSuccess);
+        var plan = result.Value!;
+        Assert.True(plan.RequiresToolCall);
+        Assert.Equal("AletheiaKnowledgePlugin.SearchGraphRag", plan.ToolName);
+    }
 
 
     [Theory]
@@ -82,6 +95,39 @@ namespace RAGS.UnitTests;
         Assert.True(result.Value.RequiresApproval);
     }
 
+    [Fact]
+    public async Task CreatePlanAsync_treats_list_all_found_features_as_exhaustive_scoped_request()
+    {
+        var service = new ChatPlanningService();
+
+        var result = await service.CreatePlanAsync("on the CMP 2026 list all found features required for AI");
+
+        Assert.True(result.IsSuccess);
+        var plan = result.Value!;
+        Assert.Equal(ChatExecutionMode.CorpusAnalysis, plan.Mode);
+        Assert.True(plan.RequiresApproval);
+        Assert.True(plan.EstimatedRetrievalCount > 0);
+        Assert.True(plan.RequiresToolCall);
+        Assert.Equal("AletheiaKnowledgePlugin.SearchRags", plan.ToolName);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_routes_cmp_engagement_feature_request_to_document_rags()
+    {
+        var service = new ChatPlanningService();
+
+        var result = await service.CreatePlanAsync("Base on CMP 2026 list required features for this engagement");
+
+        Assert.True(result.IsSuccess);
+        var plan = result.Value!;
+        Assert.Equal(ChatExecutionMode.CorpusAnalysis, plan.Mode);
+        Assert.True(plan.RequiresApproval);
+        Assert.True(plan.RequiresToolCall);
+        Assert.Equal("AletheiaKnowledgePlugin.SearchRags", plan.ToolName);
+        Assert.Contains("query", plan.ToolArguments.Keys);
+        Assert.Contains("topK", plan.ToolArguments.Keys);
+    }
+
     [Theory]
     [InlineData("hello")]
     [InlineData("hi")]
@@ -96,6 +142,23 @@ namespace RAGS.UnitTests;
         Assert.Equal(ChatExecutionMode.FastPath, result.Value!.SuggestedMode);
         Assert.False(result.Value.IsBroadCorpusRequest);
         Assert.False(result.Value.RequiresApproval);
+    }
+
+    [Theory]
+    [InlineData("what does the CMP RFP require?")]
+    [InlineData("list requirements from the RFP")]
+    public async Task CreatePlanAsync_marks_rfp_queries_as_tool_call_with_verification_step(string prompt)
+    {
+        var service = new ChatPlanningService();
+
+        var result = await service.CreatePlanAsync(prompt);
+
+        Assert.True(result.IsSuccess);
+        var plan = result.Value!;
+        Assert.True(plan.RequiresToolCall);
+        Assert.Equal("AletheiaKnowledgePlugin.SearchRags", plan.ToolName);
+        Assert.Contains(plan.Steps, s => s.StartsWith("Call repository tool", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(plan.Steps, s => s.Contains("Verify tool returned internal context before synthesis", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

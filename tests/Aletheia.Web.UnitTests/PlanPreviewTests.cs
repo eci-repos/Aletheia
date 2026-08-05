@@ -30,7 +30,9 @@ public class PlanPreviewTests : TestContext
 
         Assert.Contains("Execution Plan", cut.Markup);
         Assert.Contains("Approval required", cut.Markup);
-        Assert.Contains("CorpusAnalysis", cut.Markup);
+        Assert.Contains("Corpus analysis", cut.Markup);
+        Assert.Contains("Ready for review", cut.Markup);
+        Assert.DoesNotContain("CorpusAnalysis", cut.Markup);
         Assert.Contains("10 - 30 seconds", cut.Markup);
         Assert.Contains("Estimated model calls", cut.Markup);
         Assert.Contains("Classify intent", cut.Markup);
@@ -69,6 +71,7 @@ public class PlanPreviewTests : TestContext
         var cut = RenderComponent<PlanPreview>(parameters => parameters.Add(p => p.Plan, plan));
 
         Assert.Contains("Fast path", cut.Markup);
+        Assert.Contains("Ready for review", cut.Markup);
         Assert.Contains("btn btn-primary", cut.Markup);
         Assert.DoesNotContain("btn btn-success", cut.Markup);
         Assert.DoesNotContain("Cancel", cut.Markup);

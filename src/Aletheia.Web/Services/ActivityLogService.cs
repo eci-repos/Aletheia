@@ -1,3 +1,5 @@
+using Aletheia.RAGS.Abstractions.Models;
+
 namespace Aletheia.Web.Services;
 
 public sealed class ActivityLogService
@@ -81,6 +83,29 @@ public sealed class ActivityLogService
         Changed?.Invoke();
     }
 
+    public void UpsertChatJob(ChatJobSnapshot job)
+    {
+        UpsertJob(new BackgroundJobClientSnapshot(
+            job.JobId,
+            "Chat",
+            "Copilot chat",
+            job.Status.ToString(),
+            string.IsNullOrWhiteSpace(job.Stage) ? "Chat" : job.Stage,
+            job.PercentComplete,
+            0,
+            0,
+            string.IsNullOrWhiteSpace(job.Detail)
+                ? $"Prompt: {TrimForDisplay(job.Prompt)}"
+                : $"{job.Detail} Prompt: {TrimForDisplay(job.Prompt)}",
+            Guid.Empty,
+            "Copilot",
+            job.CreatedAt,
+            job.StartedAt,
+            job.LastHeartbeatAt,
+            job.CompletedAt,
+            job.Error));
+    }
+
     private void Add(Guid activityId, string area, string title, string message, ActivityLogStatus status)
     {
         _entries.Insert(0, new ActivityLogEntry(
@@ -108,6 +133,13 @@ public sealed class ActivityLogService
         "Cancelled" => ActivityLogStatus.Warning,
         _ => ActivityLogStatus.Info
     };
+
+    private static string TrimForDisplay(string value)
+    {
+        const int maxLength = 180;
+        var compact = value.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+        return compact.Length <= maxLength ? compact : $"{compact[..maxLength]}...";
+    }
 }
 
 public sealed record ActivityLogEntry(

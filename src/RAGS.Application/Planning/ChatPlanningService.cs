@@ -156,6 +156,7 @@ public sealed class ChatPlanningService : IChatPlanningService
         if (requiresToolCall)
         {
             steps.Add($"Call repository tool: {toolName}");
+            steps.Add("Verify tool returned internal context before synthesis");
         }
 
         switch (analysis.SuggestedMode)
@@ -222,10 +223,15 @@ public sealed class ChatPlanningService : IChatPlanningService
         return steps;
     }
 
+
+
     private static bool RequiresToolCall(PromptAnalysis analysis)
     {
         return analysis.DetectedIntentSignals.Contains("rfp", StringComparer.OrdinalIgnoreCase)
             || analysis.DetectedIntentSignals.Contains("wrags", StringComparer.OrdinalIgnoreCase)
+            || analysis.DetectedIntentSignals.Contains("lazy", StringComparer.OrdinalIgnoreCase)
+            || analysis.DetectedIntentSignals.Contains("lazygraphrag", StringComparer.OrdinalIgnoreCase)
+            || IsDocumentRequirementPrompt(analysis.DetectedIntentSignals)
             || analysis.DetectedIntentSignals.Contains("corpus-wide", StringComparer.OrdinalIgnoreCase)
             || analysis.DetectedIntentSignals.Contains("exhaustive", StringComparer.OrdinalIgnoreCase)
             || analysis.DetectedIntentSignals.Contains("temporal", StringComparer.OrdinalIgnoreCase)
@@ -235,48 +241,60 @@ public sealed class ChatPlanningService : IChatPlanningService
 
     private static string SelectToolName(PromptAnalysis analysis)
     {
-        if (analysis.DetectedIntentSignals.Contains("rfp", StringComparer.OrdinalIgnoreCase)
-            && analysis.DetectedIntentSignals.Contains("temporal", StringComparer.OrdinalIgnoreCase))
+        if (analysis.DetectedIntentSignals.Contains("lazy", StringComparer.OrdinalIgnoreCase)
+            || analysis.DetectedIntentSignals.Contains("lazygraphrag", StringComparer.OrdinalIgnoreCase))
+        {
+            return "AletheiaKnowledgePlugin.SearchLazyGraphRag";
+        }
+
+        if (analysis.IsBroadCorpusRequest
+            && !analysis.DetectedIntentSignals.Contains("rfp", StringComparer.OrdinalIgnoreCase)
+            && !IsDocumentRequirementPrompt(analysis.DetectedIntentSignals))
         {
             return "AletheiaKnowledgePlugin.SearchGraphRag";
         }
 
-        if (analysis.DetectedIntentSignals.Contains("rfp", StringComparer.OrdinalIgnoreCase)
-            || analysis.DetectedIntentSignals.Contains("wrags", StringComparer.OrdinalIgnoreCase))
-        {
-            return "AletheiaKnowledgePlugin.SearchRags";
-        }
-
-        if (analysis.SuggestedMode == ChatExecutionMode.TimelineAnalysis)
-        {
-            return "AletheiaKnowledgePlugin.SearchGraphRag";
-        }
-
-        return "AletheiaKnowledgePlugin.SearchGlobalGraph";
+        return "AletheiaKnowledgePlugin.SearchRags";
     }
 
-    private static IReadOnlyDictionary<string, string> BuildToolArguments(string prompt, PromptAnalysis analysis)
+    private static bool IsDocumentRequirementPrompt(IReadOnlyList<string> signals)
     {
-        var arguments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["query"] = prompt
-        };
-
-        var retrievalCount = analysis.SuggestedMode switch
-        {
-            ChatExecutionMode.FastPath => 0,
-            ChatExecutionMode.Retrieval => 8,
-            ChatExecutionMode.CorpusAnalysis => 50,
-            ChatExecutionMode.ComparativeAnalysis => 16,
-            ChatExecutionMode.TimelineAnalysis => 50,
-            ChatExecutionMode.StructuredSynthesis => 8,
-            _ => 8
-        };
-
-        arguments["topK"] = retrievalCount > 0 ? retrievalCount.ToString() : "8";
-
-        return arguments;
+        return signals.Contains("requirements", StringComparer.OrdinalIgnoreCase)
+            && signals.Contains("document-scoped", StringComparer.OrdinalIgnoreCase);
     }
+
+        private static IReadOnlyDictionary<string, string> BuildToolArguments(string prompt, PromptAnalysis analysis)
+        {
+            var arguments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["query"] = prompt
+            };
+
+            var retrievalCount = analysis.SuggestedMode switch
+            {
+                ChatExecutionMode.FastPath => 0,
+                ChatExecutionMode.Retrieval => 8,
+                ChatExecutionMode.CorpusAnalysis => 50,
+                ChatExecutionMode.ComparativeAnalysis => 16,
+                ChatExecutionMode.TimelineAnalysis => 50,
+                ChatExecutionMode.StructuredSynthesis => 8,
+                _ => 8
+            };
+
+            arguments["topK"] = retrievalCount > 0 ? retrievalCount.ToString() : "8";
+
+            // Sprint 46: if the prompt mentions a specific document (e.g., "CMP 2026"), add a source‑id filter.
+            // For now we pass a placeholder identifier that downstream tooling can resolve to an actual source GUID.
+            var match = System.Text.RegularExpressions.Regex.Match(prompt, @"CMP\s*([0-9]{4})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                // Placeholder format – the SearchRags implementation can translate this to the real SourceId.
+                var docName = $"CMP-{match.Groups[1].Value}";
+                arguments["sourceId"] = docName;
+            }
+
+            return arguments;
+        }
 
     private (int Min, int Max) EstimateDuration(PromptAnalysis analysis)
     {
@@ -344,7 +362,7 @@ public sealed class ChatPlanningService : IChatPlanningService
             signals.Add("temporal");
         }
 
-        if (ContainsAny(lower, "all documents", "all rfps", "entire corpus", "across the corpus", "summarize corpus", "throughout the repository", "repository"))
+        if (ContainsAny(lower, "all documents", "all rfps", "corpus", "entire corpus", "across the corpus", "summarize corpus", "throughout the repository", "repository"))
         {
             signals.Add("corpus-wide");
         }
@@ -354,12 +372,27 @@ public sealed class ChatPlanningService : IChatPlanningService
             signals.Add("rfp");
         }
 
+        if (ContainsAny(lower, "cmp", "document", "docx", "file", "artifact", "engagement"))
+        {
+            signals.Add("document-scoped");
+        }
+
+        if (ContainsAny(lower, "requirement", "requirements", "required", "feature", "features", "capability", "capabilities"))
+        {
+            signals.Add("requirements");
+        }
+
         if (ContainsAny(lower, "wrags", "wiki", "knowledge base", "kb"))
         {
             signals.Add("wrags");
         }
 
-        if (ContainsAny(lower, "every", "each", "all instances", "identify every"))
+        if (ContainsAny(lower, "lazygraphrag", "lazy graph", "lazy graph rag", "lazy enrichment"))
+        {
+            signals.Add("lazygraphrag");
+        }
+
+        if (ContainsAny(lower, "every", "each", "all instances", "identify every", "list all", "all found", "found features", "required features"))
         {
             signals.Add("exhaustive");
         }

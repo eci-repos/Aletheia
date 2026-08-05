@@ -10,7 +10,8 @@ public sealed class FileMetadata
         long sizeBytes,
         DateTimeOffset uploadedAt,
         IReadOnlyDictionary<string, string>? tags = null,
-        AuditInfo? auditInfo = null)
+        AuditInfo? auditInfo = null,
+        string? contentHash = null)
     {
         Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
 
@@ -29,6 +30,7 @@ public sealed class FileMetadata
         UploadedAt = uploadedAt;
         Tags = tags is null ? new Dictionary<string, string>() : new Dictionary<string, string>(tags);
         AuditInfo = auditInfo;
+        ContentHash = string.IsNullOrWhiteSpace(contentHash) ? null : contentHash;
     }
 
     public FileDescriptor Descriptor { get; }
@@ -42,4 +44,7 @@ public sealed class FileMetadata
     public IReadOnlyDictionary<string, string> Tags { get; }
 
     public AuditInfo? AuditInfo { get; }
+
+    /// <summary>SHA-256 (hex) of the uploaded content, when fingerprinting is enabled. Null for pre-existing rows.</summary>
+    public string? ContentHash { get; }
 }

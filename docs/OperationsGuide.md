@@ -153,3 +153,10 @@ WRAGS pages are durable generated or edited knowledge snapshots. Operators can e
 3. Restore from the latest backup if data corruption is suspected.
 4. Restart services and verify health endpoints.
 5. For GraphRAG incidents, verify Neo4j connectivity, graph driver version alignment, and whether a background job is still running or failed in `/api/jobs`.
+
+### Duplicate Uploads and Document Updates (Sprint 56)
+
+- **Duplicate trap**: uploads are fingerprinted (SHA-256) server-side. Re-posting an identical file is rejected with HTTP 409 and no blob/metadata/ingestion/brief is created; the Web UI shows a "Duplicate - already exists" badge. Nothing to operate.
+- **Document updates**: submitting a changed file against an existing document keeps its fileId, snapshots a named version, replaces the blob/current metadata, re-ingests the same source (embeddings, knowledge-index rows, and graph nodes are replaced), and regenerates the Wiki brief. Monitor the upload ingestion job (`/api/jobs`) to completion; a failure leaves the current version in place and reports the error in the job.
+- **Admin duplicate report**: `GET /api/files/duplicates` (Administrator role) lists rows sharing a content hash. Review and remove duplicates manually with the existing DELETE flow; deletion also removes vectors, knowledge-index rows, and metadata.
+- **Schema change for existing deployments**: run `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql` once (idempotent) to add `content_hash` and its index. Pre-existing rows are re-fingerprinted on their next upload/update.

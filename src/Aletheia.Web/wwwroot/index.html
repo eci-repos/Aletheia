@@ -6,10 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aletheia.Web</title>
     <base href="/" />
-    <link rel="stylesheet" href="css/bootstrap/bootstrap.min.css?v=20260723-graph9" />
-    <link rel="stylesheet" href="css/app.css?v=20260723-graph9" />
+    <link rel="stylesheet" href="css/bootstrap/bootstrap.min.css?v=20260729-copilot29" />
+    <link rel="stylesheet" href="css/app.css?v=20260729-copilot29" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <link href="Aletheia.Web.styles.css?v=20260723-graph9" rel="stylesheet" />
+    <link href="Aletheia.Web.styles.css?v=20260729-copilot29" rel="stylesheet" />
 </head>
 
 <body>
@@ -28,10 +28,45 @@
     </div>
     <script>
         window.aletheia = {
-            getBaseUri: () => `${window.location.origin}/`
+            getBaseUri: () => `${window.location.origin}/`,
+            copyText: async text => {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    return;
+                }
+
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.setAttribute('readonly', '');
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-9999px';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            },
+            startCopilotResize: (dotNetRef, startX, startWidth) => {
+                const minWidth = 280;
+                const maxWidth = 720;
+                const clamp = value => Math.max(minWidth, Math.min(maxWidth, value));
+                const onMove = event => {
+                    const nextWidth = clamp(startWidth - (event.clientX - startX));
+                    dotNetRef.invokeMethodAsync('UpdateExecutionPanelWidth', nextWidth);
+                };
+                const onUp = event => {
+                    onMove(event);
+                    document.removeEventListener('pointermove', onMove);
+                    document.removeEventListener('pointerup', onUp);
+                    document.body.classList.remove('copilot-resizing');
+                };
+
+                document.body.classList.add('copilot-resizing');
+                document.addEventListener('pointermove', onMove);
+                document.addEventListener('pointerup', onUp, { once: true });
+            }
         };
     </script>
-    <script src="_framework/blazor.webassembly.js?v=20260723-graph9"></script>
+    <script src="_framework/blazor.webassembly.js?v=20260729-copilot29"></script>
     <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
     <script>
         window.downloadFileFromStream = async (fileName, contentStreamReference) => {

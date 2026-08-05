@@ -7,7 +7,8 @@ public sealed class UploadRequest
         Stream content,
         string contentType,
         long sizeBytes,
-        IReadOnlyDictionary<string, string>? tags = null)
+        IReadOnlyDictionary<string, string>? tags = null,
+        string? contentHash = null)
     {
         Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
         Content = content ?? throw new ArgumentNullException(nameof(content));
@@ -30,6 +31,7 @@ public sealed class UploadRequest
         ContentType = contentType;
         SizeBytes = sizeBytes;
         Tags = tags is null ? new Dictionary<string, string>() : new Dictionary<string, string>(tags);
+        ContentHash = string.IsNullOrWhiteSpace(contentHash) ? null : contentHash;
     }
 
     public FileDescriptor Descriptor { get; }
@@ -41,4 +43,7 @@ public sealed class UploadRequest
     public long SizeBytes { get; }
 
     public IReadOnlyDictionary<string, string> Tags { get; }
+
+    /// <summary>SHA-256 (hex) of the uploaded content, when fingerprinting is enabled.</summary>
+    public string? ContentHash { get; }
 }

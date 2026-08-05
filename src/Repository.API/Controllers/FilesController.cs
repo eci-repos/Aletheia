@@ -1,7 +1,11 @@
+using System.Security.Cryptography;
+using Aletheia.Foundation.Security;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.Repository.Abstractions.Interfaces;
 using Aletheia.Repository.Abstractions.Models;
 using Aletheia.Repository.API.Services;
+using Aletheia.Repository.Application;
 using Aletheia.Repository.Domain.UseCases;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,34 +20,45 @@ public class FilesController : ControllerBase
     private readonly IUploadUseCase _uploadUseCase;
     private readonly IDownloadUseCase _downloadUseCase;
     private readonly IDeleteUseCase _deleteUseCase;
+    private readonly IVersioningUseCase _versioningUseCase;
+    private readonly IMetadataRepository _metadataRepository;
     private readonly IVectorStore _vectorStore;
     private readonly IUploadedContentKnowledgeIndexer _knowledgeIndexer;
+    private readonly IDuplicateDetectionService _duplicateDetection;
     private readonly IIngestionJobService _ingestionJobs;
 
     public FilesController(
         IUploadUseCase uploadUseCase,
         IDownloadUseCase downloadUseCase,
         IDeleteUseCase deleteUseCase,
+        IVersioningUseCase versioningUseCase,
+        IMetadataRepository metadataRepository,
         IVectorStore vectorStore,
         IUploadedContentKnowledgeIndexer knowledgeIndexer,
+        IDuplicateDetectionService duplicateDetection,
         IIngestionJobService ingestionJobs)
     {
         _uploadUseCase = uploadUseCase ?? throw new ArgumentNullException(nameof(uploadUseCase));
         _downloadUseCase = downloadUseCase ?? throw new ArgumentNullException(nameof(downloadUseCase));
         _deleteUseCase = deleteUseCase ?? throw new ArgumentNullException(nameof(deleteUseCase));
+        _versioningUseCase = versioningUseCase ?? throw new ArgumentNullException(nameof(versioningUseCase));
+        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _vectorStore = vectorStore ?? throw new ArgumentNullException(nameof(vectorStore));
         _knowledgeIndexer = knowledgeIndexer ?? throw new ArgumentNullException(nameof(knowledgeIndexer));
+        _duplicateDetection = duplicateDetection ?? throw new ArgumentNullException(nameof(duplicateDetection));
         _ingestionJobs = ingestionJobs ?? throw new ArgumentNullException(nameof(ingestionJobs));
     }
 
     [HttpPost("upload")]
     [ProducesResponseType(typeof(UploadResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Upload(
         [FromForm] Guid fileId,
         [FromForm] string fileName,
         [FromForm] string contentType,
         [FromForm] long sizeBytes,
+        [FromForm] Guid? existingFileId,
         IFormFile file,
         CancellationToken cancellationToken)
     {
@@ -53,29 +68,176 @@ public class FilesController : ControllerBase
         }
 
         var tempPath = await CopyToTemporaryFileAsync(file, cancellationToken).ConfigureAwait(false);
-        var descriptor = new FileDescriptor(fileId, fileName);
-        await using var uploadStream = System.IO.File.OpenRead(tempPath);
-        var request = new UploadRequest(descriptor, uploadStream, contentType, sizeBytes);
+        var contentHash = await ComputeSha256Async(tempPath, cancellationToken).ConfigureAwait(false);
 
-        var result = await _uploadUseCase.UploadAsync(request, cancellationToken).ConfigureAwait(false);
+        if (existingFileId.HasValue && existingFileId.Value != Guid.Empty)
+        {
+            return await UploadUpdateAsync(
+                existingFileId.Value,
+                fileName,
+                contentType,
+                sizeBytes,
+                tempPath,
+                contentHash,
+                cancellationToken).ConfigureAwait(false);
+        }
 
-        if (result.IsFailure)
+        // New document upload. Trap exact duplicates before anything is stored or ingested.
+        var duplicate = await _duplicateDetection.FindDuplicateAsync(contentHash, cancellationToken).ConfigureAwait(false);
+        if (duplicate is not null)
         {
             TryDeleteTempFile(tempPath);
-            return BadRequest(new { error = result.Error });
+            return Conflict(new
+            {
+                duplicate = true,
+                noChange = false,
+                message = $"This exact file is already in the repository (uploaded {duplicate.UploadedAt:g} as '{duplicate.FileName}'). Nothing was uploaded.",
+                existingFileId = duplicate.FileId,
+                existingFileName = duplicate.FileName,
+                existingUploadedAt = duplicate.UploadedAt,
+                existingVersion = duplicate.Version
+            });
+        }
+
+        var descriptor = new FileDescriptor(fileId, fileName);
+        FileMetadata uploadedMetadata;
+        await using (var uploadStream = System.IO.File.OpenRead(tempPath))
+        {
+            var request = new UploadRequest(descriptor, uploadStream, contentType, sizeBytes, contentHash: contentHash);
+            var result = await _uploadUseCase.UploadAsync(request, cancellationToken).ConfigureAwait(false);
+
+            if (result.IsFailure)
+            {
+                TryDeleteTempFile(tempPath);
+                return BadRequest(new { error = result.Error });
+            }
+
+            uploadedMetadata = result.Value!.Metadata;
         }
 
         var job = _ingestionJobs.EnqueueUploadedFile(fileId, fileName, contentType, tempPath, sizeBytes);
 
         return Ok(new
         {
-            result.Value!.Metadata,
+            Metadata = uploadedMetadata,
             RagsIngested = false,
             KnowledgeIndexed = false,
             IngestionStatus = "Queued",
             IngestionError = (string?)null,
             IngestionJobId = job.JobId
         });
+    }
+
+    private async Task<IActionResult> UploadUpdateAsync(
+        Guid existingFileId,
+        string submittedFileName,
+        string contentType,
+        long sizeBytes,
+        string tempPath,
+        string contentHash,
+        CancellationToken cancellationToken)
+    {
+        // Resolve the current (unversioned) document.
+        var existing = await _metadataRepository
+            .GetAsync(new FileDescriptor(existingFileId, submittedFileName), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing.IsFailure || existing.Value is null)
+        {
+            TryDeleteTempFile(tempPath);
+            return BadRequest(new { error = $"Existing document {existingFileId} was not found. Cannot update a document that does not exist." });
+        }
+
+        var current = existing.Value;
+
+        // No-change update: same content as the current version.
+        if (!string.IsNullOrWhiteSpace(current.ContentHash) &&
+            string.Equals(current.ContentHash, contentHash, StringComparison.OrdinalIgnoreCase))
+        {
+            TryDeleteTempFile(tempPath);
+            return Conflict(new
+            {
+                duplicate = true,
+                noChange = true,
+                message = $"'{current.Descriptor.FileName}' is already up to date with this exact content. No new version was created.",
+                existingFileId,
+                existingFileName = current.Descriptor.FileName,
+                existingUploadedAt = current.UploadedAt,
+                existingVersion = current.Descriptor.Version
+            });
+        }
+
+        // Exact duplicate of a *different* document is still a duplicate trap.
+        var duplicate = await _duplicateDetection.FindDuplicateAsync(contentHash, cancellationToken).ConfigureAwait(false);
+        if (duplicate is not null && duplicate.FileId != existingFileId)
+        {
+            TryDeleteTempFile(tempPath);
+            return Conflict(new
+            {
+                duplicate = true,
+                noChange = false,
+                message = $"This exact file is already in the repository as '{duplicate.FileName}' (uploaded {duplicate.UploadedAt:g}) under a different document. Nothing was uploaded.",
+                existingFileId = duplicate.FileId,
+                existingFileName = duplicate.FileName,
+                existingUploadedAt = duplicate.UploadedAt,
+                existingVersion = duplicate.Version
+            });
+        }
+
+        // Snapshot the current state as a named version, then replace the current (unversioned) row and blob.
+        var versionResult = await _versioningUseCase
+            .CreateVersionAsync(new FileDescriptor(existingFileId, current.Descriptor.FileName), cancellationToken)
+            .ConfigureAwait(false);
+        if (versionResult.IsFailure)
+        {
+            TryDeleteTempFile(tempPath);
+            return BadRequest(new { error = versionResult.Error });
+        }
+
+        var descriptor = new FileDescriptor(existingFileId, current.Descriptor.FileName);
+        FileMetadata uploadedMetadata;
+        await using (var uploadStream = System.IO.File.OpenRead(tempPath))
+        {
+            var request = new UploadRequest(descriptor, uploadStream, contentType, sizeBytes, contentHash: contentHash);
+            var result = await _uploadUseCase.UploadAsync(request, cancellationToken).ConfigureAwait(false);
+
+            if (result.IsFailure)
+            {
+                TryDeleteTempFile(tempPath);
+                return BadRequest(new { error = result.Error });
+            }
+
+            uploadedMetadata = result.Value!.Metadata;
+        }
+
+        var job = _ingestionJobs.EnqueueUploadedFile(existingFileId, current.Descriptor.FileName, contentType, tempPath, sizeBytes);
+
+        return Ok(new
+        {
+            Metadata = uploadedMetadata,
+            UpdatedVersion = versionResult.Value.Version,
+            RagsIngested = false,
+            KnowledgeIndexed = false,
+            IngestionStatus = "Queued",
+            IngestionError = (string?)null,
+            IngestionJobId = job.JobId
+        });
+    }
+
+    [HttpGet("duplicates")]
+    [Authorize(Roles = RoleDefinitions.Administrator)]
+    [ProducesResponseType(typeof(IReadOnlyList<FileMetadata>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ListDuplicates(CancellationToken cancellationToken)
+    {
+        var result = await _metadataRepository.ListContentHashDuplicatesAsync(cancellationToken).ConfigureAwait(false);
+
+        if (result.IsFailure)
+        {
+            return BadRequest(new { error = result.Error });
+        }
+
+        return Ok(result.Value);
     }
 
     [HttpGet("download")]
@@ -134,6 +296,13 @@ public class FilesController : ControllerBase
         return NoContent();
     }
 
+    private static async Task<string> ComputeSha256Async(string filePath, CancellationToken cancellationToken)
+    {
+        await using var stream = System.IO.File.OpenRead(filePath);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
     private static async Task<string> CopyToTemporaryFileAsync(IFormFile file, CancellationToken cancellationToken)
     {
         var directory = Path.Combine(Path.GetTempPath(), "aletheia-ingestion");
@@ -163,3 +332,4 @@ public class FilesController : ControllerBase
         }
     }
 }
+

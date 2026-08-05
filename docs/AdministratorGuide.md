@@ -97,7 +97,7 @@ The system uses the following conceptual roles:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| FeatureFlags:ShowInternalSearch | alse | When alse, end users see only the user-facing **Wiki** surface (document briefs) and semantic search. Raw Wiki/WRAGS mode controls, GraphRAG, LazyGraphRAG, and global-graph search are hidden in the UI and return HTTP 404 from the corresponding API endpoints. Set to 	rue for admin/diagnostics work (e.g., in ppsettings.Development.json or the production override). |
+| FeatureFlags:ShowInternalSearch | false | When false, end users see only the user-facing **Wiki** surface (document briefs) and semantic search. Raw Wiki/WRAGS mode controls, GraphRAG, LazyGraphRAG, and global-graph search are hidden in the UI and return HTTP 404 from the corresponding API endpoints. Set to true for admin/diagnostics work (e.g., in appsettings.Development.json or the production override). |
 
 Example:
 
@@ -128,7 +128,7 @@ MinIO__AccessKey=newkey
 
 | Controller         | Base Route              | Purpose                              |
 |--------------------|-------------------------|--------------------------------------|
-| FilesController    | `/api/files`            | Upload, download, list documents     |
+| FilesController    | `/api/files`            | Upload, download, delete documents; `/api/files/duplicates` (admin) lists duplicate uploads |
 | VersionsController | `/api/versions`         | Document version history             |
 | MetadataController | `/api/metadata`         | Document metadata CRUD               |
 | SearchController   | `/api/search`           | Full-text and vector search          |
@@ -250,3 +250,34 @@ GET /health/ready  -> Readiness probe (includes PostgreSQL, Neo4j, and MinIO con
 | API readiness fails in Docker  | Check PostgreSQL, Neo4j, MinIO health and ensure API image includes `libgssapi-krb5-2` |
 | Neo4j runtime method errors    | Verify graph packages use aligned `Neo4j.Driver` versions |
 | High memory usage              | Review vector index size; adjust pgvector dimensions |
+
+
+## Documents: Duplicates and Updates (Sprint 56)
+
+### Duplicate uploads are trapped
+Every upload is fingerprinted server-side (SHA-256). If the exact same file is already stored, the API returns **HTTP 409 Conflict** with a structured payload (`duplicate`, `noChange`, `message`, `existingFileId`, `existingFileName`, `existingUploadedAt`, `existingVersion`) and **stores/ingests nothing**. In the Web UI, the file shows a "Duplicate - already exists" badge, an Activity warning is logged, and no ingestion job is queued.
+
+### Updating an existing document
+To replace a document's content while keeping its identity:
+
+1. Open **Browse** and click the update (↻) action on the document, or open `Upload` with `?update=<fileId>&fileName=<name>`.
+2. Select the new file and click **Upload New Version**.
+3. The old state is snapshotted as a named version (visible via the versions API), the blob and current metadata are replaced, and a background ingestion job re-ingests the same source - replacing embeddings, knowledge-index rows, and graph nodes - then regenerates the Wiki brief.
+
+If the submitted file is byte-identical to the current version, the upload is trapped with "Already current - no changes" and no new version is created.
+
+### Versioning limitation
+Versioning is metadata-level: `GET /api/versions` lists prior versions, but all versions of a document share the single blob stored under `fileId/fileName` in MinIO. Downloading an older version returns the current blob. Blob-level (content-addressed) versioning is a future enhancement.
+
+### Finding and removing duplicates that already exist (admin)
+`GET /api/files/duplicates` (requires the Administrator role) returns every `file_metadata` row whose content hash is shared by more than one row. Review the list, then delete the duplicate artifacts via the existing DELETE flow (Browse or `DELETE /api/files?fileId=...&fileName=...`), which also removes vectors, knowledge-index rows, and metadata. No automatic deletion is performed.
+
+### Applying the content-hash schema change
+Fresh deployments receive `content_hash` from `init.sql`. For existing deployments, run once (idempotent):
+
+```sql
+ALTER TABLE file_metadata ADD COLUMN IF NOT EXISTS content_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_file_metadata_content_hash ON file_metadata(content_hash);
+```
+
+The same statements are provided in `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql`. Rows uploaded before this change have a NULL `content_hash`; they are re-fingerprinted on their next upload/update.

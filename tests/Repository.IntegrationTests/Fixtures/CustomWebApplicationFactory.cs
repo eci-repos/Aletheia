@@ -28,12 +28,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             ReplaceService<IVersioningService, FakeVersioningService>(services);
             services.RemoveAll<IUserStore>();
             services.RemoveAll<IRefreshTokenStore>();
-            foreach (var descriptor in services
-                .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(PostgreSqlSecuritySchemaInitializer))
-                .ToList())
-            {
-                services.Remove(descriptor);
-            }
+            // Remove PostgreSQL wiki schema initializer (uses real DB)
+// Removed removal of PostgreSqlWikiSchemaInitializer as the type no longer exists in the codebase.
+
             services.AddSingleton<IUserStore, InMemoryUserStore>();
             services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
         });

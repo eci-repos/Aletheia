@@ -24,7 +24,7 @@ Request body:
 
 Response: `200 OK` with `ChatPlanRecord`.
 
-The returned plan may have `requiresApproval: false` for fast-path work. The Blazor UI auto-approves and executes fast-path plans. Plans with `requiresApproval: true` are shown in `PlanPreview.razor` for explicit approval.
+The returned plan may have `requiresApproval: false` for fast-path work. The Blazor UI still shows the plan and waits for the operator to click **Run** so every new request has a clear acceptance point.
 
 ### Approve a plan
 
@@ -117,6 +117,10 @@ This is the primary endpoint for polling. It returns the latest progress for the
 - Final result or error
 - Telemetry (if execution has completed)
 
+The Blazor Copilot page persists the visible session, pending plan, progress, telemetry, active job ID, draft input, output format, and execution-panel layout in browser storage under `aletheia.copilot.session.v1`. This is UI convenience state only; API plan/job records remain process-local until durable server-side persistence is added.
+
+The Copilot page also mirrors progress messages into the global Activity panel. Activity entries include a prompt snippet at planning time, approval/job queue events, tool dispatch, graph fallback messages when applicable, repository context verification, and the final synthesis handoff. These entries are intended to prove that the chat agent received the request and that the configured repository tool was actually called.
+
 ### Get job telemetry
 
 ```http
@@ -193,6 +197,10 @@ Use this endpoint to fetch telemetry explicitly if the progress record has not y
 }
 ```
 
+Mandatory repository tool calls also append `Tool call` heartbeats while SearchRags, GraphRAG, LazyGraphRAG, global graph, fallback query variants, or scoped per-source retrieval are still running. `Tool call` emits an immediate heartbeat and then uses the normal `HeartbeatIntervalSeconds` cadence, not the long-wait cadence. A hung tool call should fail the `Call repository tool` step by `ChatExecutionEngine:MandatoryToolTimeoutSeconds` or the longer watchdog backstop rather than by a short 90-second watchdog window.
+
+Copilot chat now keeps GraphRAG/LazyGraphRAG/global graph tools active. Broad/global retrieval tries GraphRAG first, LazyGraphRAG second, and Semantic RAGS fallback when graph context is missing. Scoped RFP/CMP/document feature prompts remain on Semantic RAGS because source-scoped document evidence is the desired answer context.
+
 ### ChatExecutionTelemetry
 
 ```json
@@ -205,6 +213,9 @@ Use this endpoint to fetch telemetry explicitly if the progress record has not y
   "tokensPerSecond": 22.86,
   "retrievalCount": 12,
   "citationCount": 4,
+  "retrievalStrategy": "semantic",
+  "toolName": "AletheiaKnowledgePlugin.SearchRags",
+  "toolInvocationCount": 2,
   "llmCallCount": 1,
   "estimatedSecondsMin": 1,
   "estimatedSecondsMax": 5,
@@ -246,7 +257,7 @@ Use this endpoint to fetch telemetry explicitly if the progress record has not y
 
 ## Polling Guidance
 
-The Blazor UI polls `GET /copilot/plans/{planId}/progress` every 2 seconds while a job is active. Polling stops when the status is terminal (`Succeeded`, `Failed`, or `Cancelled`).
+The Blazor UI polls `GET /copilot/plans/{planId}/progress` every 2 seconds while a job is active. Polling stops when the status is terminal (`Succeeded`, `Failed`, or `Cancelled`). After a plan is approved and execution starts, the visible Execution Plan card is hidden until another approval is needed; progress and telemetry remain visible in the execution panel.
 
 For production use with many clients, consider:
 
@@ -257,6 +268,16 @@ For production use with many clients, consider:
 ## Error Handling
 
 All endpoints return structured errors:
+
+Copilot mandatory repository plans route by intent: scoped RFP/document prompts use `AletheiaKnowledgePlugin.SearchRags`, broad non-RFP corpus prompts use `AletheiaKnowledgePlugin.SearchGraphRag`, and explicit lazy graph prompts can use `AletheiaKnowledgePlugin.SearchLazyGraphRag`. If a graph path returns no usable context, the engine falls back to Semantic RAGS, including query variants and registered-source hydration for scoped prompts.
+
+If Repository metadata or Taxonomy can identify the scope, such as `RFP`, but RAGS retrieval still returns no chunks, treat the condition as RAGS index drift. Queue background repair with:
+
+```http
+POST /api/jobs/rags/repair?query=RFP
+```
+
+The repair endpoint returns an Activity-visible background job snapshot. Use `POST /api/jobs/rags/repair` with no query to rebuild all registered Repository sources.
 
 ```json
 { "error": "Plan must be approved before execution. Current status: Proposed." }
@@ -278,6 +299,9 @@ HTTP status codes:
 - Job state and progress are currently stored in memory. An API restart loses active jobs and history.
 - The background worker is process-local and single-service; it is not distributed.
 - Heartbeats are intentionally coarse: every 30 seconds during active synthesis, every 2 minutes during long waits.
+- Activity now polls recent Copilot chat jobs in addition to ingestion jobs. Activity prompt snippets are operational traces; review access controls before using this in a sensitive production environment.
+- RAGS index repair jobs appear as `RagsRepair` background jobs and report document-level progress. They do not depend on the UI staying open.
+- Copilot orchestration guidance is loaded from `ChatAgent:OrchestrationScriptPath` and defaults to `Prompts/copilot-rags-orchestration.md` in the API container.
 - Telemetry is best-effort. Provider-reported metrics are preferred; text-length heuristics are used as fallback.
 - `AlignmentConfidence` is a retrieval heuristic, not a calibrated correctness score.
 

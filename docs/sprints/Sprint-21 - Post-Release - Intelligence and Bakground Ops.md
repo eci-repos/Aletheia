@@ -8,7 +8,7 @@ Status: Active
 
 Begin the v2 RAGS initiative after v1.0 release certification by moving GraphRAG toward an index-heavy model and making long-running ingestion observable and independent from browser request timeouts.
 
-The active scope is Phase 21 only.
+Historical scope note: when this sprint was active, its scope was Phase 21. This line is not a current repository-wide mandate; current authorization comes from `docs/File 02-Current-Sprint.md`.
 
 Authorized work:
 
@@ -39,7 +39,7 @@ Authorized work:
 
 The repository is the source of truth.
 
-Phase 21 supersedes the previous v1.0 release-freeze sprint.
+At the time of this sprint, Phase 21 superseded the previous v1.0 release-freeze sprint. Current implementation scope is governed by `docs/File 02-Current-Sprint.md`.
 
 Completed v1.0 functionality must not be regressed.
 

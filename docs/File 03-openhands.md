@@ -179,3 +179,11 @@ Implementation status (2026-08-05):
 - Admin duplicate report: GET /api/files/duplicates [Authorize(Roles = Administrator)].
 - Web UI: Browse gains an update (↻) action linking to /upload?update=<fileId>&fileName=<name>; Upload page supports update mode.
 - Tests: Repository.UnitTests 102 (DuplicateDetectionServiceTests + FilesControllerTests); RAGS 225; Foundation 55. Web.UnitTests (RepositoryApiClientUploadTests) added but not runnable in this sandbox (WASM ComputeWasmBuildAssets task-host failure blocks building Aletheia.Web, pre-existing environment issue; CI does not run Web.UnitTests).
+
+
+# Sprint 57 Notes (Search Center Retrieval Quality and Troubleshooting)
+
+- Active sprint: `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md`. Sprint 56 committed/pushed (HEAD e34bba7; working tree clean).
+- Zero Search Center results == zero embeddings (PgVectorStore has no similarity threshold). Diagnose via Activity panel + `/api/jobs`; template gate, extraction failure, and fresh DB are the usual causes.
+- Sprint 57 adds: `GET /api/rags/status` diagnostics + Search Center empty-state messaging; configurable real embeddings (Ollama) with SimpleEmbeddingProvider fallback; `RAGS:MinimumScore` + keyword fallback with `RetrievalStrategy`; Reembed background job (kind `Reembed`) that replaces embeddings per source.
+- Keep existing synchronous RAGS/GraphRAG/LazyGraphRAG endpoints and the /api/jobs snapshot contract untouched.

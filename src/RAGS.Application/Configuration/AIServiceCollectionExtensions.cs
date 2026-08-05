@@ -94,10 +94,39 @@ public static class AIServiceCollectionExtensions
         // Tool invoker used by the chat execution engine to call registered repository tools.
         services.AddSingleton<IChatToolInvoker, Aletheia.RAGS.Application.Planning.KernelChatToolInvoker>();
 
-        // Embedding: keep deterministic provider for 128-dim pgvector compatibility
-        services.AddSingleton<SimpleEmbeddingProvider>();
-        services.AddSingleton<IEmbeddingProvider>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
-        services.AddSingleton<IEmbeddingService>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
+        // Embedding: configurable via AI:EmbeddingProvider ("Simple" deterministic 128-dim fallback, or "Ollama"
+        // which uses the enabled provider's EmbeddingModel, e.g., nomic-embed-text). Falls back to Simple when
+        // Ollama is requested but no enabled Ollama provider with an EmbeddingModel is configured.
+        var useOllamaEmbeddings = options.EmbeddingProvider.Equals("Ollama", StringComparison.OrdinalIgnoreCase)
+            && provider is not null
+            && provider.Type.Equals("Ollama", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(provider.EmbeddingModel);
+
+        if (useOllamaEmbeddings)
+        {
+            var embeddingEndpoint = string.IsNullOrWhiteSpace(provider.Endpoint)
+                ? "http://localhost:11434"
+                : provider.Endpoint;
+            var embeddingTimeout = TimeSpan.FromSeconds(provider.RequestTimeoutSeconds ?? 120);
+
+            services.AddSingleton(sp => new OllamaEmbeddingProvider(
+                new HttpClient
+                {
+                    BaseAddress = new Uri(embeddingEndpoint),
+                    Timeout = embeddingTimeout
+                },
+                provider.EmbeddingModel!,
+                options.EmbeddingDimension,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<OllamaEmbeddingProvider>>()));
+            services.AddSingleton<IEmbeddingProvider>(sp => sp.GetRequiredService<OllamaEmbeddingProvider>());
+            services.AddSingleton<IEmbeddingService>(sp => sp.GetRequiredService<OllamaEmbeddingProvider>());
+        }
+        else
+        {
+            services.AddSingleton<SimpleEmbeddingProvider>();
+            services.AddSingleton<IEmbeddingProvider>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
+            services.AddSingleton<IEmbeddingService>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
+        }
 
         // Semantic Kernel AI services
         services.AddSingleton<IChatAgentInstructionProvider, FileChatAgentInstructionProvider>();
@@ -112,3 +141,4 @@ public static class AIServiceCollectionExtensions
         return services;
     }
 }
+

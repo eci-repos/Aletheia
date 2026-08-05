@@ -59,7 +59,7 @@
 {
     @if (_results.Count == 0)
     {
-        <div class="alert alert-warning">No results found.</div>
+        <div class="alert alert-warning">@EmptyStateMessage</div>
     }
     else
     {
@@ -97,6 +97,18 @@
     }
 }
 
+@if (ShowInternalSearch && _status is not null)
+{
+    <div class="alert alert-secondary small mb-3">
+        <strong>RAGS status:</strong> @_status.EmbeddedChunkCount chunks · @_status.IngestedSourceCount sources ingested · @_status.RegisteredDocumentCount registered documents ·
+        @_status.TemplateGateSkipCount template-gate skips · @_status.ExtractionFailureCount extraction failures
+        @if (_status.TemplateGateSkips.Count > 0)
+        {
+            <div>Recent gate skips: @string.Join("; ", _status.TemplateGateSkips)</div>
+        }
+    </div>
+}
+
 <hr />
 
 @if (ShowInternalSearch)
@@ -110,6 +122,13 @@
 <button class="btn btn-outline-primary" @onclick="IngestAsync" disabled="@_ingesting">
     @(_ingesting ? "Ingesting..." : "Ingest Content")
 </button>
+<button class="btn btn-outline-secondary mt-2" @onclick="ReembedAllAsync" disabled="@_reembedding">
+    @(_reembedding ? "Re-embedding..." : "Re-embed all documents")
+</button>
+@if (!string.IsNullOrEmpty(_reembedStatus))
+{
+    <div class="alert @(_reembedSuccess ? "alert-success" : "alert-warning") mt-2">@_reembedStatus</div>
+}
 
 @if (!string.IsNullOrEmpty(_ingestStatus))
 {
@@ -126,13 +145,23 @@
     private bool _searching;
     private string _searchError = string.Empty;
     private List<SearchResult>? _results;
+    private RagsStatusClientSnapshot? _status;
+    private bool _statusChecked;
 
     private string _ingestContent = string.Empty;
     private bool _ingesting;
     private string _ingestStatus = string.Empty;
     private bool _ingestSuccess;
+    private bool _reembedding;
+    private string _reembedStatus = string.Empty;
+    private bool _reembedSuccess;
 
     private bool ShowInternalSearch { get; set; }
+
+    private string EmptyStateMessage =>
+        (_status?.EmbeddedChunkCount ?? 0) == 0
+            ? "No documents have been ingested yet. Search only covers documents that finished background ingestion. Upload a document and wait for the Activity panel to show Ready, then retry. Example queries for a registered RFP Analysis document: Scope of Work, Project Summary, requirements."
+            : $"No results found for \"{_query}\". Try words that appear in your documents (e.g., Scope of Work), or ask Copilot for questions with conditions.";
 
     protected override async Task OnInitializedAsync()
     {
@@ -239,6 +268,11 @@
             }
 
             ActivityLog.Complete(activityId, "Search Center", $"{ModeLabel} search", $"Search completed with {_results.Count} results.");
+            if (_results.Count == 0 && !_statusChecked)
+            {
+                _status = await ApiClient.GetRagsStatusAsync();
+                _statusChecked = true;
+            }
             await RecentGraphContext.RecordSearchAsync(_query, _mode);
         }
         catch (Exception ex)
@@ -311,6 +345,39 @@
         }
     }
 
+    private async Task ReembedAllAsync()
+    {
+        if (_reembedding)
+        {
+            return;
+        }
+
+        _reembedding = true;
+        _reembedStatus = string.Empty;
+        _reembedSuccess = false;
+        try
+        {
+            var job = await ApiClient.ReembedAsync();
+            if (job is null)
+            {
+                _reembedStatus = "Re-embed job failed to queue.";
+                return;
+            }
+
+            _reembedSuccess = true;
+            _reembedStatus = $"Re-embed job {job.JobId:N} queued. It regenerates embeddings for all registered documents.";
+            ActivityLog.UpsertJob(job);
+        }
+        catch (Exception ex)
+        {
+            _reembedStatus = $"Re-embed failed: {ex.Message}";
+        }
+        finally
+        {
+            _reembedding = false;
+        }
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Enter")
@@ -319,3 +386,4 @@
         }
     }
 }
+

@@ -34,3 +34,9 @@ Status: **Core implementation complete; verification + commit pending.**
 
 - Prepared `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md` (Status: Planned): Search Center diagnostics + retrieval quality (real embeddings, score floor, keyword fallback, Reembed job). Becomes active after Sprint 56 is committed/verified.
 - Added `docs/OperationsGuide.md` -> "Search Center Troubleshooting (Sprint 56/57)" (empty-embeddings diagnosis: no similarity threshold in PgVectorStore, ingestion/template-gate/extraction/fresh-DB causes, verification SQL, example queries).
+
+## Closure (same day)
+
+- Sprint 56 committed and pushed: `5366696` (implementation + docs, includes the pre-existing earlier-sprint batch) and `e34bba7` (Sprint 57 prep docs). Working tree clean, origin/master up to date.
+- Sprint 57 is now the active sprint (File 02 flipped).
+- Remaining: Docker smoke test of the duplicate trap + update flow (can run in parallel with Sprint 57 work).

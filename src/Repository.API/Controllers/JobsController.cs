@@ -63,4 +63,12 @@ public sealed class JobsController : ControllerBase
     {
         return Accepted(_jobs.EnqueueRagsRepair(query));
     }
+
+    [HttpPost("rags/reembed")]
+    [ProducesResponseType(typeof(IngestionJobSnapshot), StatusCodes.Status202Accepted)]
+    public IActionResult ReembedRags()
+    {
+        return Accepted(_jobs.EnqueueReembed());
+    }
 }
+

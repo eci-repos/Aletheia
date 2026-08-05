@@ -28,6 +28,8 @@ public interface IIngestionJobService
 
     IngestionJobSnapshot EnqueueRagsRepair(string? query = null);
 
+    IngestionJobSnapshot EnqueueReembed();
+
     IngestionJobSnapshot EnqueueDocumentBriefs(Guid? sourceId = null, string? sourceName = null);
 
     IReadOnlyList<IngestionJobSnapshot> List(int take = 50);
@@ -42,7 +44,8 @@ public enum IngestionJobEngine
     LazyGraphRag,
     WikiRegeneration,
     RagsRepair,
-    DocumentBriefs
+    DocumentBriefs,
+    Reembed
 }
 
 public sealed record IngestionJobSnapshot(
@@ -129,6 +132,12 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
         }
 
         var item = IngestionJobWorkItem.ForUploadedFile(sourceId, sourceName, contentType, tempFilePath, sizeBytes);
+        return Enqueue(item);
+    }
+
+    public IngestionJobSnapshot EnqueueReembed()
+    {
+        var item = IngestionJobWorkItem.ForReembed();
         return Enqueue(item);
     }
 
@@ -272,6 +281,12 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
         }
 
         if (item.Engine == IngestionJobEngine.DocumentBriefs)
+
+        if (item.Engine == IngestionJobEngine.Reembed)
+        {
+            await RunReembedJobAsync(item, state, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         {
             await RunDocumentBriefsJobAsync(item, state, cancellationToken).ConfigureAwait(false);
             return;
@@ -346,6 +361,73 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
             ? $"RAGS index repair completed for {sources.Count} registered document(s)."
             : $"RAGS index repair completed for {sources.Count - failed.Count} of {sources.Count} registered document(s); {failed.Count} failed.";
         state.Succeed("Repaired", detail);
+    }
+
+    private async Task RunReembedJobAsync(
+        IngestionJobWorkItem item,
+        IngestionJobState state,
+        CancellationToken cancellationToken)
+    {
+        state.Update("Repository scan", "Scanning registered Repository documents to re-embed.", 5, force: true);
+        var sourcesResult = await LoadRepairSourcesAsync(null, cancellationToken).ConfigureAwait(false);
+        if (sourcesResult.IsFailure || sourcesResult.Value is null)
+        {
+            state.Fail("Repository scan", sourcesResult.Error ?? "Unable to scan registered Repository documents.");
+            return;
+        }
+
+        var sources = sourcesResult.Value;
+        if (sources.Count == 0)
+        {
+            state.Succeed("No sources found", "No registered Repository documents to re-embed.");
+            return;
+        }
+
+        var failed = new List<string>();
+        for (var i = 0; i < sources.Count; i++)
+        {
+            var source = sources[i];
+            state.UpdateUnits(
+                "Re-embedding",
+                $"Regenerating embeddings for {source.SourceName} ({i + 1}/{sources.Count}).",
+                i,
+                sources.Count);
+
+            var result = await RunWithHeartbeatAsync(
+                state,
+                "Re-embedding",
+                $"Still re-embedding {source.SourceName}.",
+                async ct =>
+                {
+                    var reembedded = await _knowledgeSourceIngestionService.EnsureIngestedAsync(source, ct).ConfigureAwait(false);
+                    return reembedded.IsFailure
+                        ? Result.Failure(reembedded.Error ?? $"Re-embedding failed for {source.SourceName}.")
+                        : Result.Success();
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            if (result.IsFailure)
+            {
+                failed.Add($"{source.SourceName}: {result.Error}");
+            }
+
+            state.UpdateUnits(
+                "Re-embedding",
+                $"Completed {i + 1} of {sources.Count} registered document(s).",
+                i + 1,
+                sources.Count);
+        }
+
+        if (failed.Count == sources.Count)
+        {
+            state.Fail("Re-embedding", $"Re-embedding failed for all {sources.Count} document(s): {string.Join("; ", failed.Take(3))}");
+            return;
+        }
+
+        var detail = failed.Count == 0
+            ? $"Re-embedding completed for {sources.Count} registered document(s)."
+            : $"Re-embedding completed for {sources.Count - failed.Count} of {sources.Count} registered document(s); {failed.Count} failed.";
+        state.Succeed("Re-embedded", detail);
     }
 
     private async Task<Result<IReadOnlyList<KnowledgeSource>>> LoadRepairSourcesAsync(string? query, CancellationToken cancellationToken)
@@ -956,6 +1038,23 @@ internal sealed record IngestionJobWorkItem(
             null,
             null,
             normalizedQuery?.Length ?? 0);
+    }
+
+    public static IngestionJobWorkItem ForReembed()
+    {
+        return new IngestionJobWorkItem(
+            Guid.NewGuid(),
+            "ReembedIngestion",
+            "Re-embed all registered documents",
+            Guid.Empty,
+            null,
+            IngestionJobEngine.Reembed,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0);
     }
 
     public static IngestionJobWorkItem ForDocumentBriefs(Guid? sourceId, string? sourceName)

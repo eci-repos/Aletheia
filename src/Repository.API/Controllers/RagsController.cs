@@ -1,5 +1,6 @@
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.Repository.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,10 +12,27 @@ namespace Aletheia.Repository.API.Controllers;
 public class RagsController : ControllerBase
 {
     private readonly IRagsService _ragsService;
+    private readonly IRagsStatusService _ragsStatusService;
 
-    public RagsController(IRagsService ragsService)
+    public RagsController(IRagsService ragsService, IRagsStatusService ragsStatusService)
     {
         _ragsService = ragsService ?? throw new ArgumentNullException(nameof(ragsService));
+        _ragsStatusService = ragsStatusService ?? throw new ArgumentNullException(nameof(ragsStatusService));
+    }
+
+    [HttpGet("status")]
+    [ProducesResponseType(typeof(RagsStatusSnapshot), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Status(CancellationToken cancellationToken)
+    {
+        var result = await _ragsStatusService.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        if (result.IsFailure)
+        {
+            return BadRequest(new { error = result.Error });
+        }
+
+        return Ok(result.Value);
     }
 
     [HttpPost("ingest")]

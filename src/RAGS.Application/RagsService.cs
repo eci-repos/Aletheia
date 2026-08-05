@@ -1,5 +1,6 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
+using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.RAGS.Application.Pipelines;
 using Microsoft.Extensions.Logging;
@@ -14,17 +15,20 @@ public sealed class RagsService : IRagsService
     private readonly ChunkingPipeline _chunkingPipeline;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IVectorStore _vectorStore;
+    private readonly RetrievalOptions _retrievalOptions;
     private readonly Microsoft.Extensions.Logging.ILogger<RagsService> _logger;
 
     public RagsService(
         ChunkingPipeline chunkingPipeline,
         IEmbeddingProvider embeddingProvider,
         IVectorStore vectorStore,
+        Microsoft.Extensions.Options.IOptions<RetrievalOptions>? retrievalOptions = null,
         Microsoft.Extensions.Logging.ILogger<RagsService>? logger = null)
     {
         _chunkingPipeline = chunkingPipeline ?? throw new ArgumentNullException(nameof(chunkingPipeline));
         _embeddingProvider = embeddingProvider ?? throw new ArgumentNullException(nameof(embeddingProvider));
         _vectorStore = vectorStore ?? throw new ArgumentNullException(nameof(vectorStore));
+        _retrievalOptions = retrievalOptions?.Value ?? new RetrievalOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RagsService>.Instance;
     }
 
@@ -105,6 +109,31 @@ public sealed class RagsService : IRagsService
         }
 
         var results = searchResult.Value;
+        // Sprint 57: score floor + keyword fallback - when vector retrieval returns nothing or its
+        // best score is below the configured floor, fall back to lexical search so users get results
+        // instead of silence.
+        var minimumScore = _retrievalOptions.MinimumScore;
+        var bestScore = results.Count == 0 ? 0f : results.Max(result => result.Score);
+        if (results.Count == 0 || bestScore < minimumScore)
+        {
+            var keywordResult = await _vectorStore
+                .SearchKeywordAsync(request.Query, request.TopK, cancellationToken)
+                .ConfigureAwait(false);
+            if (keywordResult.IsSuccess && keywordResult.Value is { Count: > 0 })
+            {
+                results = keywordResult.Value;
+                _logger.LogInformation(
+                    "RAGS retrieval used keyword fallback for query '{Query}' (vector count {VectorCount}, best score {BestScore:P2}, minimum {MinimumScore:P2}).",
+                    request.Query,
+                    searchResult.Value.Count,
+                    bestScore,
+                    minimumScore);
+            }
+            else if (keywordResult.IsFailure)
+            {
+                _logger.LogWarning("RAGS keyword fallback failed for query '{Query}': {Error}.", request.Query, keywordResult.Error);
+            }
+        }
         if (request.SourceId.HasValue && _vectorStore is not ISourceFilteredVectorStore)
         {
             results = results

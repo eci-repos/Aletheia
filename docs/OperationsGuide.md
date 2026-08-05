@@ -170,6 +170,8 @@ The Search Center's default **Semantic** mode searches the `embeddings` table (p
 3. **No extractable text.** If extraction yields no text, ingestion marks the source "not ingestable" and writes no embeddings.
 4. **Fresh database / stack restart with a new volume** - embeddings are gone even when blobs/metadata still exist.
 
+Status endpoint (Sprint 57): `GET /api/rags/status` returns `EmbeddedChunkCount`, `IngestedSourceCount`, `RegisteredDocumentCount`, `TemplateGateSkipCount`, `ExtractionFailureCount`, recent template-gate skips, and the last 10 `UploadIngestion` jobs with status/error. The Search Center uses it to tell users why a search returned nothing (empty corpus vs no match); an operator status chip is shown when `FeatureFlags:ShowInternalSearch=true`.
+
 Verification query (run against PostgreSQL):
 
 ```sql
@@ -180,3 +182,12 @@ SELECT source_id, count(*) FROM embeddings GROUP BY source_id;
 Example queries that should return results for an ingested RFP Analysis document: `Scope of Work`, `Project Summary`, `proposal format`, `Vendor Experience`, `requirements`, `Work Plan`.
 
 **Embedding caveat:** today embeddings use the deterministic `SimpleEmbeddingProvider` (character + bigram frequency hash, 128-dim), so matching is lexical rather than meaning-based. Improving retrieval quality (real embedding provider, score floor, keyword fallback) is planned in `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md`.
+
+
+### Keyword Fallback (Sprint 57)
+
+`RagsService.RetrieveAsync` now falls back to keyword search (`IVectorStore.SearchKeywordAsync`; PostgreSQL `ILIKE` over chunk content and file name, newest chunks first) when the vector search returns no results or the best vector score is below `RAGS:MinimumScore` (default 0). Results carry `RetrievalStrategy` = `keyword` so callers can tell which path produced them. Tune via `RAGS__MinimumScore` (e.g., 0.35) to prefer lexical results when vector matches are weak.
+
+### Re-embedding (Sprint 57)
+
+`POST /api/jobs/rags/reembed` queues a `ReembedIngestion` job that re-runs ingestion for every registered document (embeddings, knowledge-index rows, and graph nodes replaced; Wiki briefs regenerated). Use it after changing the embedding provider or dimension. The schema initializer migrates the `embeddings.embedding` column dimension automatically (drops/recreates the vector index). Configure via `AI:EmbeddingProvider` ("Simple" default | "Ollama"), `AI:EmbeddingDimension`, and the provider's `EmbeddingModel`.

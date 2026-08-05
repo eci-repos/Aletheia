@@ -203,6 +203,28 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<IReadOnlyList<SearchResult>>(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<RagsStatusClientSnapshot?> GetRagsStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync("/api/rags/status", cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<RagsStatusClientSnapshot>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<BackgroundJobClientSnapshot?> ReembedAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsync("/api/jobs/rags/reembed", null, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
+    }
+
     // GraphRAG
     public async Task<bool> GraphRagIngestAsync(Guid sourceId, string content, CancellationToken cancellationToken = default)
     {
@@ -1026,6 +1048,24 @@ public sealed class RepositoryApiClient
     }
 }
 
+public sealed record RagsStatusClientSnapshot(
+    int EmbeddedChunkCount,
+    int IngestedSourceCount,
+    int RegisteredDocumentCount,
+    long TemplateGateSkipCount,
+    long ExtractionFailureCount,
+    IReadOnlyList<string> TemplateGateSkips,
+    IReadOnlyList<RagsUploadJobClientSummary> RecentUploadJobs);
+
+public sealed record RagsUploadJobClientSummary(
+    Guid JobId,
+    string Status,
+    string Stage,
+    string? Error,
+    Guid SourceId,
+    string? SourceName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt);
 public sealed record UploadClientResult(
     bool Uploaded,
     bool RagsIngested,
@@ -1056,5 +1096,7 @@ public sealed record BackgroundJobClientSnapshot(
     DateTimeOffset LastHeartbeatAt,
     DateTimeOffset? CompletedAt,
     string? Error);
+
+
 
 

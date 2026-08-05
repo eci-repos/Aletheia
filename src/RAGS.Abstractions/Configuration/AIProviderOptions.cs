@@ -21,4 +21,7 @@ public class AIProviderOptions
     public int? RequestTimeoutSeconds { get; set; }
 
     public int? BatchSize { get; set; }
+
+    /// <summary>Model used for embeddings when this provider is selected for embedding (e.g., nomic-embed-text).</summary>
+    public string? EmbeddingModel { get; set; }
 }

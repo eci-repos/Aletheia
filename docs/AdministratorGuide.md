@@ -136,6 +136,7 @@ MinIO__AccessKey=newkey
 | GovernanceController | `/api/governance`     | Policies, retention, compliance      |
 | KnowledgeGraphController | `/api/graph`      | Graph nodes, edges, paths            |
 | RagsController     | `/api/rags`             | RAG ingestion and retrieval          |
+| RagsController     | \/api/rags/status\     | Retrieval diagnostics: chunk/source counts, template-gate skips, recent upload jobs |
 | CopilotController  | `/api/copilot`          | AI chat and copilot sessions         |
 | GraphRagController | `/api/graphrag`         | GraphRAG search                      |
 | LazyGraphRagController | `/api/lazygraphrag` | LazyGraphRAG search                  |
@@ -281,3 +282,38 @@ CREATE INDEX IF NOT EXISTS idx_file_metadata_content_hash ON file_metadata(conte
 ```
 
 The same statements are provided in `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql`. Rows uploaded before this change have a NULL `content_hash`; they are re-fingerprinted on their next upload/update.
+
+### Retrieval Options (Sprint 57)
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| RAGS:MinimumScore | 0 | Minimum cosine similarity (0..1) for vector results. When the best vector result is below this floor (or the vector search returns nothing), retrieval falls back to keyword search over chunk content and file names (`RetrievalStrategy` = `keyword`). 0 keeps the classic behavior (fallback only when vector results are empty); raise it (e.g., 0.35) to make weak vector matches fall back to lexical results. |
+
+Environment variable override:
+
+```bash
+RAGS__MinimumScore=0.35
+```
+
+### Embedding Provider and Re-embedding (Sprint 57)
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| AI:EmbeddingProvider | Simple | "Simple" = deterministic 128-dim hash (no AI required, lexical matching). "Ollama" = real embeddings via the enabled Ollama provider's EmbeddingModel. Falls back to Simple when Ollama is requested but no enabled Ollama provider has an EmbeddingModel. |
+| AI:EmbeddingDimension | 768 | Expected embedding dimension for the embeddings table schema (nomic-embed-text = 768). Set to match the chosen model; the provider updates to the actual dimension after the first call. |
+| AI:Providers[*].EmbeddingModel | - | Model used for embeddings (e.g., nomic-embed-text on the LocalOllama provider). |
+
+Environment variable overrides:
+
+```bash
+AI__EmbeddingProvider=Ollama
+AI__EmbeddingDimension=768
+```
+
+**Switching to Ollama embeddings:** set `AI:EmbeddingProvider=Ollama` and `EmbeddingModel` on the provider, restart the API (the `PgVectorSchemaInitializer` migrates the `embeddings.embedding` column to the new dimension automatically, dropping/recreating the vector index), then re-embed:
+
+```http
+POST /api/jobs/rags/reembed
+```
+
+The Reembed job (kind `ReembedIngestion`) re-runs ingestion for every registered document, replacing embeddings, knowledge-index rows, and graph nodes, then regenerates Wiki briefs. Track it in the Activity panel or `GET /api/jobs`. The Search Center admin section (with `FeatureFlags:ShowInternalSearch=true`) has a **Re-embed all documents** button.

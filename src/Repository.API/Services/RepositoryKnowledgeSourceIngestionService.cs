@@ -16,6 +16,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
     private readonly IUploadedContentKnowledgeIndexer _knowledgeIndexer;
     private readonly IDocumentTemplateRegistry? _templateRegistry;
     private readonly IGraphProvider? _graphProvider;
+    private readonly IIngestionDiagnostics? _diagnostics;
     private readonly Lazy<IIngestionJobService>? _ingestionJobs;
     private readonly ILogger<RepositoryKnowledgeSourceIngestionService> _logger;
 
@@ -26,6 +27,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         IUploadedContentKnowledgeIndexer knowledgeIndexer,
         IDocumentTemplateRegistry? templateRegistry = null,
         IGraphProvider? graphProvider = null,
+        IIngestionDiagnostics? diagnostics = null,
         ILogger<RepositoryKnowledgeSourceIngestionService>? logger = null,
         Lazy<IIngestionJobService>? ingestionJobs = null)
     {
@@ -35,6 +37,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         _knowledgeIndexer = knowledgeIndexer ?? throw new ArgumentNullException(nameof(knowledgeIndexer));
         _templateRegistry = templateRegistry;
         _graphProvider = graphProvider;
+        _diagnostics = diagnostics;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RepositoryKnowledgeSourceIngestionService>.Instance;
         _ingestionJobs = ingestionJobs;
     }
@@ -80,6 +83,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         if (extraction.IsFailure || extraction.Value is null)
         {
             _logger.LogWarning("Knowledge source text extraction failed for {SourceName}: {Error}.", source.SourceName, extraction.Error);
+            _diagnostics?.RecordExtractionFailure(source.SourceName, extraction.Error ?? "unknown");
             return Result<bool>.Failure(extraction.Error ?? "Knowledge source text extraction failed.");
         }
 
@@ -145,6 +149,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         return Result<bool>.Success(true);
     }
 }
+
 
 
 

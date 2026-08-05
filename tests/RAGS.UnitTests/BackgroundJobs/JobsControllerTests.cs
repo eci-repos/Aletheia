@@ -91,6 +91,11 @@ public sealed class JobsControllerTests
             return CreateJob(sourceId ?? Guid.Empty, "DocumentBriefs");
         }
 
+        public IngestionJobSnapshot EnqueueReembed()
+        {
+            return CreateJob(Guid.Empty, "ReembedIngestion");
+        }
+
         public IngestionJobSnapshot EnqueueRagsRepair(string? query = null)
         {
             var job = CreateJob(Guid.Empty, "RagsRepair");

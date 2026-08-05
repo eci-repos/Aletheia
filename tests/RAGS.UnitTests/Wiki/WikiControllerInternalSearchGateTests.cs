@@ -169,6 +169,11 @@ public sealed class WikiControllerInternalSearchGateTests
             return CreateJob(sourceId ?? Guid.Empty, "DocumentBriefs");
         }
 
+        public IngestionJobSnapshot EnqueueReembed()
+        {
+            return CreateJob(Guid.Empty, "ReembedIngestion");
+        }
+
         public IReadOnlyList<IngestionJobSnapshot> List(int take = 50)
         {
             return Array.Empty<IngestionJobSnapshot>();

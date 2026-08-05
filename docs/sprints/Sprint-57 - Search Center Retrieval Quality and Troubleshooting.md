@@ -1,6 +1,6 @@
 # Sprint 57 - Search Center Retrieval Quality and Troubleshooting
 
-**Status:** Planned (next after Sprint 56; not yet the active authority - complete and commit Sprint 56 first)
+**Status:** Active
 
 ## Objective
 
@@ -58,6 +58,29 @@
 
 ## Implementation Status (2026-08-05)
 
-Sprint file prepared. No implementation yet.
-- Docs added under Sprint 56: `docs/OperationsGuide.md` -> "Search Center Troubleshooting (Sprint 56/57)" with empty-embeddings diagnosis, verification SQL, and example queries.
-- Blocking prerequisite: Sprint 56 must be committed/verified before Sprint 57 becomes active (both touch the ingestion pipeline and `RagsService`/`PgVectorStore`).
+Deliverable 1 (Search diagnostics) implemented and locally verified:
+
+1. **`GET /api/rags/status`** (RagsController, authenticated) - `RagsStatusService`/`IRagsStatusService` (Repository.API, singletons in Program.cs) returns `RagsStatusSnapshot`: EmbeddedChunkCount, IngestedSourceCount, RegisteredDocumentCount (PostgreSQL counts via Dapper), TemplateGateSkipCount, ExtractionFailureCount + recent gate skips (from `IngestionDiagnostics`), and the last 10 `UploadIngestion` jobs (from `IngestionJobService.List`).
+2. **Ingestion diagnostics counters** - `IIngestionDiagnostics`/`IngestionDiagnostics` (singleton); `RepositoryKnowledgeSourceIngestionService` records template-gate skips and extraction failures (optional ctor dependency, wired in DI).
+3. **Search Center UI** - empty results now show a contextual message: corpus-empty -> "No documents have been ingested yet... check the Activity panel" + example queries; otherwise "No results found for 'query'... ask Copilot". A RAGS status chip (counts + recent gate skips) renders for operators when `FeatureFlags:ShowInternalSearch=true`. `RepositoryApiClient.GetRagsStatusAsync()` added.
+4. **Tests** - Repository.UnitTests 107 passed (IngestionDiagnosticsTests x3, RagsControllerTests x2); RAGS 225, Foundation 55 green; Web C#/Razor CoreCompile 0 errors.
+5. **Docs** - OperationsGuide status endpoint, AdministratorGuide API table updated.
+
+Remaining in Sprint 57: Deliverable 2 (score floor + keyword fallback), Deliverable 3 (real embedding provider + Reembed job), Docker smoke test, commit.
+
+## Deliverable 2 - Score Floor and Keyword Fallback (2026-08-05, implemented)
+
+- `RetrievalOptions` (`RAGS:MinimumScore`, default 0) registered in Program.cs; `"RAGS": { "MinimumScore": 0 }` added to appsettings.json.
+- `IVectorStore.SearchKeywordAsync(query, topK)` added with a default "not supported" implementation; `PgVectorStore` implements it (PostgreSQL `ILIKE` over `embeddings.content` and `file_metadata.file_name`, newest first, `RetrievalStrategy` = "keyword").
+- `RagsService.RetrieveAsync` falls back to keyword search when vector results are empty or the best vector score is below `RAGS:MinimumScore`; strategy surfaced via `SearchResult.RetrievalStrategy` ("semantic" vs "keyword"). Backward compatible (default 0 => fallback only on empty vector results).
+- Tests: RAGS.UnitTests 229 passed (+4: empty-vector fallback, below-floor fallback, above-floor keeps vector, unsupported-keyword keeps vector). Repository 107, Foundation 55 green; Web CoreCompile 0 errors.
+- Docs: AdministratorGuide (Retrieval Options), OperationsGuide (Keyword Fallback).
+
+## Deliverable 3 - Real Embedding Provider and Reembed Job (2026-08-05, implemented)
+
+- `OllamaEmbeddingProvider` (RAGS.Application/Providers): calls Ollama `/api/embed` with the configured model; parses `embeddings[0]`; tracks the actual dimension after first call; clear failure messages.
+- Config: `AI:EmbeddingProvider` ("Simple" default | "Ollama"), `AI:EmbeddingDimension` (default 768), `AI:Providers[*].EmbeddingModel` (LocalOllama -> nomic-embed-text in appsettings). `AIServiceCollectionExtensions` selects Ollama when configured (with Simple fallback when misconfigured).
+- Dimension migration: `PgVectorSchema` now emits an idempotent DO-block that checks `format_type(atttypid, atttypmod)` of `embeddings.embedding` and ALTERs the column to the provider dimension (dropping the vector index first; recreated after). Applied in both `BuildSqlScript` and `EnsureCreatedAsync`.
+- Reembed job: `IngestionJobEngine.Reembed`, `IIngestionJobService.EnqueueReembed()` (kind `ReembedIngestion`), `RunReembedJobAsync` (reuses `LoadRepairSourcesAsync` + `EnsureIngestedAsync` per source with heartbeat/progress), `POST /api/jobs/rags/reembed`, `RepositoryApiClient.ReembedAsync`, Search Center admin "Re-embed all documents" button.
+- Tests: RAGS.UnitTests 234 passed (+5 OllamaEmbeddingProvider; PgVectorSchema ivfflat assertion adjusted for the DROP reference); Repository 108 (+1 JobsControllerTests); Foundation 55 green; Web CoreCompile 0 errors.
+- Docs: AdministratorGuide (embedding config + reembed), OperationsGuide (re-embedding).

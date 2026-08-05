@@ -151,7 +151,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
                 .ConfigureAwait(false);
 
-            var results = rows.Select(MapToSearchResult).ToList();
+            var results = rows.Select(row => MapToSearchResult(row)).ToList();
 
             return Result<IReadOnlyList<SearchResult>>.Success(results);
         }
@@ -161,6 +161,59 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         }
     }
 
+    public async Task<Result<IReadOnlyList<SearchResult>>> SearchKeywordAsync(
+        string query,
+        int topK,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>());
+        }
+
+        const string sql = @"
+            SELECT
+                e.chunk_id as ""ChunkId"",
+                e.source_id as ""SourceId"",
+                e.content as ""Content"",
+                m.file_name as ""SourceName"",
+                e.chunk_index as ""ChunkIndex"",
+                (CASE WHEN m.file_name ILIKE '%' || @Query || '%' THEN 1.0 ELSE 0.9 END) as ""Score""
+            FROM embeddings e
+            LEFT JOIN LATERAL (
+                SELECT file_name
+                FROM file_metadata
+                WHERE file_id = e.source_id
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            ) m ON true
+            WHERE e.content ILIKE '%' || @Query || '%'
+               OR m.file_name ILIKE '%' || @Query || '%'
+            ORDER BY e.created_at DESC
+            LIMIT @TopK";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<EmbeddingRow>(
+                new CommandDefinition(sql, new
+                {
+                    Query = query.Trim(),
+                    TopK = topK
+                }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
+
+            var results = rows.Select(row => MapToSearchResult(row, "keyword")).ToList();
+
+            return Result<IReadOnlyList<SearchResult>>.Success(results);
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
     public async Task<Result<IReadOnlyList<SearchResult>>> GetSourceChunksAsync(
         Guid sourceId,
         int take,
@@ -195,7 +248,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 new CommandDefinition(sql, new { SourceId = sourceId, Take = take }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
                 .ConfigureAwait(false);
 
-            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(MapToSearchResult).ToList());
+            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(row => MapToSearchResult(row)).ToList());
         }
         catch (Exception ex)
         {
@@ -263,7 +316,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
                 .ConfigureAwait(false);
 
-            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(MapToSearchResult).ToList());
+            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(row => MapToSearchResult(row)).ToList());
         }
         catch (Exception ex)
         {
@@ -276,7 +329,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         return $"[{string.Join(",", vector.ToArray())}]";
     }
 
-    private static SearchResult MapToSearchResult(EmbeddingRow row)
+    private static SearchResult MapToSearchResult(EmbeddingRow row, string? retrievalStrategy = null)
     {
         var citations = string.IsNullOrWhiteSpace(row.SourceName)
             ? Array.Empty<string>()
@@ -285,7 +338,8 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         return new SearchResult(
             new Chunk(row.ChunkId, row.SourceId, row.Content, row.ChunkIndex),
             (float)row.Score,
-            citations);
+            citations,
+            retrievalStrategy: retrievalStrategy ?? "semantic");
     }
 
     private record EmbeddingRow
@@ -298,3 +352,5 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         public int ChunkIndex { get; set; }
     }
 }
+
+

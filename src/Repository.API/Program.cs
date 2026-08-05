@@ -94,6 +94,8 @@ builder.Services.AddSingleton<IUploadedFileTextExtractor, UploadedFileTextExtrac
 builder.Services.AddSingleton<IUploadedContentKnowledgeIndexer, UploadedContentKnowledgeIndexer>();
 builder.Services.AddSingleton<IKnowledgeSourceIngestionService, RepositoryKnowledgeSourceIngestionService>();
 builder.Services.AddSingleton<IngestionJobService>();
+builder.Services.AddSingleton<Aletheia.Repository.API.Services.IIngestionDiagnostics, Aletheia.Repository.API.Services.IngestionDiagnostics>();
+builder.Services.AddSingleton<Aletheia.Repository.API.Services.IRagsStatusService, Aletheia.Repository.API.Services.RagsStatusService>();
 builder.Services.AddSingleton<IIngestionJobService>(sp => sp.GetRequiredService<IngestionJobService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IngestionJobService>());
 builder.Services.AddSingleton(sp => new Lazy<Aletheia.Repository.API.Services.IIngestionJobService>(sp.GetRequiredService<Aletheia.Repository.API.Services.IIngestionJobService>));
@@ -103,6 +105,7 @@ builder.Services.AddAletheiaAI(builder.Configuration);
 
 // RAGS
 builder.Services.Configure<Aletheia.RAGS.Abstractions.Configuration.PgVectorOptions>(builder.Configuration.GetSection(Aletheia.RAGS.Abstractions.Configuration.PgVectorOptions.SectionName));
+builder.Services.Configure<Aletheia.RAGS.Abstractions.Configuration.RetrievalOptions>(builder.Configuration.GetSection(Aletheia.RAGS.Abstractions.Configuration.RetrievalOptions.SectionName));
     builder.Services.Configure<Aletheia.RAGS.Abstractions.Configuration.TaxonomyOptions>(builder.Configuration.GetSection(Aletheia.RAGS.Abstractions.Configuration.TaxonomyOptions.SectionName));
     builder.Services.AddSingleton<ITermNormalizer, ConfigurableTermNormalizer>();
 builder.Services.AddSingleton<ChunkingPipeline>();
@@ -253,6 +256,8 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 app.Run();
 
 public partial class Program { }
+
+
 
 
 

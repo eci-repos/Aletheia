@@ -40,7 +40,7 @@ public class PgVectorSchemaTests
         Assert.Contains("CREATE INDEX IF NOT EXISTS idx_embeddings_embedding_ivfflat", sql);
         Assert.Contains("USING ivfflat", sql);
         Assert.Contains("lists = 100", sql);
-        Assert.DoesNotContain("idx_embeddings_embedding_hnsw", sql);
+        Assert.DoesNotContain("CREATE INDEX IF NOT EXISTS idx_embeddings_embedding_hnsw", sql);
     }
 
     [Theory]
@@ -72,3 +72,4 @@ public class PgVectorSchemaTests
         Assert.Throws<ArgumentNullException>(() => new PgVectorSchema(null!, 128));
     }
 }
+

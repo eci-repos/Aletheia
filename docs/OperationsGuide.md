@@ -160,3 +160,23 @@ WRAGS pages are durable generated or edited knowledge snapshots. Operators can e
 - **Document updates**: submitting a changed file against an existing document keeps its fileId, snapshots a named version, replaces the blob/current metadata, re-ingests the same source (embeddings, knowledge-index rows, and graph nodes are replaced), and regenerates the Wiki brief. Monitor the upload ingestion job (`/api/jobs`) to completion; a failure leaves the current version in place and reports the error in the job.
 - **Admin duplicate report**: `GET /api/files/duplicates` (Administrator role) lists rows sharing a content hash. Review and remove duplicates manually with the existing DELETE flow; deletion also removes vectors, knowledge-index rows, and metadata.
 - **Schema change for existing deployments**: run `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-05-file-metadata-content-hash.sql` once (idempotent) to add `content_hash` and its index. Pre-existing rows are re-fingerprinted on their next upload/update.
+
+### Search Center Troubleshooting (Sprint 56/57)
+
+The Search Center's default **Semantic** mode searches the `embeddings` table (pgvector). A query that returns **zero results almost always means there are no embeddings** for the corpus: `PgVectorStore.SearchAsync` has no similarity threshold, so any embedded chunk would rank in the top-K (even a weak match). Causes and checks:
+
+1. **Ingestion job did not complete.** Open the Activity panel or `GET /api/jobs`; the `Upload` job must reach `Succeeded` ("Ready - fully ingested and searchable"). A failed job shows the reason (template gate, extraction, AI provider).
+2. **Canonical template gate.** Ingestion is stopped when the document name does not token-match a template in `docs/doc-templates` (e.g., `CMP 2026 - 3. RFP Analysis.docx` -> `3.0 - RFP Analysis`). Renamed copies are silently blocked.
+3. **No extractable text.** If extraction yields no text, ingestion marks the source "not ingestable" and writes no embeddings.
+4. **Fresh database / stack restart with a new volume** - embeddings are gone even when blobs/metadata still exist.
+
+Verification query (run against PostgreSQL):
+
+```sql
+SELECT count(*) AS embedded_chunks FROM embeddings;
+SELECT source_id, count(*) FROM embeddings GROUP BY source_id;
+```
+
+Example queries that should return results for an ingested RFP Analysis document: `Scope of Work`, `Project Summary`, `proposal format`, `Vendor Experience`, `requirements`, `Work Plan`.
+
+**Embedding caveat:** today embeddings use the deterministic `SimpleEmbeddingProvider` (character + bigram frequency hash, 128-dim), so matching is lexical rather than meaning-based. Improving retrieval quality (real embedding provider, score floor, keyword fallback) is planned in `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md`.

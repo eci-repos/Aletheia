@@ -44,3 +44,8 @@ Sprint 55 (Document Briefs and the End-User Wiki) is **complete and committed** 
 - **Docs**: Architecture, AdministratorGuide, OperationsGuide, AGENTS.md, File 03-openhands.md updated.
 
 
+
+## Next Sprint Prepared
+
+- `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md` (Status: Planned) is the prepared next sprint: Search Center diagnostics (empty-corpus messaging, `GET /api/rags/status`) + retrieval quality (configurable real embeddings, score floor, keyword fallback, Reembed job). It becomes active only after Sprint 56 is committed and verified.
+- `docs/OperationsGuide.md` already gained the "Search Center Troubleshooting (Sprint 56/57)" section (empty-embeddings diagnosis, verification SQL, example queries).

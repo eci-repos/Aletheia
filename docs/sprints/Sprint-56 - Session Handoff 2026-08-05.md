@@ -29,3 +29,8 @@ Status: **Core implementation complete; verification + commit pending.**
 1. Commit: Sprint 56 implementation + docs, and the `.github/workflows/ci.yml` .NET 10 fix (already in the working tree) - commit separately from the pre-existing uncommitted earlier-sprint batch.
 2. Push -> GitHub Actions CI run.
 3. Docker smoke test: `docker builder prune -f`, `docker compose build`, `docker compose up -d`; upload the same file twice (second attempt -> 409 duplicate badge); update a document (Browse -> update action -> new version + re-ingest + brief regen); admin `GET /api/files/duplicates`.
+
+## Follow-up (same day)
+
+- Prepared `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md` (Status: Planned): Search Center diagnostics + retrieval quality (real embeddings, score floor, keyword fallback, Reembed job). Becomes active after Sprint 56 is committed/verified.
+- Added `docs/OperationsGuide.md` -> "Search Center Troubleshooting (Sprint 56/57)" (empty-embeddings diagnosis: no similarity threshold in PgVectorStore, ingestion/template-gate/extraction/fresh-DB causes, verification SQL, example queries).

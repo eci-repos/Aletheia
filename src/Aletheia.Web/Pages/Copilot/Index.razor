@@ -20,6 +20,7 @@
                     <span>Conversation</span>
                     <div class="copilot-header-actions">
                         <button class="btn btn-sm btn-light" @onclick="ResetChatAsync">New chat</button>
+                        <button class="btn btn-sm btn-outline-light" @onclick="OpenThemePickerAsync" title="Scope this session to knowledge themes">Knowledge</button>
                         @if (_executionPanelCollapsed)
                         {
                             <button class="btn btn-sm btn-light" @onclick="RestoreExecutionPanelAsync">Show execution</button>
@@ -226,6 +227,13 @@
         _stateRestored = true;
         var state = await CopilotState.RestoreAsync();
         ApplyState(state);
+        // Sprint 58: surface the knowledge-theme picker immediately for a fresh session so the
+        // filtering option is discoverable without having to click "New chat" first.
+        if (_session.Messages.Count == 0)
+        {
+            _showThemePicker = true;
+        }
+
         await InvokeAsync(StateHasChanged);
 
         if (_pendingPlan is not null || _activeJobId.HasValue)

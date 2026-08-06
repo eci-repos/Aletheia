@@ -6,7 +6,7 @@ The platform is in the post-release RAGS v2 sprint. The active work moves GraphR
 
 ## Current Sprint
 
-Hardening and Operational Handoff - finalizes documentation for the conversational planning system, validates cancellation/failure/partial-result/telemetry reliability scenarios, and prepares the codebase for the next agent.
+Sprint 58 - Session Knowledge Theme Filtering (active). See docs/File 02-Current-Sprint.md and docs/sprints/.
 
 ## Solution Layout
 

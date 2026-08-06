@@ -84,3 +84,11 @@ Remaining in Sprint 57: Deliverable 2 (score floor + keyword fallback), Delivera
 - Reembed job: `IngestionJobEngine.Reembed`, `IIngestionJobService.EnqueueReembed()` (kind `ReembedIngestion`), `RunReembedJobAsync` (reuses `LoadRepairSourcesAsync` + `EnsureIngestedAsync` per source with heartbeat/progress), `POST /api/jobs/rags/reembed`, `RepositoryApiClient.ReembedAsync`, Search Center admin "Re-embed all documents" button.
 - Tests: RAGS.UnitTests 234 passed (+5 OllamaEmbeddingProvider; PgVectorSchema ivfflat assertion adjusted for the DROP reference); Repository 108 (+1 JobsControllerTests); Foundation 55 green; Web CoreCompile 0 errors.
 - Docs: AdministratorGuide (embedding config + reembed), OperationsGuide (re-embedding).
+
+## Defect Fix - Ingestion job routing regression (2026-08-05)
+
+- **Symptom:** uploads stored fine but the `UploadIngestion` background job immediately went to "Document brief" and failed with `no retrieved evidence is available`; no text extraction/chunking/embedding ever ran, so Search Center stayed empty.
+- **Root cause:** commit `9cdc131` inserted the `Reembed` branch into `IngestionJobService.RunJobAsync` between the `DocumentBriefs` `if` and its body, orphaning the body into an unconditional bare block. Every job that reached that point (including `Rags` uploads) ran `RunDocumentBriefsJobAsync`; `RunUploadedFileJobAsync` became unreachable (compiler warning CS0162).
+- **Fix:** restored proper if/body pairing so `DocumentBriefs`, `Reembed`, and upload (`Rags`) jobs each route to their own handler.
+- **Regression test:** `Repository.UnitTests.Services.IngestionJobServiceRoutingTests.UploadedFileJob_runs_ingestion_then_queues_document_brief` enqueues an uploaded file through the real background service and asserts the job ends `Succeeded`/`Indexed`, the text extractor + RAGS ingest ran exactly once, and the document brief only runs as its own queued job afterward. Added `<InternalsVisibleTo Include="Repository.UnitTests" />` to `Repository.API.csproj`.
+- **Results:** Repository.UnitTests 109 (+1), RAGS 234, Foundation 55 green; Web CoreCompile 0 errors.

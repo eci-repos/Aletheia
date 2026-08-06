@@ -55,4 +55,10 @@ Sprint 56 (Duplicate Upload Detection and Document Update Flow) is **complete, c
 - `PgVectorSchema` auto-migrates `embeddings.embedding` column dimension (idempotent DO-block, drops/recreates the vector index).
 - Reembed background job (kind `ReembedIngestion`): `POST /api/jobs/rags/reembed`, per-source `EnsureIngestedAsync` with progress; Search Center admin "Re-embed all documents" button.
 - RAGS.UnitTests 234 (+5), Repository 108 (+1), Foundation 55 green; Web CoreCompile 0 errors.
-- Remaining: Docker smoke test, commit.
+- Remaining: Docker smoke test.
+
+### Defect Fix - Uploads skipped ingestion (2026-08-05)
+
+- Fixed `IngestionJobService.RunJobAsync` routing regression (introduced by the Reembed job in `9cdc131`): the `DocumentBriefs` branch body was orphaned into an unconditional bare block, so upload jobs ran the document brief (which failed with "no retrieved evidence is available") instead of text extraction/chunking/embeddings.
+- Added routing regression test (`IngestionJobServiceRoutingTests`) + `InternalsVisibleTo` for Repository.UnitTests. Repository 109 (+1), RAGS 234, Foundation 55 green; Web CoreCompile 0 errors.
+- Remaining: Docker smoke test.

@@ -281,14 +281,14 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
         }
 
         if (item.Engine == IngestionJobEngine.DocumentBriefs)
+        {
+            await RunDocumentBriefsJobAsync(item, state, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
         if (item.Engine == IngestionJobEngine.Reembed)
         {
             await RunReembedJobAsync(item, state, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-        {
-            await RunDocumentBriefsJobAsync(item, state, cancellationToken).ConfigureAwait(false);
             return;
         }
 

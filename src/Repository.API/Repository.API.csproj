@@ -33,4 +33,9 @@
     <ProjectReference Include="..\RAGS.Infrastructure.Graph\RAGS.Infrastructure.Graph.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Repository.UnitTests" />
+  </ItemGroup>
+
 </Project>
+

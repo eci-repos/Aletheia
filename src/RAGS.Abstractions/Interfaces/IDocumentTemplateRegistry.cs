@@ -9,4 +9,10 @@ public interface IDocumentTemplateRegistry
 
     /// <summary>Returns the canonical template name for a document, or null when no template matches.</summary>
     string? TryGetCanonicalName(string fileName);
+
+    /// <summary>Returns the knowledge theme of the canonical template matching the document, or null when no template matches.</summary>
+    string? TryGetTheme(string fileName);
+
+    /// <summary>Returns the distinct knowledge themes declared by the canonical templates, in declaration order.</summary>
+    IReadOnlyList<string> ListThemes();
 }

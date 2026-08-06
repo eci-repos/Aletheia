@@ -7,17 +7,24 @@ namespace Aletheia.RAGS.Application;
 
 /// <summary>
 /// Loads document templates from <c>docs/doc-templates</c>. Each template enumerates the ordered
-/// sections (headings with a short description) that every document of that kind is expected to cover.
+/// sections (headings with a short description) that every document of that kind is expected to
+/// cover, and declares a knowledge theme on its first line (e.g. <c>Theme: Analysis</c>).
 /// </summary>
 public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
 {
+    /// <summary>Theme used when a template does not declare one or a document matches no template.</summary>
+    public const string Uncategorized = "Uncategorized";
+
     private const int MaxDescriptionLength = 250;
 
     private readonly IReadOnlyDictionary<string, IReadOnlyList<DocumentTemplateSection>> _templates;
+    private readonly IReadOnlyDictionary<string, string> _themes;
 
     public DocumentTemplateRegistry()
     {
-        _templates = LoadTemplates();
+        var templates = LoadTemplates();
+        _templates = templates;
+        _themes = LoadThemes(templates.Keys);
     }
 
     public IReadOnlyList<DocumentTemplateSection>? TryGetSections(string fileName)
@@ -39,6 +46,32 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
         }
 
         return FindTemplateName(fileName);
+    }
+
+    public string? TryGetTheme(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        var canonicalName = FindTemplateName(fileName);
+        return canonicalName is null ? null : _themes[canonicalName];
+    }
+
+    public IReadOnlyList<string> ListThemes()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var themes = new List<string>();
+        foreach (var theme in _themes.Values)
+        {
+            if (seen.Add(theme))
+            {
+                themes.Add(theme);
+            }
+        }
+
+        return themes;
     }
 
     private string? FindTemplateName(string fileName)
@@ -99,8 +132,50 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
         return templates;
     }
 
+    private static Dictionary<string, string> LoadThemes(IEnumerable<string> templateNames)
+    {
+        var themes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var folder = LocateDocTemplatesFolder();
+        if (folder is null)
+        {
+            return themes;
+        }
+
+        foreach (var name in templateNames)
+        {
+            var file = Path.Combine(folder, name + ".md");
+            var theme = File.Exists(file) ? ReadTheme(file) : null;
+            themes[name] = string.IsNullOrWhiteSpace(theme) ? Uncategorized : theme.Trim();
+        }
+
+        return themes;
+    }
+
+    private static string? ReadTheme(string file)
+    {
+        foreach (var rawLine in File.ReadLines(file))
+        {
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            if (line.StartsWith("#", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var match = ThemePattern.Match(line);
+            return match.Success ? match.Groups[1].Value.Trim() : null;
+        }
+
+        return null;
+    }
+
     private static readonly Regex SectionPattern = new(@"^\d+\.\s+\*\*(.+?)\*\*", RegexOptions.Compiled);
     private static readonly Regex HeadingPattern = new(@"^##\s+(.+)$", RegexOptions.Compiled);
+    private static readonly Regex ThemePattern = new(@"^Theme:\s*(.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static IReadOnlyList<DocumentTemplateSection> ParseSections(string file)
     {

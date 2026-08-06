@@ -24,4 +24,16 @@ public interface IMetadataRepository
     {
         return Task.FromResult(Result<IReadOnlyList<FileMetadata>>.Success(new List<FileMetadata>()));
     }
+
+    /// <summary>Persists the canonical template name and knowledge theme for every row of the given file. No-op when not supported.</summary>
+    Task<Result> SetTemplateAsync(Guid fileId, string? templateName, string? theme, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Success());
+    }
+
+    /// <summary>Returns one row per file_metadata row with template/theme information for knowledge-theme counts. Empty when not supported.</summary>
+    Task<Result<IReadOnlyList<FileThemeRow>>> ListThemeRowsAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result<IReadOnlyList<FileThemeRow>>.Success(new List<FileThemeRow>()));
+    }
 }

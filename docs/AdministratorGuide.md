@@ -317,3 +317,11 @@ POST /api/jobs/rags/reembed
 ```
 
 The Reembed job (kind `ReembedIngestion`) re-runs ingestion for every registered document, replacing embeddings, knowledge-index rows, and graph nodes, then regenerates Wiki briefs. Track it in the Activity panel or `GET /api/jobs`. The Search Center admin section (with `FeatureFlags:ShowInternalSearch=true`) has a **Re-embed all documents** button.
+
+### Knowledge Themes (Sprint 58)
+
+- **Concept**: every canonical template in `docs/doc-templates` declares a knowledge theme on its first line (`Theme: <Theme>`, e.g. `Theme: Analysis`). The theme is persisted on `file_metadata.template_name` / `file_metadata.theme` at ingestion (idempotent migration `2026-08-06-file-metadata-template-theme.sql`; fresh installs get it from `init.sql`). Documents ingested before Sprint 58 fall back to a theme derived from the file name via the template registry.
+- **Templates**: a template with no `Theme:` line resolves to `Uncategorized`. New document kinds require a template AND a theme before documents of that kind can be ingested and theme-filtered.
+- **End users**: the Copilot session picks knowledge themes at session creation (theme picker) and shows them as chips in the session header, editable mid-session. An empty selection ("All themes") means all documents - the pre-Sprint-58 behavior.
+- **API**: `GET /api/knowledge/themes` (authenticated) returns `[{ theme, documentCount }]`, including themes with zero registered documents so the picker is stable.
+- **Enforcement**: the selected themes are resolved to registered source ids (`IKnowledgeThemeService`, singleton) and enforced in every RAGS retrieval path - vector and keyword fallback (`RetrievalRequest.SourceIds`, `source_id = ANY(...)` in PgVectorStore) - and on repository-tool results in the execution engine. A named document outside the session themes returns no results from that document.

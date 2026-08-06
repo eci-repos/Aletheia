@@ -1800,6 +1800,7 @@ public class ChatExecutionEngineTests
         ChatExecutionEngineOptions? options = null,
         ChatAgentOptions? chatAgentOptions = null,
         IDocumentTemplateRegistry? templateRegistry = null,
+        IKnowledgeThemeService? themeService = null,
         bool startWorkerLoop = true)
     {
         var planning = new ChatPlanningService();
@@ -1845,7 +1846,8 @@ public class ChatExecutionEngineTests
             knowledgeSourceResolver,
             knowledgeSourceIngestion,
             metadataRepository,
-            templateRegistry);
+            templateRegistry,
+            themeService);
         var host = new FakeHost(execution);
         if (startWorkerLoop)
         {
@@ -2095,6 +2097,57 @@ public class ChatExecutionEngineTests
         }
     }
 
+    [Fact]
+    public async Task Engine_theme_filter_restricts_unscoped_retrieval_to_theme_sources()
+    {
+        var themeSourceId1 = Guid.NewGuid();
+        var themeSourceId2 = Guid.NewGuid();
+        var rags = new RequestCapturingRagsService(new[]
+        {
+            new SearchResult(new Chunk(Guid.NewGuid(), themeSourceId1, "theme scoped context", 0), 0.9f)
+        });
+        var themeService = new FakeKnowledgeThemeService(new[] { themeSourceId1, themeSourceId2 });
+        var services = CreateServices(
+            rags: rags,
+            themeService: themeService,
+            chatAgentOptions: new ChatAgentOptions
+            {
+                BehaviorFlags = new ChatAgentBehaviorFlags { RequireRepositoryLookupBeforeAnswer = false }
+            });
+
+        var planResult = await services.Approval.CreatePlanAsync(
+            "what does CMP say?", themeFilter: new[] { "Analysis" });
+        Assert.True(planResult.IsSuccess);
+        Assert.Equal(new[] { "Analysis" }, planResult.Value!.ThemeFilter);
+        Assert.Equal(ChatExecutionMode.Retrieval, planResult.Value!.Mode);
+        Assert.False(planResult.Value!.RequiresToolCall);
+
+        var approved = await services.Approval.ApproveAsync(planResult.Value.PlanId);
+        Assert.True(approved.IsSuccess);
+        var afterApproval = await services.Approval.GetAsync(planResult.Value.PlanId);
+        Assert.True(afterApproval.IsSuccess);
+        Assert.Equal(new[] { "Analysis" }, afterApproval.Value!.ThemeFilter);
+        var started = await services.Execution.StartAsync(planResult.Value.PlanId);
+        Assert.True(started.IsSuccess);
+
+        await services.RunUntilTerminalAsync(started.Value!.JobId, TimeSpan.FromSeconds(10));
+
+        var themeScoped = rags.Requests.FirstOrDefault(request => request.SourceIds is not null);
+        Assert.NotNull(themeScoped);
+        Assert.Equal(new[] { themeSourceId1, themeSourceId2 }, themeScoped!.SourceIds);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_without_theme_filter_keeps_empty_theme_filter()
+    {
+        var services = CreateServices(rags: new FakeRagsService(Array.Empty<SearchResult>()));
+
+        var planResult = await services.Approval.CreatePlanAsync("what is an RFP");
+
+        Assert.True(planResult.IsSuccess);
+        Assert.Empty(planResult.Value!.ThemeFilter);
+    }
+
     private sealed class FakeRagsService : IRagsService
     {
         private readonly IReadOnlyList<SearchResult> _results;
@@ -2117,6 +2170,83 @@ public class ChatExecutionEngineTests
         public Task<Result<IReadOnlyList<SearchResult>>> RetrieveSourceChunksAsync(Guid sourceId, int take, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
+        }
+    }
+
+    private sealed class RecordingRagsService : IRagsService
+    {
+        private readonly IReadOnlyList<SearchResult> _results;
+
+        public RecordingRagsService(IReadOnlyList<SearchResult> results)
+        {
+            _results = results;
+        }
+
+        public List<Guid?> Requests { get; } = new();
+
+        public Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(RetrievalRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request.SourceId);
+            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(_results));
+        }
+
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveSourceChunksAsync(Guid sourceId, int take, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
+        }
+    }
+
+    private sealed class RequestCapturingRagsService : IRagsService
+    {
+        private readonly IReadOnlyList<SearchResult> _results;
+
+        public RequestCapturingRagsService(IReadOnlyList<SearchResult> results)
+        {
+            _results = results;
+        }
+
+        public List<RetrievalRequest> Requests { get; } = new();
+
+        public Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(RetrievalRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(_results));
+        }
+
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveSourceChunksAsync(Guid sourceId, int take, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
+        }
+    }
+
+    private sealed class FakeKnowledgeThemeService : IKnowledgeThemeService
+    {
+        private readonly IReadOnlyList<Guid> _sourceIds;
+
+        public FakeKnowledgeThemeService(IReadOnlyList<Guid> sourceIds)
+        {
+            _sourceIds = sourceIds;
+        }
+
+        public Task<Result<IReadOnlyList<Guid>>> ResolveSourceIdsAsync(IReadOnlyList<string> themes, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<Guid>>.Success(_sourceIds));
+        }
+
+        public Task<Result<IReadOnlyList<KnowledgeThemeCount>>> GetThemesWithCountsAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<KnowledgeThemeCount>>.Success(
+                new List<KnowledgeThemeCount> { new KnowledgeThemeCount("Analysis", 1) }));
         }
     }
 
@@ -2253,34 +2383,6 @@ public class ChatExecutionEngineTests
                 _resultsBySource.TryGetValue(sourceId, out var results)
                     ? results
                     : Array.Empty<SearchResult>()));
-        }
-    }
-
-    private sealed class RecordingRagsService : IRagsService
-    {
-        private readonly IReadOnlyList<SearchResult> _results;
-
-        public RecordingRagsService(IReadOnlyList<SearchResult> results)
-        {
-            _results = results;
-        }
-
-        public List<Guid?> Requests { get; } = new();
-
-        public Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(Result.Success());
-        }
-
-        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(RetrievalRequest request, CancellationToken cancellationToken = default)
-        {
-            Requests.Add(request.SourceId);
-            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(_results));
-        }
-
-        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveSourceChunksAsync(Guid sourceId, int take, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
     }
 

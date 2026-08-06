@@ -37,7 +37,7 @@ public class CopilotController : ControllerBase
             .ChatAsync(
                 payload.Session,
                 payload.Message,
-                new ChatRequestOptions { OutputFormat = payload.OutputFormat },
+                new ChatRequestOptions { OutputFormat = payload.OutputFormat, ThemeFilter = payload.ThemeFilter ?? payload.Session.ThemeFilter },
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -92,7 +92,7 @@ public class CopilotController : ControllerBase
         }
 
         var result = await _planApprovalService
-            .CreatePlanAsync(payload.Prompt, payload.SessionId, payload.HistoryMessages, cancellationToken)
+            .CreatePlanAsync(payload.Prompt, payload.SessionId, payload.HistoryMessages, payload.ThemeFilter, cancellationToken)
             .ConfigureAwait(false);
 
         return result.IsSuccess
@@ -268,6 +268,9 @@ public class CopilotController : ControllerBase
         public ChatSession Session { get; set; } = new();
         public string Message { get; set; } = string.Empty;
         public string? OutputFormat { get; set; }
+
+        /// <summary>Knowledge themes (Sprint 58). Null/empty falls back to the session's ThemeFilter, then to all documents.</summary>
+        public IReadOnlyList<string>? ThemeFilter { get; set; }
     }
 
     public class PlanPayload
@@ -277,6 +280,8 @@ public class CopilotController : ControllerBase
         public Guid? SessionId { get; set; }
 
         public IReadOnlyList<ChatMessage>? HistoryMessages { get; set; }
+
+        public IReadOnlyList<string>? ThemeFilter { get; set; }
     }
 
     public class CancelPayload

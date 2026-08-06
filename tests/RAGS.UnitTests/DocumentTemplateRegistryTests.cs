@@ -70,4 +70,31 @@ public sealed class DocumentTemplateRegistryTests
         Assert.NotNull(projectSummary);
         Assert.False(string.IsNullOrWhiteSpace(projectSummary!.Description));
     }
+
+    [Fact]
+    public void TryGetTheme_returns_template_theme()
+    {
+        var registry = new DocumentTemplateRegistry();
+
+        Assert.Equal("Analysis", registry.TryGetTheme("CMP 2026 - 3. RFP Analysis.docx"));
+        Assert.Equal("Analysis", registry.TryGetTheme("CMP 2022 - 3. RFP Analysis.docx"));
+    }
+
+    [Fact]
+    public void TryGetTheme_returns_null_for_unmatched_document()
+    {
+        var registry = new DocumentTemplateRegistry();
+
+        Assert.Null(registry.TryGetTheme("Q3 Financial Report.xlsx"));
+    }
+
+    [Fact]
+    public void ListThemes_contains_declared_theme()
+    {
+        var registry = new DocumentTemplateRegistry();
+
+        var themes = registry.ListThemes();
+
+        Assert.Contains("Analysis", themes);
+    }
 }

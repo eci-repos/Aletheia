@@ -26,6 +26,51 @@
                         }
                     </div>
                 </div>
+                @if (_session.ThemeFilter is { Count: > 0 })
+                {
+                    <div class="copilot-theme-chips">
+                        <span class="copilot-theme-chips-label">Knowledge:</span>
+                        @foreach (var theme in _session.ThemeFilter)
+                        {
+                            <span class="badge rounded-pill bg-info text-dark copilot-theme-chip">@theme</span>
+                        }
+                        <button class="btn btn-sm btn-outline-secondary copilot-theme-edit" @onclick="OpenThemePickerAsync" title="Edit knowledge themes">Edit</button>
+                    </div>
+                }
+                @if (_showThemePicker)
+                {
+                    <div class="card copilot-theme-picker">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <strong>Knowledge themes</strong>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="SelectAllThemesAsync">All themes</button>
+                            </div>
+                            @if (_availableThemes.Count == 0)
+                            {
+                                <p class="text-muted small mb-2">No knowledge themes are available yet.</p>
+                            }
+                            else
+                            {
+                                <div class="copilot-theme-options">
+                                    @foreach (var theme in _availableThemes)
+                                    {
+                                        <label class="form-check copilot-theme-option">
+                                            <input type="checkbox" class="form-check-input" checked="@_selectedThemes.Contains(theme.Theme)" @onchange="@(() => ToggleTheme(theme.Theme))" />
+                                            <span class="form-check-label">
+                                                @theme.Theme
+                                                <span class="text-muted small">(@theme.DocumentCount)</span>
+                                            </span>
+                                        </label>
+                                    }
+                                </div>
+                            }
+                            <div class="d-flex gap-2 mt-3">
+                                <button class="btn btn-sm btn-primary" @onclick="ApplyThemePickerAsync" disabled="@_isChatting">Apply to session</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelThemePickerAsync">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                }
                 <div class="card-body copilot-conversation-body">
                     @if (_session.Messages.Count == 0)
                     {
@@ -151,6 +196,9 @@
     private DotNetObjectReference<Index>? _dotNetRef;
     private Guid? _chatActivityId;
     private readonly HashSet<string> _loggedProgressMessages = new(StringComparer.Ordinal);
+    private List<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount> _availableThemes = new();
+    private readonly HashSet<string> _selectedThemes = new(StringComparer.OrdinalIgnoreCase);
+    private bool _showThemePicker;
 
     private bool IsInputDisabled => _isChatting || _isBusy;
 
@@ -167,6 +215,7 @@
             _sessionOpenedHandler = session => _ = HandleSessionOpened(session);
             CopilotState.SessionOpened += _sessionOpenedHandler;
             await CopilotState.LoadRecentSessionsAsync();
+            await LoadKnowledgeThemesAsync();
         }
 
         if (!firstRender || _stateRestored)
@@ -200,6 +249,64 @@
         _dotNetRef?.Dispose();
     }
 
+    private async Task LoadKnowledgeThemesAsync()
+    {
+        _availableThemes = (await ApiClient.GetKnowledgeThemesAsync()).ToList();
+        _selectedThemes.Clear();
+        if (_session.ThemeFilter is { Count: > 0 })
+        {
+            foreach (var theme in _session.ThemeFilter)
+            {
+                _selectedThemes.Add(theme);
+            }
+        }
+    }
+
+    private async Task OpenThemePickerAsync()
+    {
+        _selectedThemes.Clear();
+        if (_session.ThemeFilter is { Count: > 0 })
+        {
+            foreach (var theme in _session.ThemeFilter)
+            {
+                _selectedThemes.Add(theme);
+            }
+        }
+
+        _showThemePicker = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleTheme(string theme)
+    {
+        if (!_selectedThemes.Add(theme))
+        {
+            _selectedThemes.Remove(theme);
+        }
+    }
+
+    private async Task SelectAllThemesAsync()
+    {
+        _selectedThemes.Clear();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ApplyThemePickerAsync()
+    {
+        _session.ThemeFilter = _selectedThemes.Count == 0
+            ? new List<string>()
+            : _selectedThemes.ToList();
+        _showThemePicker = false;
+        await CopilotState.SaveAsync(new CopilotClientState { Session = _session });
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CancelThemePickerAsync()
+    {
+        _showThemePicker = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task HandleSessionOpened(ChatSession session)
     {
         if (_session.Messages.Count > 0 && _session.Id != session.Id)
@@ -221,6 +328,14 @@
         _activeJobId = null;
         _planStatusMessage = string.Empty;
         _loggedProgressMessages.Clear();
+        _selectedThemes.Clear();
+        if (session.ThemeFilter is { Count: > 0 })
+        {
+            foreach (var theme in session.ThemeFilter)
+            {
+                _selectedThemes.Add(theme);
+            }
+        }
 
         await CopilotState.SaveAsync(new CopilotClientState { Session = session });
         await InvokeAsync(StateHasChanged);
@@ -260,7 +375,7 @@
             var history = _session.Messages.Count > 1
                 ? _session.Messages.Take(_session.Messages.Count - 1).ToList()
                 : new List<ChatMessage>();
-            _pendingPlan = await ApiClient.PlanChatAsync(userMessage, _session.Id, history);
+            _pendingPlan = await ApiClient.PlanChatAsync(userMessage, _session.Id, history, _session.ThemeFilter is { Count: > 0 } ? _session.ThemeFilter : null);
             if (_pendingPlan is null)
             {
                 _chatError = "Planning failed: the API returned no execution plan.";
@@ -566,6 +681,8 @@
         _executionPanelWidth = 360;
         _chatActivityId = null;
         _loggedProgressMessages.Clear();
+        _selectedThemes.Clear();
+        _showThemePicker = true;
 
         await CopilotState.ClearAsync();
         await InvokeAsync(StateHasChanged);

@@ -1,6 +1,7 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.Repository.Abstractions.Interfaces;
 using Aletheia.Repository.Abstractions.Models;
 using Aletheia.Repository.Domain.UseCases;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
     private readonly IGraphProvider? _graphProvider;
     private readonly IIngestionDiagnostics? _diagnostics;
     private readonly Lazy<IIngestionJobService>? _ingestionJobs;
+    private readonly IMetadataRepository? _metadataRepository;
     private readonly ILogger<RepositoryKnowledgeSourceIngestionService> _logger;
 
     public RepositoryKnowledgeSourceIngestionService(
@@ -28,6 +30,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         IDocumentTemplateRegistry? templateRegistry = null,
         IGraphProvider? graphProvider = null,
         IIngestionDiagnostics? diagnostics = null,
+        IMetadataRepository? metadataRepository = null,
         ILogger<RepositoryKnowledgeSourceIngestionService>? logger = null,
         Lazy<IIngestionJobService>? ingestionJobs = null)
     {
@@ -38,6 +41,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         _templateRegistry = templateRegistry;
         _graphProvider = graphProvider;
         _diagnostics = diagnostics;
+        _metadataRepository = metadataRepository;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RepositoryKnowledgeSourceIngestionService>.Instance;
         _ingestionJobs = ingestionJobs;
     }
@@ -54,7 +58,8 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         _logger.LogInformation("Knowledge source hydration started for {SourceName} ({SourceId}).", source.SourceName, source.SourceId);
 
         // Canonical template gate: every ingested document must match a canonical template in docs/doc-templates.
-        if (_templateRegistry is not null && _templateRegistry.TryGetCanonicalName(source.SourceName) is null)
+        var canonicalName = _templateRegistry?.TryGetCanonicalName(source.SourceName);
+        if (canonicalName is null)
         {
             _logger.LogWarning(
                 "Ingestion stopped for {SourceName}: no canonical document template found. The document name should identify its canonical template (see docs/doc-templates).",
@@ -62,6 +67,10 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
             return Result<bool>.Failure(
                 $"Ingestion stopped: no canonical document template found for '{source.SourceName}'. Register a matching template under docs/doc-templates or correct the document name.");
         }
+
+        // Sprint 58: persist the canonical template + knowledge theme so sessions can filter by theme.
+        await PersistTemplateAsync(source.SourceId, canonicalName, _templateRegistry?.TryGetTheme(source.SourceName), cancellationToken)
+            .ConfigureAwait(false);
 
         var download = await _downloadUseCase
             .DownloadAsync(new DownloadRequest(new FileDescriptor(source.SourceId, source.SourceName)), cancellationToken)
@@ -148,8 +157,27 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
 
         return Result<bool>.Success(true);
     }
+
+    private async Task PersistTemplateAsync(Guid fileId, string? canonicalName, string? theme, CancellationToken cancellationToken)
+    {
+        if (_metadataRepository is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _metadataRepository
+                .SetTemplateAsync(fileId, canonicalName, theme, cancellationToken)
+                .ConfigureAwait(false);
+            if (result.IsFailure)
+            {
+                _logger.LogWarning("Unable to persist template/theme for {SourceId}: {Error}.", fileId, result.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to persist template/theme for {SourceId}.", fileId);
+        }
+    }
 }
-
-
-
-

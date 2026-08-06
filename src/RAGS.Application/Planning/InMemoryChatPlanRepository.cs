@@ -56,6 +56,7 @@ public sealed class InMemoryChatPlanRepository : IChatPlanRepository
             ToolArguments = existing.ToolArguments,
             SessionId = existing.SessionId,
             HistoryMessages = existing.HistoryMessages,
+            ThemeFilter = existing.ThemeFilter,
             ReviewedBy = reviewedBy ?? existing.ReviewedBy,
             ReviewedAt = status is ChatPlanStatus.Approved or ChatPlanStatus.Cancelled
                 ? DateTimeOffset.UtcNow

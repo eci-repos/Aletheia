@@ -161,6 +161,71 @@ public class RagsServiceTests
         Assert.Equal("only vector match", item.Chunk.Content);
     }
 
+    [Fact]
+    public async Task RetrieveAsync_filters_results_to_source_set_for_unfiltered_store()
+    {
+        var sourceA = Guid.NewGuid();
+        var sourceB = Guid.NewGuid();
+        var vectorStore = new FakeVectorStore
+        {
+            SearchOverride = _ => new List<SearchResult>
+            {
+                new SearchResult(new Chunk(Guid.NewGuid(), sourceA, "from source A", 0), 0.95f),
+                new SearchResult(new Chunk(Guid.NewGuid(), sourceB, "from source B", 0), 0.93f)
+            }
+        };
+        var service = CreateService(vectorStore);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("query", 5, sourceIds: new[] { sourceA }));
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Equal(sourceA, item.Chunk.SourceId);
+        Assert.Equal("from source A", item.Chunk.Content);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_keyword_fallback_honors_source_set()
+    {
+        var sourceA = Guid.NewGuid();
+        var sourceB = Guid.NewGuid();
+        var vectorStore = new FakeVectorStore
+        {
+            SearchOverride = _ => new List<SearchResult>(),
+            KeywordResults = new List<SearchResult>
+            {
+                new SearchResult(new Chunk(Guid.NewGuid(), sourceA, "keyword A", 0), 0.9f, retrievalStrategy: "keyword"),
+                new SearchResult(new Chunk(Guid.NewGuid(), sourceB, "keyword B", 0), 0.9f, retrievalStrategy: "keyword")
+            }
+        };
+        var service = CreateService(vectorStore);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("requirements", 5, sourceIds: new[] { sourceA }));
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Equal(sourceA, item.Chunk.SourceId);
+        Assert.Equal("keyword", item.RetrievalStrategy);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_returns_empty_when_source_set_is_empty()
+    {
+        var vectorStore = new FakeVectorStore
+        {
+            SearchOverride = _ => new List<SearchResult>
+            {
+                new SearchResult(new Chunk(Guid.NewGuid(), Guid.NewGuid(), "any result", 0), 0.95f)
+            }
+        };
+        var service = CreateService(vectorStore);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("query", 5, sourceIds: Array.Empty<Guid>()));
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value!);
+    }
+
     private static SearchResult CreateKeywordResult(string content)
     {
         return new SearchResult(

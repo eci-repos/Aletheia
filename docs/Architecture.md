@@ -200,3 +200,12 @@ Every upload is hashed server-side (SHA-256 of the raw bytes, computed over the 
 ### API contract notes
 - 409 payload is machine-readable; the Web client (`RepositoryApiClient.UploadAsync`) maps it to `UploadClientResult` (`IsDuplicate`, `NoChange`, `DuplicateMessage`, `ExistingFileId`, `ExistingFileName`).
 - Existing synchronous RAGS/GraphRAG/LazyGraphRAG endpoints and the `/api/jobs` snapshot contract are unchanged.
+
+### Retrieval Pipeline (Sprint 58: Knowledge Theme Filtering)
+
+The Copilot retrieval pipeline now includes a session-level **knowledge theme stage**:
+
+1. **Session scope**: the user picks themes at session creation (or edits them mid-session). The selection rides `ChatSession.ThemeFilter` -> `ChatPayload` -> `ChatRequestOptions`/`ChatPlanRecord`.
+2. **Theme -> source resolution**: `KnowledgeThemeService` (singleton) resolves the theme set to registered source ids from `file_metadata` (persisted `template_name`/`theme`, with a read-time registry fallback for pre-Sprint-58 rows).
+3. **Enforcement**: `RetrievalRequest.SourceIds` carries the source set into `RagsService.RetrieveAsync`, which uses `PgVectorStore.SearchBySourcesAsync` for the vector path and a source-set predicate in the keyword fallback (`source_id = ANY(...)`); stores without set support post-filter results. The execution engine intersects the theme set with Sprint 51's single-document scope (a named document outside the themes returns no results) and filters repository-tool results before synthesis.
+4. **Catalog**: `GET /api/knowledge/themes` returns themes with registered-document counts for the UI picker (themes with zero documents are included).

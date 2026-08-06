@@ -11,4 +11,7 @@ public class ChatSession
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset LastActivity { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Knowledge themes (Sprint 58) scoping this session. Empty = all documents.</summary>
+    public List<string> ThemeFilter { get; set; } = new();
 }

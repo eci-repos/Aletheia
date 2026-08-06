@@ -93,9 +93,11 @@ public sealed class RagsService : IRagsService
 
         _logger.LogInformation("RAGS embedding generated for query '{Query}'; querying vector store.", request.Query);
 
-        var searchResult = request.SourceId.HasValue && _vectorStore is ISourceFilteredVectorStore sourceFilteredVectorStore
-            ? await sourceFilteredVectorStore.SearchBySourceAsync(embeddingResult.Value, request.TopK, request.SourceId.Value, cancellationToken).ConfigureAwait(false)
-            : await _vectorStore.SearchAsync(embeddingResult.Value, request.TopK, cancellationToken).ConfigureAwait(false);
+        var searchResult = request.SourceIds is not null && _vectorStore is ISourceFilteredVectorStore sourceSetVectorStore
+            ? await sourceSetVectorStore.SearchBySourcesAsync(embeddingResult.Value, request.TopK, request.SourceIds, cancellationToken).ConfigureAwait(false)
+            : request.SourceId.HasValue && _vectorStore is ISourceFilteredVectorStore sourceFilteredVectorStore
+                ? await sourceFilteredVectorStore.SearchBySourceAsync(embeddingResult.Value, request.TopK, request.SourceId.Value, cancellationToken).ConfigureAwait(false)
+                : await _vectorStore.SearchAsync(embeddingResult.Value, request.TopK, cancellationToken).ConfigureAwait(false);
         if (searchResult.IsFailure)
         {
             _logger.LogWarning("RAGS vector search failed for query '{Query}': {Error}.", request.Query, searchResult.Error);
@@ -117,7 +119,7 @@ public sealed class RagsService : IRagsService
         if (results.Count == 0 || bestScore < minimumScore)
         {
             var keywordResult = await _vectorStore
-                .SearchKeywordAsync(request.Query, request.TopK, cancellationToken)
+                .SearchKeywordAsync(request.Query, request.TopK, request.SourceIds, cancellationToken)
                 .ConfigureAwait(false);
             if (keywordResult.IsSuccess && keywordResult.Value is { Count: > 0 })
             {
@@ -134,7 +136,14 @@ public sealed class RagsService : IRagsService
                 _logger.LogWarning("RAGS keyword fallback failed for query '{Query}': {Error}.", request.Query, keywordResult.Error);
             }
         }
-        if (request.SourceId.HasValue && _vectorStore is not ISourceFilteredVectorStore)
+        if (request.SourceIds is not null && _vectorStore is not ISourceFilteredVectorStore)
+        {
+            results = results
+                .Where(result => request.SourceIds.Contains(result.Chunk.SourceId))
+                .Take(request.TopK)
+                .ToList();
+        }
+        else if (request.SourceId.HasValue && _vectorStore is not ISourceFilteredVectorStore)
         {
             results = results
                 .Where(result => result.Chunk.SourceId == request.SourceId.Value)

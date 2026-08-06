@@ -18,6 +18,7 @@ public sealed class SemanticKernelCopilotService : ICopilotService
     private readonly CopilotOptions _options;
     private readonly ChatAgentOptions _chatAgentOptions;
     private readonly IChatAgentInstructionProvider? _instructionProvider;
+    private readonly IKnowledgeThemeService? _themeService;
 
     public SemanticKernelCopilotService(
         IChatService chatService,
@@ -28,7 +29,8 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         IOptions<CopilotOptions>? options = null,
         IWragsWikiService? wikiService = null,
         IOptions<ChatAgentOptions>? chatAgentOptions = null,
-        IChatAgentInstructionProvider? instructionProvider = null)
+        IChatAgentInstructionProvider? instructionProvider = null,
+        IKnowledgeThemeService? themeService = null)
     {
         _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
         _agentService = agentService ?? throw new ArgumentNullException(nameof(agentService));
@@ -39,6 +41,7 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         _options = options?.Value ?? new CopilotOptions();
         _chatAgentOptions = chatAgentOptions?.Value ?? new ChatAgentOptions();
         _instructionProvider = instructionProvider;
+        _themeService = themeService;
     }
 
     public async Task<Result<ChatMessage>> ChatAsync(
@@ -121,8 +124,10 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         try
         {
             source = await ResolveSourceAsync(userMessage, cancellationToken).ConfigureAwait(false);
+            var themeSourceIds = await ResolveThemeSourceIdsAsync(requestOptions?.ThemeFilter, cancellationToken).ConfigureAwait(false);
+            var sourceIds = ApplyThemeToSourceScope(source?.SourceId, themeSourceIds);
             retrieval = await _ragsService.RetrieveAsync(
-                new RetrievalRequest(retrievalQuery, topK, source?.SourceId),
+                new RetrievalRequest(retrievalQuery, topK, source?.SourceId, sourceIds),
                 cancellationToken).ConfigureAwait(false);
 
             if (source is not null && ShouldHydrateSource(retrieval))
@@ -134,7 +139,7 @@ public sealed class SemanticKernelCopilotService : ICopilotService
                 if (ingestion.IsSuccess && ingestion.Value)
                 {
                     retrieval = await _ragsService.RetrieveAsync(
-                        new RetrievalRequest(retrievalQuery, topK, source.SourceId),
+                        new RetrievalRequest(retrievalQuery, topK, source.SourceId, sourceIds),
                         cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -169,6 +174,41 @@ public sealed class SemanticKernelCopilotService : ICopilotService
             orchestrationInstructions: orchestrationInstructions);
 
         return new AugmentedPrompt(prompt, retrievalResults, source, topK, RetrievalUsed: true, strategies);
+    }
+
+    /// <summary>Sprint 58: resolves the session theme filter to registered source ids. Null when no filter is active.</summary>
+    private async Task<IReadOnlyList<Guid>?> ResolveThemeSourceIdsAsync(
+        IReadOnlyList<string>? themes,
+        CancellationToken cancellationToken)
+    {
+        if (themes is not { Count: > 0 } || _themeService is null)
+        {
+            return null;
+        }
+
+        var result = await _themeService
+            .ResolveSourceIdsAsync(themes, cancellationToken)
+            .ConfigureAwait(false);
+        return result.IsSuccess ? result.Value : null;
+    }
+
+    /// <summary>Sprint 58: intersects the resolved single source with the theme scope. Returns the effective source set.</summary>
+    private static IReadOnlyList<Guid>? ApplyThemeToSourceScope(Guid? sourceId, IReadOnlyList<Guid>? themeSourceIds)
+    {
+        if (themeSourceIds is null)
+        {
+            // No theme filter: preserve the existing single-source (SourceId) scoping untouched.
+            return null;
+        }
+
+        if (sourceId.HasValue)
+        {
+            return themeSourceIds.Contains(sourceId.Value)
+                ? new List<Guid> { sourceId.Value }
+                : new List<Guid>();
+        }
+
+        return themeSourceIds;
     }
 
     private async Task<IReadOnlyList<SearchResult>> MergeWragsResultsAsync(

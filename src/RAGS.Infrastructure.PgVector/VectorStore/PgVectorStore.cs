@@ -166,12 +166,30 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         int topK,
         CancellationToken cancellationToken = default)
     {
+        return await SearchKeywordAsync(query, topK, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<Result<IReadOnlyList<SearchResult>>> SearchKeywordAsync(
+        string query,
+        int topK,
+        IReadOnlyList<Guid>? sourceIds,
+        CancellationToken cancellationToken = default)
+    {
         if (string.IsNullOrWhiteSpace(query))
         {
             return Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>());
         }
 
-        const string sql = @"
+        if (sourceIds is not null && sourceIds.Count == 0)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>());
+        }
+
+        var sourcePredicate = sourceIds is { Count: > 0 }
+            ? "AND e.source_id = ANY(@SourceIds)"
+            : string.Empty;
+
+        var sql = $@"
             SELECT
                 e.chunk_id as ""ChunkId"",
                 e.source_id as ""SourceId"",
@@ -187,8 +205,9 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 ORDER BY uploaded_at DESC
                 LIMIT 1
             ) m ON true
-            WHERE e.content ILIKE '%' || @Query || '%'
-               OR m.file_name ILIKE '%' || @Query || '%'
+            WHERE (e.content ILIKE '%' || @Query || '%'
+               OR m.file_name ILIKE '%' || @Query || '%')
+              {sourcePredicate}
             ORDER BY e.created_at DESC
             LIMIT @TopK";
 
@@ -201,7 +220,8 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 new CommandDefinition(sql, new
                 {
                     Query = query.Trim(),
-                    TopK = topK
+                    TopK = topK,
+                    SourceIds = sourceIds?.ToArray()
                 }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
                 .ConfigureAwait(false);
 
@@ -214,6 +234,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
             return Result<IReadOnlyList<SearchResult>>.Failure($"{SearchFailedMessage} {ex.Message}");
         }
     }
+
     public async Task<Result<IReadOnlyList<SearchResult>>> GetSourceChunksAsync(
         Guid sourceId,
         int take,
@@ -313,6 +334,54 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                     QueryEmbedding = VectorToString(vector),
                     TopK = topK,
                     SourceId = sourceId
+                }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
+
+            return Result<IReadOnlyList<SearchResult>>.Success(rows.Select(row => MapToSearchResult(row)).ToList());
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<SearchResult>>> SearchBySourcesAsync(
+        ReadOnlyMemory<float> vector,
+        int topK,
+        IReadOnlyList<Guid> sourceIds,
+        CancellationToken cancellationToken = default)
+    {
+        var sql = $@"
+            SELECT
+                e.chunk_id as ""ChunkId"",
+                e.source_id as ""SourceId"",
+                e.content as ""Content"",
+                m.file_name as ""SourceName"",
+                e.chunk_index as ""ChunkIndex"",
+                1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
+            FROM embeddings e
+            LEFT JOIN LATERAL (
+                SELECT file_name
+                FROM file_metadata
+                WHERE file_id = e.source_id
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            ) m ON true
+            WHERE e.source_id = ANY(@SourceIds)
+            ORDER BY e.embedding <=> @QueryEmbedding::vector
+            LIMIT @TopK";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<EmbeddingRow>(
+                new CommandDefinition(sql, new
+                {
+                    QueryEmbedding = VectorToString(vector),
+                    TopK = topK,
+                    SourceIds = sourceIds.ToArray()
                 }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
                 .ConfigureAwait(false);
 

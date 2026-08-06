@@ -17,7 +17,7 @@ public sealed class ChatPlanApprovalService : IChatPlanApprovalService
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     }
 
-    public async Task<Result<ChatPlanRecord>> CreatePlanAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, CancellationToken cancellationToken = default)
+    public async Task<Result<ChatPlanRecord>> CreatePlanAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, IReadOnlyList<string>? themeFilter = null, CancellationToken cancellationToken = default)
     {
         var planResult = await _planningService.CreatePlanAsync(prompt, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (planResult.IsFailure || planResult.Value is null)
@@ -46,7 +46,8 @@ public sealed class ChatPlanApprovalService : IChatPlanApprovalService
             CreatedAt = plan.CreatedAt,
             ExpiresAt = plan.ExpiresAt,
             SessionId = sessionId,
-            HistoryMessages = history
+            HistoryMessages = history,
+            ThemeFilter = themeFilter ?? Array.Empty<string>()
         };
 
         var saveResult = await _repository.SaveAsync(record, cancellationToken).ConfigureAwait(false);

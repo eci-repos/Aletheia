@@ -12,4 +12,7 @@ public sealed class ChatRequestOptions
 
     /// <summary>Ordered template sections (heading + description) the answer should follow.</summary>
     public IReadOnlyList<DocumentTemplateSection>? SectionOutline { get; set; }
+
+    /// <summary>Knowledge themes (Sprint 58) that scope retrieval for this request. Empty/null = all documents.</summary>
+    public IReadOnlyList<string>? ThemeFilter { get; set; }
 }

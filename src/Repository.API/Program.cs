@@ -117,6 +117,7 @@ builder.Services.AddSingleton<IVectorStore>(sp =>
     return new PgVectorStore(connectionFactory, embeddingProvider.VectorDimension, pgVectorOptions.CommandTimeoutSeconds);
 });
 builder.Services.AddSingleton<IRagsService, RagsService>();
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IKnowledgeThemeService, Aletheia.RAGS.Application.KnowledgeThemeService>();
 builder.Services.AddHostedService(sp =>
 {
     var connectionFactory = sp.GetRequiredService<PostgreSqlConnectionFactory>();

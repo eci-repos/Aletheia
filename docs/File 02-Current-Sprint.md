@@ -1,64 +1,46 @@
-# Sprint 57 - Search Center Retrieval Quality and Troubleshooting
+# Sprint 58 - Session Knowledge Theme Filtering
 
 **Status:** Active
 
-Full authority: `docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md` (created 2026-08-05). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-58 - Session Knowledge Theme Filtering.md` (created 2026-08-06). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 56 (Duplicate Upload Detection and Document Update Flow) is **complete, committed, and pushed**: commits `5366696` (implementation + docs) and `e34bba7` (Sprint 57 prep docs) are on `origin/master` (HEAD `e34bba7`). Remaining Sprint 56 verification: Docker smoke test (duplicate trap + update flow) - can run in parallel with Sprint 57 work.
+Sprint 57 (Search Center Retrieval Quality and Troubleshooting) is **complete, committed, and pushed**: commits `9cdc131`, `bcb59f9`, and `7220987` (ingestion routing regression fix) are on `origin/master` (HEAD `7220987`). Remaining Sprint 57 verification: Docker smoke test (upload -> ingest -> search empty vs populated -> status endpoint; plus the Sprint 56 duplicate/update flow) - can run in parallel with Sprint 58 work.
 
 ## Objective
 
-1. **Make "no results" diagnosable** - when Search Center returns nothing, tell the user *why* (no documents ingested, ingestion blocked/failed, or no match) instead of a generic "No results found".
-2. **Improve retrieval quality** - real embeddings (configurable), score floor + keyword fallback so relevant content is never silently missed, and a Reembed background job.
+Let the end-user scope a Copilot session to a set of **knowledge themes** derived from the canonical document templates (e.g., Analysis, As-Built, As-Proposed, or a combination). Themes are chosen at session creation and shown as chips in the session header; the selection restricts which registered documents Copilot retrieves from for that session. No selection = current behavior (all documents).
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Search diagnostics**: `GET /api/rags/status` (embedded chunk count, ingested source count, per-source last upload job status/error, template-gate skips); Search Center UI empty-state messaging (empty corpus vs no match, pointers to Activity panel + example queries); structured logging for gate skips.
-2. **Retrieval quality**: configurable real embedding provider (Ollama) with SimpleEmbeddingProvider fallback (`AI:EmbeddingProvider`); dimension migration path + `Reembed` background job (kind `Reembed`, replaces embeddings per source via DeleteBySourceAsync); optional `RAGS:MinimumScore` + keyword (ILIKE/to_tsvector) fallback with `RetrievalStrategy` surfaced.
-3. **Tests**: diagnostics (empty corpus, gate skips); retrieval (score floor, keyword fallback, provider selection, Reembed); existing suites green; Web C#/Razor compiles.
-4. **Docs**: OperationsGuide troubleshooting (added under Sprint 56) + status endpoint; AdministratorGuide embedding config + Reembed job; Architecture retrieval pipeline; AGENTS/handoff.
+1. **Theme model**: each canonical template in `docs/doc-templates` gains a `Theme:` metadata line (e.g., `3.0 - RFP Analysis` -> `Analysis`); `DocumentTemplateRegistry` exposes `TryGetTheme` / `ListThemes`.
+2. **Persistence**: `file_metadata.template_name` + `file_metadata.theme` (idempotent migration + init.sql); ingestion persists them; read-time fallback derivation for pre-migration rows.
+3. **Session filter (API + retrieval)**: `ChatSession.ThemeFilter` rides the existing chat path into `ChatRequestOptions`; `RetrievalRequest.SourceIds` + PgVectorStore vector/keyword predicates; engine resolves theme -> source set and enforces in all RAGS retrieval paths (intersects with Sprint 51 single-document scope, union for collections); `GET /api/knowledge/themes`.
+4. **Web UI (UX option #1)**: theme picker on "New chat"; theme chips in the session header with mid-session edit; persisted with session state (localStorage v2 key) and sent on every chat call.
+5. **Tests**: RAGS (theme resolution, engine enforcement, intersection, keyword fallback, backward compat), Repository (persistence, themes endpoint, ListSourceIdsByThemeAsync), Web CoreCompile; existing suites green.
+6. **Docs**: Architecture (retrieval pipeline theme stage), AdministratorGuide (theme convention + endpoint), OperationsGuide (troubleshooting), Development-Guidelines (new templates must declare a theme), AGENTS, File 02/03, handoff.
 
 ## Acceptance Criteria
 
-- Empty-corpus search shows an actionable message ("no documents ingested; check the Activity panel") instead of generic "No results".
-- With content ingested, word-sharing queries return results; keyword fallback returns results when vector scores are empty/below floor, with `RetrievalStrategy` indicating the path.
-- Real embedding provider configurable; Reembed replaces embeddings for all sources without manual SQL.
-- RAGS / Foundation / Repository suites green; Web C#/Razor compiles.
+- Templates carry themes; new ingestions persist `template_name` + `theme`; pre-existing documents resolve via fallback.
+- Theme picker at session creation; header chips; mid-session edits apply to subsequent turns; selection persists and is sent on every chat call.
+- `[Analysis]` restricts retrieval to Analysis-themed sources; combinations take the union; a named document outside the filter yields no results from that document.
+- Empty `ThemeFilter` behaves exactly as before the sprint.
+- Repository / RAGS / Foundation suites green; Web C#/Razor compiles.
 
 ## Out of Scope
 
-- Rerankers, cross-lingual embeddings, multi-tenant search; GraphRAG/LazyGraphRAG internals; community summaries.
+- GraphRAG/LazyGraphRAG internals and community summaries; a global knowledge-scope widget over Search Center / Wiki / Browse; rerankers; multi-tenant/ACL scoping; new session stores (sessions remain client-side).
 
 ---
 
-## Progress (2026-08-05)
+## Progress (2026-08-06)
 
-- Sprint 57 sprint file created (`docs/sprints/Sprint-57 - Search Center Retrieval Quality and Troubleshooting.md`); status flipped to Active after Sprint 56 was committed/pushed.
-- **Deliverable 1 (Search diagnostics) implemented**:
-  - `GET /api/rags/status` (authenticated) - `RagsStatusService` + `IngestionDiagnostics` (singletons); returns chunk/source/document counts, template-gate + extraction-failure counters, recent gate skips, last 10 `UploadIngestion` jobs.
-  - `RepositoryKnowledgeSourceIngestionService` records template-gate skips and extraction failures.
-  - Search Center empty-state messaging (empty corpus vs no match, Activity-panel pointer, example queries) + operator RAGS status chip when `FeatureFlags:ShowInternalSearch=true`; `RepositoryApiClient.GetRagsStatusAsync()`.
-  - Tests: Repository.UnitTests 107 (IngestionDiagnosticsTests x3, RagsControllerTests x2); RAGS 225, Foundation 55 green; Web CoreCompile 0 errors.
-  - Docs: OperationsGuide + AdministratorGuide updated.
-- Remaining: Deliverable 2 (score floor + keyword fallback), Deliverable 3 (real embeddings + Reembed job), Docker smoke test, commit.
+- Sprint 58 sprint file created; Sprint 57 closed out (routing fix commit `7220987` pushed). No implementation yet.
+### Implementation Progress (2026-08-06)
 
-
-### Deliverable 2 - Score floor + keyword fallback (2026-08-05)
-
-- `RAGS:MinimumScore` (default 0) via `RetrievalOptions`; `IVectorStore.SearchKeywordAsync` (default not-supported; PgVectorStore implements ILIKE over content + file name); `RagsService.RetrieveAsync` falls back to keyword when vector results are empty or below the floor; `RetrievalStrategy` = "keyword" surfaced. Backward compatible.
-- RAGS.UnitTests 229 passed (+4); Repository 107, Foundation 55 green; Web CoreCompile 0 errors.
-- Remaining: Deliverable 3 (real embeddings + Reembed job), Docker smoke test, commit.
-
-### Deliverable 3 - Real embedding provider + Reembed job (2026-08-05)
-
-- `OllamaEmbeddingProvider` (/api/embed) + `AI:EmbeddingProvider`/`AI:EmbeddingDimension`/`AI:Providers[*].EmbeddingModel` config with Simple fallback; appsettings updated (LocalOllama -> nomic-embed-text).
-- `PgVectorSchema` auto-migrates `embeddings.embedding` column dimension (idempotent DO-block, drops/recreates the vector index).
-- Reembed background job (kind `ReembedIngestion`): `POST /api/jobs/rags/reembed`, per-source `EnsureIngestedAsync` with progress; Search Center admin "Re-embed all documents" button.
-- RAGS.UnitTests 234 (+5), Repository 108 (+1), Foundation 55 green; Web CoreCompile 0 errors.
-- Remaining: Docker smoke test.
-
-### Defect Fix - Uploads skipped ingestion (2026-08-05)
-
-- Fixed `IngestionJobService.RunJobAsync` routing regression (introduced by the Reembed job in `9cdc131`): the `DocumentBriefs` branch body was orphaned into an unconditional bare block, so upload jobs ran the document brief (which failed with "no retrieved evidence is available") instead of text extraction/chunking/embeddings.
-- Added routing regression test (`IngestionJobServiceRoutingTests`) + `InternalsVisibleTo` for Repository.UnitTests. Repository 109 (+1), RAGS 234, Foundation 55 green; Web CoreCompile 0 errors.
-- Remaining: Docker smoke test.
+- **D1 (Theme model)**: `Theme: Analysis` on the RFP Analysis template; registry `TryGetTheme`/`ListThemes` + `Uncategorized`; Development-Guidelines convention documented.
+- **D2 (Persistence)**: `file_metadata.template_name`/`theme` migration + init.sql; `SetTemplateAsync`/`ListThemeRowsAsync`; ingestion persists template + theme after the gate.
+- **D3 (Session filter + retrieval)**: `RetrievalRequest.SourceIds` with PgVectorStore set predicates (vector + keyword fallback); `KnowledgeThemeService` singleton + `GET /api/knowledge/themes`; theme filter rides session -> payload -> options/plan -> engine; engine enforces on all RAGS paths, intersects Sprint 51 single-document scope, and post-filters tool results; direct Copilot path intersects the named source.
+- **D4 (Web UI)**: New-chat theme picker (themes + document counts), header theme chips with Edit, selection persisted (session storage v2) and sent on every plan/chat call.
+- **D5**: RAGS 249 / Repository 113 / Foundation 55 green; Web CoreCompile 0 errors.
+- **Remaining**: Docker smoke test (upload -> ingest -> themes endpoint -> theme-scoped vs all-themes Copilot session), commit.

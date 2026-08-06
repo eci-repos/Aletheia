@@ -6,7 +6,7 @@ namespace Aletheia.RAGS.Abstractions.Interfaces;
 
 public interface IChatPlanApprovalService
 {
-    Task<Result<ChatPlanRecord>> CreatePlanAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, CancellationToken cancellationToken = default);
+    Task<Result<ChatPlanRecord>> CreatePlanAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, IReadOnlyList<string>? themeFilter = null, CancellationToken cancellationToken = default);
 
     Task<Result<ChatPlanRecord>> ApproveAsync(Guid planId, string? approvedBy = null, CancellationToken cancellationToken = default);
 

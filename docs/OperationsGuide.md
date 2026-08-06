@@ -191,3 +191,11 @@ Example queries that should return results for an ingested RFP Analysis document
 ### Re-embedding (Sprint 57)
 
 `POST /api/jobs/rags/reembed` queues a `ReembedIngestion` job that re-runs ingestion for every registered document (embeddings, knowledge-index rows, and graph nodes replaced; Wiki briefs regenerated). Use it after changing the embedding provider or dimension. The schema initializer migrates the `embeddings.embedding` column dimension automatically (drops/recreates the vector index). Configure via `AI:EmbeddingProvider` ("Simple" default | "Ollama"), `AI:EmbeddingDimension`, and the provider's `EmbeddingModel`.
+
+### Knowledge Theme Filtering (Sprint 58)
+
+- A Copilot session can be scoped to knowledge themes (Analysis, As-Built, As-Proposed, ...). Themes come from the canonical templates (`docs/doc-templates`, first-line `Theme: ...`) and are persisted per document at ingestion.
+- **Symptom: Copilot returns nothing for a document that exists.** Check the session header chips: if a theme is active, the document may be outside the selected themes. Remove the theme (Edit next to the chips, then "All themes") and retry.
+- **Symptom: `GET /api/knowledge/themes` shows `Uncategorized` for a document.** The document name does not match a canonical template (or its template lacks a `Theme:` line). Register/update the template and re-ingest (or run the Reembed job) to persist the theme.
+- Verify the persisted mapping: `SELECT file_name, template_name, theme FROM file_metadata ORDER BY uploaded_at DESC;`
+- Themes with zero documents are still listed; selecting them simply matches nothing.

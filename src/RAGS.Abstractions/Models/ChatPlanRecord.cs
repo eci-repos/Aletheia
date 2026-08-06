@@ -44,5 +44,8 @@ public sealed class ChatPlanRecord
 
     public IReadOnlyList<ChatMessage>? HistoryMessages { get; init; }
 
+    /// <summary>Knowledge themes (Sprint 58) scoping this plan. Empty = all documents.</summary>
+    public IReadOnlyList<string> ThemeFilter { get; init; } = Array.Empty<string>();
+
     public string? CancellationReason { get; init; }
 }

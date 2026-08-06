@@ -6,7 +6,7 @@ namespace Aletheia.Web.Services;
 
 public sealed class CopilotStateService
 {
-    private const string StorageKey = "aletheia.copilot.session.v1";
+    private const string StorageKey = "aletheia.copilot.session.v2";
     private const double DefaultPanelWidth = 360;
     private const double MinPanelWidth = 280;
     private const double MaxPanelWidth = 720;
@@ -62,7 +62,8 @@ public sealed class CopilotStateService
             Id = session.Id,
             Title = string.IsNullOrWhiteSpace(session.Title) ? "New Chat" : session.Title,
             CreatedAt = session.CreatedAt,
-            LastActivity = session.LastActivity
+            LastActivity = session.LastActivity,
+            ThemeFilter = session.ThemeFilter is { Count: > 0 } ? new List<string>(session.ThemeFilter) : new List<string>()
         };
         stored.Messages.AddRange(session.Messages.TakeLast(MaxStoredMessagesPerSession));
 

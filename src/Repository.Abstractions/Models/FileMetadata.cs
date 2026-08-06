@@ -11,7 +11,9 @@ public sealed class FileMetadata
         DateTimeOffset uploadedAt,
         IReadOnlyDictionary<string, string>? tags = null,
         AuditInfo? auditInfo = null,
-        string? contentHash = null)
+        string? contentHash = null,
+        string? templateName = null,
+        string? theme = null)
     {
         Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
 
@@ -31,6 +33,8 @@ public sealed class FileMetadata
         Tags = tags is null ? new Dictionary<string, string>() : new Dictionary<string, string>(tags);
         AuditInfo = auditInfo;
         ContentHash = string.IsNullOrWhiteSpace(contentHash) ? null : contentHash;
+        TemplateName = string.IsNullOrWhiteSpace(templateName) ? null : templateName;
+        Theme = string.IsNullOrWhiteSpace(theme) ? null : theme;
     }
 
     public FileDescriptor Descriptor { get; }
@@ -47,4 +51,10 @@ public sealed class FileMetadata
 
     /// <summary>SHA-256 (hex) of the uploaded content, when fingerprinting is enabled. Null for pre-existing rows.</summary>
     public string? ContentHash { get; }
+
+    /// <summary>Canonical template name resolved at ingestion (docs/doc-templates). Null for pre-Sprint-58 rows.</summary>
+    public string? TemplateName { get; }
+
+    /// <summary>Knowledge theme of the canonical template (e.g. Analysis, As-Built, As-Proposed). Null for pre-Sprint-58 rows.</summary>
+    public string? Theme { get; }
 }

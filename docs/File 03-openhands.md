@@ -187,3 +187,16 @@ Implementation status (2026-08-05):
 - Zero Search Center results == zero embeddings (PgVectorStore has no similarity threshold). Diagnose via Activity panel + `/api/jobs`; template gate, extraction failure, and fresh DB are the usual causes.
 - Sprint 57 adds: `GET /api/rags/status` diagnostics + Search Center empty-state messaging; configurable real embeddings (Ollama) with SimpleEmbeddingProvider fallback; `RAGS:MinimumScore` + keyword fallback with `RetrievalStrategy`; Reembed background job (kind `Reembed`) that replaces embeddings per source.
 - Keep existing synchronous RAGS/GraphRAG/LazyGraphRAG endpoints and the /api/jobs snapshot contract untouched.
+
+# Sprint 58 Notes (Session Knowledge Theme Filtering)
+
+- Active sprint: `docs/sprints/Sprint-58 - Session Knowledge Theme Filtering.md`. Sprint 57 committed/pushed (HEAD 7220987); its Docker smoke test remains as parallel verification.
+- Goal: end-user scopes a Copilot session to knowledge themes derived from canonical templates (Analysis, As-Built, As-Proposed, or combinations). UX option #1: theme picker at session creation + theme chips in the session header (editable mid-session).
+- Theme model: `docs/doc-templates` template files gain a first-line `Theme: <theme>`; `DocumentTemplateRegistry` parses it and exposes `TryGetTheme` / `ListThemes` (missing => Uncategorized).
+- Persistence: `file_metadata.template_name` + `file_metadata.theme` (idempotent migration 2026-08-06 + init.sql); `RepositoryKnowledgeSourceIngestionService` persists at ingestion; read-time fallback derives theme from file name for pre-migration rows; Reembed job backfills.
+- Filter path: `ChatSession.ThemeFilter` -> `ChatPayload` -> `ChatRequestOptions` -> engine; `RetrievalRequest.SourceIds` (set predicate in PgVectorStore SearchAsync + SearchKeywordAsync); engine intersects with Sprint 51 single-document scope, union for collections; `GET /api/knowledge/themes` returns themes + registered-document counts.
+- Constraints: keep /api/jobs snapshot contract and existing synchronous RAGS/GraphRAG/LazyGraphRAG endpoints compatible; GraphRAG/LazyGraphRAG internals and community summaries out of scope; sessions remain client-side state (CopilotStateService localStorage, key bump to v2).
+### Sprint 58 Implementation Status (2026-08-06)
+
+- D1-D4 implemented: theme metadata on templates (`Theme: Analysis` + registry `TryGetTheme`/`ListThemes`), `file_metadata.template_name`/`theme` persistence (migration 2026-08-06), `RetrievalRequest.SourceIds` + PgVectorStore set predicates, `KnowledgeThemeService` singleton + `GET /api/knowledge/themes`, theme filter through `ChatSession` -> `ChatPayload`/`PlanPayload` -> `ChatRequestOptions`/`ChatPlanRecord` (preserved through approval), engine enforcement (RAGS paths + Sprint 51 intersection + tool-result post-filter), Web picker + header chips (session storage v2).
+- D5: RAGS 249 / Repository 113 / Foundation 55 green; Web CoreCompile 0 errors. Remaining: Docker smoke test + commit.

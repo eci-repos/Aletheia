@@ -603,9 +603,9 @@ public sealed class RepositoryApiClient
     }
 
     // Copilot planning
-    public async Task<ChatPlanRecord?> PlanChatAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, CancellationToken cancellationToken = default)
+    public async Task<ChatPlanRecord?> PlanChatAsync(string prompt, Guid? sessionId = null, IReadOnlyList<ChatMessage>? history = null, IReadOnlyList<string>? themeFilter = null, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.PostAsJsonAsync("/api/copilot/plan", new { Prompt = prompt, SessionId = sessionId, HistoryMessages = history }, cancellationToken).ConfigureAwait(false);
+        var response = await _httpClient.PostAsJsonAsync("/api/copilot/plan", new { Prompt = prompt, SessionId = sessionId, HistoryMessages = history, ThemeFilter = themeFilter }, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(await BuildApiFailureAsync(
@@ -712,11 +712,31 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<ChatExecutionTelemetry>(cancellationToken).ConfigureAwait(false);
     }
 
+    // Knowledge themes (Sprint 58)
+    public async Task<IReadOnlyList<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>> GetKnowledgeThemesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("/api/knowledge/themes", cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return Array.Empty<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>();
+            }
+
+            return await response.Content.ReadFromJsonAsync<IReadOnlyList<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>>(cancellationToken).ConfigureAwait(false)
+                ?? Array.Empty<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>();
+        }
+        catch
+        {
+            return Array.Empty<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>();
+        }
+    }
+
     // Copilot chat
-    public async Task<ChatMessage?> ChatAsync(ChatSession session, string message, string? outputFormat = null, CancellationToken cancellationToken = default)
+    public async Task<ChatMessage?> ChatAsync(ChatSession session, string message, string? outputFormat = null, IReadOnlyList<string>? themeFilter = null, CancellationToken cancellationToken = default)
     {
         var token = await _authService.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        var request = new { Session = session, Message = message, OutputFormat = outputFormat };
+        var request = new { Session = session, Message = message, OutputFormat = outputFormat, ThemeFilter = themeFilter ?? session.ThemeFilter };
         _httpClient.DefaultRequestHeaders.Authorization = string.IsNullOrWhiteSpace(token)
             ? null
             : new AuthenticationHeaderValue("Bearer", token);

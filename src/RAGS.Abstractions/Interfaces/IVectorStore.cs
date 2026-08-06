@@ -17,6 +17,10 @@ public interface IVectorStore
     Task<Result<IReadOnlyList<SearchResult>>> SearchKeywordAsync(string query, int topK, CancellationToken cancellationToken = default)
         => Task.FromResult(Result<IReadOnlyList<SearchResult>>.Failure("Keyword search is not supported by this store."));
 
+    /// <summary>Lexical fallback restricted to a source set (Sprint 58). Default implementation ignores the filter; stores may override.</summary>
+    Task<Result<IReadOnlyList<SearchResult>>> SearchKeywordAsync(string query, int topK, IReadOnlyList<Guid>? sourceIds, CancellationToken cancellationToken = default)
+        => SearchKeywordAsync(query, topK, cancellationToken);
+
     /// <summary>Returns the first <paramref name="take"/> chunks of a source in document order (by chunk index).</summary>
     Task<Result<IReadOnlyList<SearchResult>>> GetSourceChunksAsync(Guid sourceId, int take, CancellationToken cancellationToken = default)
         => Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));

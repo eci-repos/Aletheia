@@ -191,3 +191,46 @@
         margin-bottom: 0.5rem;
     }
 }
+
+
+.copilot-theme-chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.4rem 1rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.copilot-theme-chips-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-right: 0.2rem;
+}
+
+.copilot-theme-chip {
+    font-size: 0.8rem;
+}
+
+.copilot-theme-edit {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.5rem;
+}
+
+.copilot-theme-picker {
+    margin: 0.5rem 1rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.copilot-theme-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.copilot-theme-option {
+    margin-bottom: 0;
+}

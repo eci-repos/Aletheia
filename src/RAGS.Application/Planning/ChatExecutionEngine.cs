@@ -52,6 +52,7 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
     private readonly IKnowledgeSourceIngestionService? _knowledgeSourceIngestionService;
     private readonly IMetadataRepository? _metadataRepository;
     private readonly IDocumentTemplateRegistry? _templateRegistry;
+    private readonly IKnowledgeThemeService? _themeService;
     private readonly IChatToolInvoker _toolInvoker;
     private readonly IChatProgressStore _progressStore;
     private readonly IChatTelemetryService _telemetryService;
@@ -76,7 +77,8 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
         IKnowledgeSourceResolver? knowledgeSourceResolver = null,
         IKnowledgeSourceIngestionService? knowledgeSourceIngestionService = null,
         IMetadataRepository? metadataRepository = null,
-        IDocumentTemplateRegistry? templateRegistry = null)
+        IDocumentTemplateRegistry? templateRegistry = null,
+        IKnowledgeThemeService? themeService = null)
     {
         _planApprovalService = planApprovalService ?? throw new ArgumentNullException(nameof(planApprovalService));
         _copilotService = copilotService ?? throw new ArgumentNullException(nameof(copilotService));
@@ -89,6 +91,7 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
         _knowledgeSourceIngestionService = knowledgeSourceIngestionService;
         _metadataRepository = metadataRepository;
         _templateRegistry = templateRegistry;
+        _themeService = themeService;
         _progressStore = progressStore ?? throw new ArgumentNullException(nameof(progressStore));
         _telemetryService = telemetryService ?? throw new ArgumentNullException(nameof(telemetryService));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
@@ -408,6 +411,18 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
             };
         }
 
+        // Sprint 58: enforce the session knowledge themes on any retrieval that bypassed the
+        // engine's own retrieval paths (e.g. the repository-tool path), so no content from
+        // excluded documents reaches synthesis.
+        if (retrieval is { Count: > 0 })
+        {
+            var themeScope = await ResolveThemeSourceIdsAsync(item, jobToken).ConfigureAwait(false);
+            if (themeScope is not null)
+            {
+                retrieval = retrieval.Where(result => themeScope.Contains(result.Chunk.SourceId)).ToList();
+            }
+        }
+
         // Mark the "Retrieving context" step as completed now that retrieval logic has finished
         await CompleteStepAsync(item.JobId, "Retrieving context", jobToken).ConfigureAwait(false);
 
@@ -664,12 +679,13 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
         {
             return scopedRetrieval;
         }
+        var themeSourceIds = await ResolveThemeSourceIdsAsync(item, cancellationToken).ConfigureAwait(false);
         var result = await RunWithHeartbeatAsync(
             item.JobId,
             state,
             "RAGS retrieval",
             "Still retrieving relevant chunks.",
-            ct => _ragsService.RetrieveAsync(new RetrievalRequest(item.Prompt, topK), ct),
+            ct => _ragsService.RetrieveAsync(new RetrievalRequest(item.Prompt, topK, sourceIds: themeSourceIds), ct),
             stepCts.Token).ConfigureAwait(false);
 
         if (result.IsFailure || result.Value is null || result.Value.Count == 0)
@@ -692,12 +708,13 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
         state.Update("RAGS retrieval", $"Small corpus quick-return: retrieving up to {topK} relevant chunks.");
         using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         stepCts.CancelAfter(TimeSpan.FromSeconds(_options.SmallCorpusTimeoutSeconds));
+        var themeSourceIds = await ResolveThemeSourceIdsAsync(item, cancellationToken).ConfigureAwait(false);
         var result = await RunWithHeartbeatAsync(
             item.JobId,
             state,
             "RAGS retrieval",
             "Still retrieving relevant chunks.",
-            ct => _ragsService.RetrieveAsync(new RetrievalRequest(item.Prompt, topK), ct),
+            ct => _ragsService.RetrieveAsync(new RetrievalRequest(item.Prompt, topK, sourceIds: themeSourceIds), ct),
             stepCts.Token).ConfigureAwait(false);
 
         if (result.IsFailure || result.Value is null)
@@ -725,7 +742,8 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
         }
         using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         stepCts.CancelAfter(TimeSpan.FromSeconds(_options.DefaultStepTimeoutSeconds));
-        var request = new RetrievalRequest(item.Prompt, topK);
+        var themeSourceIds = await ResolveThemeSourceIdsAsync(item, cancellationToken).ConfigureAwait(false);
+        var request = new RetrievalRequest(item.Prompt, topK, sourceIds: themeSourceIds);
         var result = await RunWithHeartbeatAsync(
             item.JobId,
             state,
@@ -1808,6 +1826,19 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
         return new KnowledgeSource(metadata.Descriptor.FileId, metadata.Descriptor.FileName, metadata.UploadedAt);
     }
 
+    private async Task<IReadOnlyList<Guid>?> ResolveThemeSourceIdsAsync(ChatJobWorkItem item, CancellationToken cancellationToken)
+    {
+        if (item.Plan.ThemeFilter is not { Count: > 0 } || _themeService is null)
+        {
+            return null;
+        }
+
+        var result = await _themeService
+            .ResolveSourceIdsAsync(item.Plan.ThemeFilter, cancellationToken)
+            .ConfigureAwait(false);
+        return result.IsSuccess ? result.Value : null;
+    }
+
     private async Task<IReadOnlyList<SearchResult>?> TrySourceScopedRetrievalAsync(
         ChatJobWorkItem item,
         ChatJobState state,
@@ -1821,9 +1852,21 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
             return null;
         }
 
+        var themeSourceIds = await ResolveThemeSourceIdsAsync(item, cancellationToken).ConfigureAwait(false);
+
         if (scope.IsSingle && scope.Sources.Count == 1)
         {
             var source = scope.Sources[0];
+            if (themeSourceIds is not null && !themeSourceIds.Contains(source.SourceId))
+            {
+                await _progressStore.AppendMessageAsync(item.JobId, new ChatProgressMessage
+                {
+                    Stage = "RAGS retrieval",
+                    Message = $"Source {source.SourceName} is outside the session knowledge themes; no retrieval for this document."
+                }, cancellationToken).ConfigureAwait(false);
+                return Array.Empty<SearchResult>();
+            }
+
             state.Update("RAGS retrieval", $"Source-scoped retrieval for {source.SourceName}.", force: true);
             await _progressStore.AppendMessageAsync(item.JobId, new ChatProgressMessage
             {
@@ -1841,10 +1884,23 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
             return attempt.Results;
         }
 
+        var themeScopedSources = themeSourceIds is null
+            ? scope.Sources
+            : scope.Sources.Where(source => themeSourceIds.Contains(source.SourceId)).ToList();
+        if (themeScopedSources.Count == 0)
+        {
+            await _progressStore.AppendMessageAsync(item.JobId, new ChatProgressMessage
+            {
+                Stage = "RAGS retrieval",
+                Message = "None of the resolved sources are inside the session knowledge themes; no retrieval."
+            }, cancellationToken).ConfigureAwait(false);
+            return Array.Empty<SearchResult>();
+        }
+
         await _progressStore.AppendMessageAsync(item.JobId, new ChatProgressMessage
         {
             Stage = "RAGS retrieval",
-            Message = $"Prompt requests a collection view; retrieving independently for {scope.Sources.Count} matching registered source(s)."
+            Message = $"Prompt requests a collection view; retrieving independently for {themeScopedSources.Count} matching registered source(s)."
         }, cancellationToken).ConfigureAwait(false);
 
         return await RetrieveScopedCollectionResultsAsync(
@@ -1852,7 +1908,7 @@ public sealed class ChatExecutionEngine : BackgroundService, IChatExecutionEngin
             state,
             item.Prompt,
             topK,
-            scope.Sources,
+            themeScopedSources,
             Array.Empty<SearchResult>(),
             cancellationToken).ConfigureAwait(false);
     }

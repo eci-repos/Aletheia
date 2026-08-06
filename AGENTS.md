@@ -80,3 +80,11 @@ Current-Sprint.md takes precedence.
 Do not request clarification if Current-Sprint.md clearly identifies
 the authorized work.
 
+
+## Knowledge Theme Filtering (Sprint 58)
+
+- Theme = category label on a canonical template (e.g., `3.0 - RFP Analysis` -> `Analysis`). Template files in `docs/doc-templates` declare it with a first-line `Theme: <theme>`; `DocumentTemplateRegistry` exposes `TryGetTheme(fileName)` and `ListThemes()` (missing/mismatched => `Uncategorized`).
+- `file_metadata` persists `template_name` + `theme` (idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-06-file-metadata-template-theme.sql` + init.sql); ingestion writes them in `RepositoryKnowledgeSourceIngestionService`; read-time fallback derives theme from the file name when columns are null.
+- Session scoping: `ChatSession.ThemeFilter` (empty = all documents) rides `ChatPayload` -> `ChatRequestOptions` -> `ChatExecutionEngine`; the engine resolves themes to source ids (`IMetadataRepository.ListSourceIdsByThemeAsync`) and enforces them in the RAGS retrieval paths via `RetrievalRequest.SourceIds` (PgVectorStore `source_id = ANY(...)` predicate on both `SearchAsync` and `SearchKeywordAsync`). Named-document scope (Sprint 51) intersects with the theme filter; collection paths take the union of theme-matched sources.
+- `GET /api/knowledge/themes` (authenticated) returns `[{ theme, documentCount }]` for the UI picker. Web: theme picker on New chat + theme chips in the Copilot session header, persisted in `CopilotStateService` (localStorage key `aletheia.copilot.session.v2`) and sent on every chat call.
+- GraphRAG/LazyGraphRAG internals, community summaries, and Search Center / Wiki surfaces are not theme-filtered.

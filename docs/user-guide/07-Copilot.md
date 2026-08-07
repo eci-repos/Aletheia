@@ -7,6 +7,7 @@ Copilot (`/copilot`) answers questions grounded in the repository, with citation
 - On a fresh session, the **Knowledge themes** picker appears (see `04-Knowledge-Themes.md`).
 - Pick the themes that apply, or leave **All themes** for the full repository.
 - The selection is shown as chips in the header and can be edited mid-session; it is persisted with the session and sent with every request.
+- Since Sprint 59 a template can declare multiple themes (e.g. `Analysis, As-Built`), and a session selecting any of them includes the document. Copilot's filter stays session-scoped — it is independent of the Search Center theme scope (see `05-Search-Center.md`).
 
 ## Asking a question
 

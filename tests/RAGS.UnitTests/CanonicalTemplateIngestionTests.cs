@@ -13,9 +13,11 @@ namespace RAGS.UnitTests;
 public sealed class CanonicalTemplateIngestionTests
 {
     [Fact]
-    public async Task EnsureIngestedAsync_stops_when_no_canonical_template_matches()
+    public async Task EnsureIngestedAsync_proceeds_when_no_canonical_template_matches()
     {
         var download = new Mock<IDownloadUseCase>();
+        download.Setup(d => d.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<DownloadResponse>.Failure("download not configured for this test"));
         var extractor = new Mock<IUploadedFileTextExtractor>();
         var rags = new Mock<IRagsService>();
         var indexer = new Mock<IUploadedContentKnowledgeIndexer>();
@@ -26,13 +28,14 @@ public sealed class CanonicalTemplateIngestionTests
             indexer.Object,
             new DocumentTemplateRegistry());
 
+        // Sprint 59: the canonical gate is softened. A document with no matching template proceeds
+        // (ingested as Uncategorized); the failure here is from the download step, not the gate.
         var result = await service.EnsureIngestedAsync(
             new KnowledgeSource(Guid.NewGuid(), "Q3 Financial Report.xlsx", DateTimeOffset.UtcNow));
 
         Assert.True(result.IsFailure);
-        Assert.Contains("canonical", result.Error, StringComparison.OrdinalIgnoreCase);
-        download.Verify(d => d.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-        rags.Verify(r => r.IngestAsync(It.IsAny<IngestionRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains("download", result.Error, StringComparison.OrdinalIgnoreCase);
+        download.Verify(d => d.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

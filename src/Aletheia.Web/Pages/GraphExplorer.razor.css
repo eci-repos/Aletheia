@@ -82,6 +82,7 @@
 }
 
 .graph-canvas {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
@@ -93,6 +94,23 @@
     border: 1px solid #cfd4dc;
     border-radius: 4px;
     background: #ffffff;
+}
+
+.graph-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    z-index: 5;
+    color: #374151;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid #cfd4dc;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    backdrop-filter: blur(1px);
 }
 
 .graph-context-panel {

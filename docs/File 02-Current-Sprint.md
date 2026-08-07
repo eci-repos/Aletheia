@@ -1,46 +1,81 @@
-# Sprint 58 - Session Knowledge Theme Filtering
+# Sprint 59 - Canonical Gate Softening, Multi-Theme, and Shared Theme Scope
 
 **Status:** Active
 
-Full authority: `docs/sprints/Sprint-58 - Session Knowledge Theme Filtering.md` (created 2026-08-06). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-59 - Canonical Gate Softening, Multi-Theme, and Shared Theme Scope.md` (created 2026-08-07). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 57 (Search Center Retrieval Quality and Troubleshooting) is **complete, committed, and pushed**: commits `9cdc131`, `bcb59f9`, and `7220987` (ingestion routing regression fix) are on `origin/master` (HEAD `7220987`). Remaining Sprint 57 verification: Docker smoke test (upload -> ingest -> search empty vs populated -> status endpoint; plus the Sprint 56 duplicate/update flow) - can run in parallel with Sprint 58 work.
+Sprint 58 (Session Knowledge Theme Filtering) is **complete, committed, and pushed**: commit `4fdfaf0` is on `origin/master` (HEAD `4fdfaf0`). Remaining Sprint 58 verification: Docker smoke test (upload -> ingest -> themes endpoint -> theme-scoped vs all-themes Copilot session) - can run in parallel with Sprint 59 work.
 
 ## Objective
 
-Let the end-user scope a Copilot session to a set of **knowledge themes** derived from the canonical document templates (e.g., Analysis, As-Built, As-Proposed, or a combination). Themes are chosen at session creation and shown as chips in the session header; the selection restricts which registered documents Copilot retrieves from for that session. No selection = current behavior (all documents).
+Three coordinated improvements to the canonical-template / theme / filtering model, delivered in one pass because they share the `file_metadata` schema:
+
+1. **Soften the canonical gate** — a document with no matching template is ingested anyway (RAGS + knowledge index + graph seed) instead of being refused; template-dependent features (document briefs, per-section retrieval, theme) stay gated on `Canonical` status.
+2. **Multi-theme per document** — templates declare a set of themes (`Theme: Analysis, As-Built`); `file_metadata.theme` becomes a set; theme filtering matches any selected theme; the picker shows each theme with its document count.
+3. **Persist derived themes (backfill)** — a re-evaluation operation derives and persists `template_name` + `theme` + `template_status` for null rows; the read-time fallback is demoted to a safety net.
+4. **Shared theme scope across surfaces (Phase 1)** — a shared scope state (localStorage) that Search Center honors as an optional theme filter on semantic search, with a visible "scoped to themes" indicator. Copilot keeps its session-scoped filter; Wiki stays curated.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Theme model**: each canonical template in `docs/doc-templates` gains a `Theme:` metadata line (e.g., `3.0 - RFP Analysis` -> `Analysis`); `DocumentTemplateRegistry` exposes `TryGetTheme` / `ListThemes`.
-2. **Persistence**: `file_metadata.template_name` + `file_metadata.theme` (idempotent migration + init.sql); ingestion persists them; read-time fallback derivation for pre-migration rows.
-3. **Session filter (API + retrieval)**: `ChatSession.ThemeFilter` rides the existing chat path into `ChatRequestOptions`; `RetrievalRequest.SourceIds` + PgVectorStore vector/keyword predicates; engine resolves theme -> source set and enforces in all RAGS retrieval paths (intersects with Sprint 51 single-document scope, union for collections); `GET /api/knowledge/themes`.
-4. **Web UI (UX option #1)**: theme picker on "New chat"; theme chips in the session header with mid-session edit; persisted with session state (localStorage v2 key) and sent on every chat call.
-5. **Tests**: RAGS (theme resolution, engine enforcement, intersection, keyword fallback, backward compat), Repository (persistence, themes endpoint, ListSourceIdsByThemeAsync), Web CoreCompile; existing suites green.
-6. **Docs**: Architecture (retrieval pipeline theme stage), AdministratorGuide (theme convention + endpoint), OperationsGuide (troubleshooting), Development-Guidelines (new templates must declare a theme), AGENTS, File 02/03, handoff.
+1. **Soften the canonical gate**: `file_metadata.template_status` (`Canonical`/`Uncategorized`); ingestion ingests uncategorized documents instead of hard-stopping; briefs gated on `Canonical`; `GET /api/knowledge/uncategorized` + `POST /api/knowledge/reevaluate` (admin list + promotion trigger).
+2. **Multi-theme**: templates declare a theme set; `file_metadata.theme` becomes `text[]`; `TryGetThemes`; match-any filtering; per-theme counts.
+3. **Backfill**: re-evaluate persists `template_name`/`theme`/`template_status` for null rows; read-time fallback demoted to safety net.
+4. **Shared scope**: `SearchScopeStateService` (localStorage); Search Center theme filter on semantic search with visible indicator; `GET /api/rags/retrieve?themes=` resolves and restricts.
+5. **Tests**: RAGS (multi-theme, match-any, uncategorized ingestion), Repository (template_status, uncategorized list, re-evaluate, retrieve?themes=), Web CoreCompile; existing suites green.
+6. **Docs**: Architecture, AdministratorGuide, OperationsGuide, Development-Guidelines, user guide (Search Center / Knowledge Themes), AGENTS, File 02/03, handoff.
 
 ## Acceptance Criteria
 
-- Templates carry themes; new ingestions persist `template_name` + `theme`; pre-existing documents resolve via fallback.
-- Theme picker at session creation; header chips; mid-session edits apply to subsequent turns; selection persists and is sent on every chat call.
-- `[Analysis]` restricts retrieval to Analysis-themed sources; combinations take the union; a named document outside the filter yields no results from that document.
-- Empty `ThemeFilter` behaves exactly as before the sprint.
+- A document with no matching template is ingested with `template_status = Uncategorized`; no brief; admin list shows it; re-evaluate promotes it and generates the brief once a template matches.
+- Templates may declare multiple themes; a document in multiple themes is matched by any and counted in each; picker shows per-theme counts.
+- Pre-Sprint-58 rows get `template_name`/`theme`/`template_status` persisted by re-evaluate; read-time fallback remains a safety net.
+- Search Center semantic search honors the shared theme scope with a visible indicator; Copilot keeps its session-scoped filter; graph modes and Wiki unaffected.
 - Repository / RAGS / Foundation suites green; Web C#/Razor compiles.
 
 ## Out of Scope
 
-- GraphRAG/LazyGraphRAG internals and community summaries; a global knowledge-scope widget over Search Center / Wiki / Browse; rerankers; multi-tenant/ACL scoping; new session stores (sessions remain client-side).
+- Theme-aware GraphRAG/LazyGraphRAG retrieval and community summaries (backlog item 5, parked); theme scope over Wiki / Browse / graph surfaces beyond Search Center semantic search; rerankers; multi-tenant/ACL scoping; new session stores.
 
 ---
 
-## Progress (2026-08-06)
+## Progress (2026-08-07)
 
-- Sprint 58 sprint file created; Sprint 57 closed out (routing fix commit `7220987` pushed). No implementation yet.
-### Implementation Progress (2026-08-06)
+### Implementation complete — all four deliverables implemented, tested, documented
 
-- **D1 (Theme model)**: `Theme: Analysis` on the RFP Analysis template; registry `TryGetTheme`/`ListThemes` + `Uncategorized`; Development-Guidelines convention documented.
-- **D2 (Persistence)**: `file_metadata.template_name`/`theme` migration + init.sql; `SetTemplateAsync`/`ListThemeRowsAsync`; ingestion persists template + theme after the gate.
-- **D3 (Session filter + retrieval)**: `RetrievalRequest.SourceIds` with PgVectorStore set predicates (vector + keyword fallback); `KnowledgeThemeService` singleton + `GET /api/knowledge/themes`; theme filter rides session -> payload -> options/plan -> engine; engine enforces on all RAGS paths, intersects Sprint 51 single-document scope, and post-filters tool results; direct Copilot path intersects the named source.
-- **D4 (Web UI)**: New-chat theme picker (themes + document counts), header theme chips with Edit, selection persisted (session storage v2) and sent on every plan/chat call.
-- **D5**: RAGS 249 / Repository 113 / Foundation 55 green; Web CoreCompile 0 errors.
-- **Remaining**: Docker smoke test (upload -> ingest -> themes endpoint -> theme-scoped vs all-themes Copilot session), commit.
+**Backend (1-3):**
+- Migration `2026-08-07-file-metadata-template-status-themes.sql` + `init.sql`: `template_status TEXT`, `theme` -> `text[]` (GIN index), `idx_file_metadata_template_status`.
+- Softened gate: no matching template => persist `Uncategorized` and continue ingestion; briefs only for `Canonical`.
+- Multi-theme: `TryGetThemes`, `ResolveSourceIdsAsync` match-any, per-theme counts, `text[]` persistence.
+- Backfill/promotion: `TemplateReevaluationService` + `GET /api/knowledge/uncategorized` + `POST /api/knowledge/reevaluate`.
+- `GET /api/rags/retrieve?themes=` resolves theme set -> `SourceIds`.
+- Diagnostics: template-gate-skip counters repurposed to `UncategorizedIngestCount`/`UncategorizedIngests`.
+
+**Web (4):**
+- `SearchScopeStateService` (localStorage scope), Search Center theme filter chips + "Scoped to N themes" indicator (semantic only), admin uncategorized list + re-evaluate panel.
+- `RepositoryApiClient`: `themes=` param, `GetUncategorizedAsync`, `ReevaluateTemplatesAsync`.
+
+**Verification:**
+- RAGS.UnitTests 251 passed / Repository.UnitTests 121 passed / Foundation.UnitTests 55 passed / `dotnet build Aletheia.slnx` succeeds.
+- Aletheia.Web.UnitTests 33 passed / 6 failed — **pre-existing failures** (verified identical on clean `4fdfaf0` via `git stash`); unrelated to Sprint 59 (UploadAsync, Copilot page/state), tracked for a separate fix.
+
+**Docs:** Architecture / AdministratorGuide / OperationsGuide / Development-Guidelines / user guide (04/05/07) / AGENTS / File 02/03 / handoff updated; backlog item statuses updated.
+
+**Remaining:** Docker smoke test (optional, can run in parallel — see Sprint 59 sprint file).
+
+### Post-implementation chat fix (2026-08-07)
+
+Smoke-test report "Chat does not work at all" traced to the Copilot restore path: after a page reload the Web page restored a pending plan and polled `GET /api/copilot/plans/{id}/progress`, which returned **404** for a plan with no execution job yet — the client then polled every 2s **forever**. Fixed:
+
+- API `GetPlanProgress`: a plan without an execution job now returns **200** with `JobId = Guid.Empty` (not-started state) instead of 404; "plan not found" still 404s.
+- Web `Index.razor`: the polling loop treats `JobId == Guid.Empty` as "not started" — clears stale restored execution state, keeps the plan preview so **Run** works — and stops after 3 consecutive no-progress polls instead of looping indefinitely (covers API restarts where in-memory chat plans/jobs are lost).
+
+Verified end-to-end via curl (plan → progress-before-execute 200/empty jobId → approve → execute → job completes with an answer); RAGS 251 / Repository 121 / Foundation 55 green; Web.UnitTests still the same 6 pre-existing failures. Containers rebuilt. **Browser action required: hard refresh (Ctrl+F5)** to load the new WASM bundle.
+
+### Post-implementation graph UX fix (2026-08-07)
+
+Smoke-test feedback: the Graph Explorer "jumps around" while the layout runs and gives no feedback, so users press buttons and think it is running wild. Fixed with two coordinated changes:
+
+- **Visible "preparing graph" state**: `GraphExplorer.razor` now shows a spinner + staged status line over the canvas ("Loading graph…" → "Loading edges…" → "Rendering layout…") while the graph loads and lays out. The Refresh / Import / Fit / Re-layout / Spread / Find Path buttons are disabled during the load so the user cannot trigger more work mid-render. The overlay clears when the layout settles.
+- **Render once, don't re-layout**: `window.initGraph` now accepts a `dotNetRef` + `preservePositions` flag. On scope changes (context selection, chunk toggle) the page re-renders the graph but keeps existing node positions (`randomize: false`) instead of re-running the randomized `cose` layout, so the view no longer jumps around. The JS hooks `layoutstop` to invoke `OnGraphLayoutSettled` on the page, which clears the loading overlay.
+
+Contract: `initGraph(containerId, nodes, edges, dotNetRef, preservePositions)`; the page owns a `DotNetObjectReference<GraphExplorer>` (disposed in `Dispose`) and exposes `[JSInvokable] OnGraphLayoutSettled()`. Web project builds clean (0 warnings/errors).

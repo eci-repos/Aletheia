@@ -3,7 +3,7 @@
 ## Upload
 
 1. Open **Upload**, choose a file, submit.
-2. The file name must identify its canonical template (e.g., `CMP 2026 - 3. RFP Analysis.docx` → `3.0 - RFP Analysis`). If no template matches, ingestion stops with a message; register a template or correct the file name.
+2. The file name identifies its canonical template (e.g., `CMP 2026 - 3. RFP Analysis.docx` → `3.0 - RFP Analysis`). If no template matches, the document is still ingested and searchable but marked **Uncategorized** (no document brief) until an administrator adds a template and promotes it.
 3. After upload, the **Activity** panel tracks the background jobs: upload ingestion (`Succeeded` / `Indexed`), then `DocumentBriefs` (Wiki brief generation).
 
 ## Duplicate detection

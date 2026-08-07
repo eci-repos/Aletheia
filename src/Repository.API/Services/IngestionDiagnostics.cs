@@ -5,41 +5,42 @@ namespace Aletheia.Repository.API.Services;
 /// <summary>Runtime counters for ingestion diagnostics surfaced by GET /api/rags/status.</summary>
 public interface IIngestionDiagnostics
 {
-    void RecordTemplateGateSkip(string sourceName);
+    /// <summary>Records a document ingested with no matching canonical template (Sprint 59 softened gate).</summary>
+    void RecordUncategorizedIngest(string sourceName);
 
     void RecordExtractionFailure(string sourceName, string error);
 
-    long TemplateGateSkipCount { get; }
+    long UncategorizedIngestCount { get; }
 
     long ExtractionFailureCount { get; }
 
-    IReadOnlyList<string> TemplateGateSkips { get; }
+    IReadOnlyList<string> UncategorizedIngests { get; }
 }
 
 public sealed class IngestionDiagnostics : IIngestionDiagnostics
 {
     private const int MaxRecent = 50;
 
-    private long _templateGateSkips;
+    private long _uncategorizedIngests;
     private long _extractionFailures;
-    private readonly ConcurrentQueue<string> _recentTemplateGateSkips = new();
+    private readonly ConcurrentQueue<string> _recentUncategorizedIngests = new();
 
-    public long TemplateGateSkipCount => Interlocked.Read(ref _templateGateSkips);
+    public long UncategorizedIngestCount => Interlocked.Read(ref _uncategorizedIngests);
 
     public long ExtractionFailureCount => Interlocked.Read(ref _extractionFailures);
 
-    public IReadOnlyList<string> TemplateGateSkips => _recentTemplateGateSkips.ToArray();
+    public IReadOnlyList<string> UncategorizedIngests => _recentUncategorizedIngests.ToArray();
 
-    public void RecordTemplateGateSkip(string sourceName)
+    public void RecordUncategorizedIngest(string sourceName)
     {
-        Interlocked.Increment(ref _templateGateSkips);
-        EnqueueRecent(_recentTemplateGateSkips, sourceName);
+        Interlocked.Increment(ref _uncategorizedIngests);
+        EnqueueRecent(_recentUncategorizedIngests, sourceName);
     }
 
     public void RecordExtractionFailure(string sourceName, string error)
     {
         Interlocked.Increment(ref _extractionFailures);
-        EnqueueRecent(_recentTemplateGateSkips, $"{sourceName} ({error})");
+        EnqueueRecent(_recentUncategorizedIngests, $"{sourceName} ({error})");
     }
 
     private static void EnqueueRecent(ConcurrentQueue<string> queue, string value)

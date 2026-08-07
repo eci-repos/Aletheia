@@ -25,14 +25,25 @@ public interface IMetadataRepository
         return Task.FromResult(Result<IReadOnlyList<FileMetadata>>.Success(new List<FileMetadata>()));
     }
 
-    /// <summary>Persists the canonical template name and knowledge theme for every row of the given file. No-op when not supported.</summary>
-    Task<Result> SetTemplateAsync(Guid fileId, string? templateName, string? theme, CancellationToken cancellationToken = default)
+    /// <summary>Persists the canonical template name, knowledge themes, and template status for every row of the given file. No-op when not supported.</summary>
+    Task<Result> SetTemplateAsync(
+        Guid fileId,
+        string? templateName,
+        IReadOnlyList<string>? themes,
+        string? templateStatus = null,
+        CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result.Success());
     }
 
     /// <summary>Returns one row per file_metadata row with template/theme information for knowledge-theme counts. Empty when not supported.</summary>
     Task<Result<IReadOnlyList<FileThemeRow>>> ListThemeRowsAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result<IReadOnlyList<FileThemeRow>>.Success(new List<FileThemeRow>()));
+    }
+
+    /// <summary>Returns rows that are not Canonical (null or Uncategorized template status) for the admin uncategorized list and re-evaluation. Empty when not supported.</summary>
+    Task<Result<IReadOnlyList<FileThemeRow>>> ListUncategorizedAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result<IReadOnlyList<FileThemeRow>>.Success(new List<FileThemeRow>()));
     }

@@ -1,6 +1,7 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.RAGS.Application;
 using Aletheia.Repository.Abstractions.Interfaces;
 using Aletheia.Repository.Abstractions.Models;
 using Aletheia.Repository.Domain.UseCases;
@@ -57,19 +58,26 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
 
         _logger.LogInformation("Knowledge source hydration started for {SourceName} ({SourceId}).", source.SourceName, source.SourceId);
 
-        // Canonical template gate: every ingested document must match a canonical template in docs/doc-templates.
+        // Sprint 59: softened canonical gate. A document with no matching template is ingested anyway
+        // (RAGS + knowledge index + graph seed) with template_status = Uncategorized, so a new document
+        // kind arriving before its template is written is never lost. Template-dependent features
+        // (document briefs, per-section retrieval, theme) stay gated on Canonical status.
         var canonicalName = _templateRegistry?.TryGetCanonicalName(source.SourceName);
+        var templateStatus = canonicalName is null ? KnowledgeThemeService.Uncategorized : KnowledgeThemeService.Canonical;
         if (canonicalName is null)
         {
-            _logger.LogWarning(
-                "Ingestion stopped for {SourceName}: no canonical document template found. The document name should identify its canonical template (see docs/doc-templates).",
+            _diagnostics?.RecordUncategorizedIngest(source.SourceName);
+            _logger.LogInformation(
+                "No canonical document template found for {SourceName}; ingesting as Uncategorized. Register a matching template under docs/doc-templates and re-evaluate to promote it.",
                 source.SourceName);
-            return Result<bool>.Failure(
-                $"Ingestion stopped: no canonical document template found for '{source.SourceName}'. Register a matching template under docs/doc-templates or correct the document name.");
+        }
+        else
+        {
+            _logger.LogInformation("Canonical document template {CanonicalName} matched for {SourceName}.", canonicalName, source.SourceName);
         }
 
-        // Sprint 58: persist the canonical template + knowledge theme so sessions can filter by theme.
-        await PersistTemplateAsync(source.SourceId, canonicalName, _templateRegistry?.TryGetTheme(source.SourceName), cancellationToken)
+        // Sprint 58/59: persist the canonical template + knowledge themes + template status so sessions can filter by theme.
+        await PersistTemplateAsync(source.SourceId, canonicalName, _templateRegistry?.TryGetThemes(source.SourceName), templateStatus, cancellationToken)
             .ConfigureAwait(false);
 
         var download = await _downloadUseCase
@@ -144,21 +152,30 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         _logger.LogInformation("Knowledge source hydration completed for {SourceName}.", source.SourceName);
 
         // Sprint 55: keep the user-facing Wiki fresh with a document brief once a registered
-        // document is ingested. The lazy reference avoids a construction-time cycle with
-        // IngestionJobService, which depends on this service for repair/hydration.
-        try
+        // document is ingested. Sprint 59: briefs are gated on Canonical status (uncategorized
+        // documents have no template sections to structure a brief). The lazy reference avoids a
+        // construction-time cycle with IngestionJobService, which depends on this service for repair/hydration.
+        if (canonicalName is not null)
         {
-            _ingestionJobs?.Value.EnqueueDocumentBriefs(source.SourceId, source.SourceName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Unable to queue document brief generation for {SourceName}.", source.SourceName);
+            try
+            {
+                _ingestionJobs?.Value.EnqueueDocumentBriefs(source.SourceId, source.SourceName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Unable to queue document brief generation for {SourceName}.", source.SourceName);
+            }
         }
 
         return Result<bool>.Success(true);
     }
 
-    private async Task PersistTemplateAsync(Guid fileId, string? canonicalName, string? theme, CancellationToken cancellationToken)
+    private async Task PersistTemplateAsync(
+        Guid fileId,
+        string? canonicalName,
+        IReadOnlyList<string>? themes,
+        string? templateStatus,
+        CancellationToken cancellationToken)
     {
         if (_metadataRepository is null)
         {
@@ -168,7 +185,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         try
         {
             var result = await _metadataRepository
-                .SetTemplateAsync(fileId, canonicalName, theme, cancellationToken)
+                .SetTemplateAsync(fileId, canonicalName, themes, templateStatus, cancellationToken)
                 .ConfigureAwait(false);
             if (result.IsFailure)
             {

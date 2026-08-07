@@ -3,9 +3,9 @@
 ## Search returns nothing
 
 1. **Is the corpus empty?** Search Center tells you: "No documents have been ingested yet... check the Activity panel." Upload a document and wait for the upload job to end `Succeeded`/`Indexed` and the brief job to finish.
-2. **Did ingestion fail?** Check the Activity panel and `/api/jobs`; a canonical-template mismatch stops ingestion ("no canonical document template found"). Fix the file name or register a template.
+2. **Did ingestion fail?** Check the Activity panel and `/api/jobs` for extraction or AI-provider errors. A document with no matching canonical template is no longer refused — it is ingested as **Uncategorized** (searchable, but with no document brief) until an administrator adds a template and promotes it.
 3. **Does the query match?** Try words from the document (e.g., `Scope of Work`). With content ingested, the keyword fallback returns results when vector scores are empty/below floor.
-4. **Operator check:** `GET /api/rags/status` shows embedded chunk count, ingested source count, template-gate skips, extraction failures, and recent upload jobs.
+4. **Operator check:** `GET /api/rags/status` shows embedded chunk count, ingested source count, uncategorized ingests, extraction failures, and recent upload jobs.
 
 ## Copilot has no relevant information
 

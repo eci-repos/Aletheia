@@ -27,6 +27,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
                 content_hash AS ""ContentHash"",
                 template_name AS ""TemplateName"",
                 theme AS ""Theme"",
+                template_status AS ""TemplateStatus"",
                 created_at AS ""CreatedAt"",
                 created_by_id AS ""CreatedById"",
                 created_by_type AS ""CreatedByType"",
@@ -81,10 +82,10 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         }
 
         var sql = $@"
-            INSERT INTO file_metadata (file_id, file_name, version, content_type, size_bytes, uploaded_at, tags, content_hash, template_name, theme,
+            INSERT INTO file_metadata (file_id, file_name, version, content_type, size_bytes, uploaded_at, tags, content_hash, template_name, theme, template_status,
                                        created_at, created_by_id, created_by_type, created_by_name,
                                        last_modified_at, last_modified_by_id, last_modified_by_type, last_modified_by_name)
-            VALUES (@FileId, @FileName, @Version, @ContentType, @SizeBytes, @UploadedAt, @Tags::jsonb, @ContentHash, @TemplateName, @Theme,
+            VALUES (@FileId, @FileName, @Version, @ContentType, @SizeBytes, @UploadedAt, @Tags::jsonb, @ContentHash, @TemplateName, @Theme, @TemplateStatus,
                     @CreatedAt, @CreatedById, @CreatedByType, @CreatedByName,
                     @LastModifiedAt, @LastModifiedById, @LastModifiedByType, @LastModifiedByName)
             ON CONFLICT (file_id, COALESCE(version, ''))
@@ -97,6 +98,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
                 content_hash = EXCLUDED.content_hash,
                 template_name = EXCLUDED.template_name,
                 theme = EXCLUDED.theme,
+                template_status = EXCLUDED.template_status,
                 last_modified_at = EXCLUDED.last_modified_at,
                 last_modified_by_id = EXCLUDED.last_modified_by_id,
                 last_modified_by_type = EXCLUDED.last_modified_by_type,
@@ -256,12 +258,18 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         }
     }
 
-    public async Task<Result> SetTemplateAsync(Guid fileId, string? templateName, string? theme, CancellationToken cancellationToken = default)
+    public async Task<Result> SetTemplateAsync(
+        Guid fileId,
+        string? templateName,
+        IReadOnlyList<string>? themes,
+        string? templateStatus = null,
+        CancellationToken cancellationToken = default)
     {
         const string sql = @"
             UPDATE file_metadata
             SET template_name = @TemplateName,
-                theme = @Theme
+                theme = @Theme,
+                template_status = @TemplateStatus
             WHERE file_id = @FileId";
 
         using var connection = _connectionFactory.CreateConnection();
@@ -273,7 +281,8 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
             {
                 FileId = fileId,
                 TemplateName = templateName,
-                Theme = theme
+                Theme = themes is null ? null : themes.ToArray(),
+                TemplateStatus = templateStatus
             }).ConfigureAwait(false);
             return Result.Success();
         }
@@ -289,7 +298,8 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
             SELECT file_id AS ""FileId"",
                    file_name AS ""FileName"",
                    template_name AS ""TemplateName"",
-                   theme AS ""Theme""
+                   theme AS ""Theme"",
+                   template_status AS ""TemplateStatus""
             FROM file_metadata
             ORDER BY uploaded_at DESC";
 
@@ -299,7 +309,34 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         try
         {
             var rows = await connection.QueryAsync<ThemeRow>(sql).ConfigureAwait(false);
-            var items = rows.Select(row => new FileThemeRow(row.FileId, row.FileName, row.TemplateName, row.Theme)).ToList();
+            var items = rows.Select(row => new FileThemeRow(row.FileId, row.FileName, row.TemplateName, row.Theme, row.TemplateStatus)).ToList();
+            return Result<IReadOnlyList<FileThemeRow>>.Success(items);
+        }
+        catch (PostgresException ex)
+        {
+            return Result<IReadOnlyList<FileThemeRow>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<FileThemeRow>>> ListUncategorizedAsync(CancellationToken cancellationToken = default)
+    {
+        var sql = $@"
+            SELECT file_id AS ""FileId"",
+                   file_name AS ""FileName"",
+                   template_name AS ""TemplateName"",
+                   theme AS ""Theme"",
+                   template_status AS ""TemplateStatus""
+            FROM file_metadata
+            WHERE template_status IS NULL OR template_status <> 'Canonical'
+            ORDER BY uploaded_at DESC";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<ThemeRow>(sql).ConfigureAwait(false);
+            var items = rows.Select(row => new FileThemeRow(row.FileId, row.FileName, row.TemplateName, row.Theme, row.TemplateStatus)).ToList();
             return Result<IReadOnlyList<FileThemeRow>>.Success(items);
         }
         catch (PostgresException ex)
@@ -327,7 +364,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
             auditInfo = new AuditInfo(row.CreatedAt!.Value, createdBy, row.LastModifiedAt, lastModifiedBy);
         }
 
-        return new FileMetadata(descriptor, row.ContentType, row.SizeBytes, row.UploadedAt, tags, auditInfo, row.ContentHash, row.TemplateName, row.Theme);
+        return new FileMetadata(descriptor, row.ContentType, row.SizeBytes, row.UploadedAt, tags, auditInfo, row.ContentHash, row.TemplateName, row.Theme, row.TemplateStatus);
     }
 
     private static MetadataRow MapToRow(FileMetadata metadata)
@@ -345,7 +382,8 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
             Tags = JsonSerializer.Serialize(metadata.Tags),
             ContentHash = metadata.ContentHash,
             TemplateName = metadata.TemplateName,
-            Theme = metadata.Theme,
+            Theme = metadata.Theme?.ToArray(),
+            TemplateStatus = metadata.TemplateStatus,
             CreatedAt = audit?.CreatedAt,
             CreatedById = audit?.CreatedBy.ActorId,
             CreatedByType = audit?.CreatedBy.ActorType,
@@ -368,7 +406,8 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         public string Tags { get; set; } = "{}";
         public string? ContentHash { get; set; }
         public string? TemplateName { get; set; }
-        public string? Theme { get; set; }
+        public string[]? Theme { get; set; }
+        public string? TemplateStatus { get; set; }
         public DateTimeOffset? CreatedAt { get; set; }
         public string? CreatedById { get; set; }
         public string? CreatedByType { get; set; }
@@ -384,6 +423,7 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         public Guid FileId { get; set; }
         public string FileName { get; set; } = string.Empty;
         public string? TemplateName { get; set; }
-        public string? Theme { get; set; }
+        public string[]? Theme { get; set; }
+        public string? TemplateStatus { get; set; }
     }
 }

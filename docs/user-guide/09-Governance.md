@@ -18,6 +18,6 @@ The Governance surface covers repository governance controls and collaboration f
 
 - Uploads/ingestion jobs are tracked in the **Activity** panel and `/api/jobs`.
 - Copilot responses carry telemetry; chat jobs expose progress records and telemetry endpoints (`/api/copilot/jobs`, `/api/copilot/jobs/{id}/progress`, `/api/copilot/jobs/{id}/telemetry`).
-- RAGS status (`GET /api/rags/status`) exposes chunk/source counts, template-gate skips, extraction failures, and recent upload jobs (Administrator).
+- RAGS status (`GET /api/rags/status`) exposes chunk/source counts, uncategorized ingests, extraction failures, and recent upload jobs (Administrator).
 
 For API details see `docs/AdministratorGuide.md` and `docs/Copilot-Progress-API-Documentation.md`.

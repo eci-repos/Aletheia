@@ -13,6 +13,17 @@ Search Center (`/search`) is the primary human-facing retrieval workbench. It se
 
 When internal modes are hidden, their API endpoints return HTTP 404 and the UI hides the controls.
 
+## Theme scope
+
+Above the search box, a **Theme scope** filter lets you restrict **semantic** search to documents in selected knowledge themes:
+
+- Each theme chip shows its registered-document count (a document in multiple themes counts in each).
+- Selecting one or more themes scopes results to those documents; a **"Scoped to N themes"** indicator appears so the active scope is always visible.
+- Your selection is remembered between visits (shared scope state).
+- Clear the scope (or pick **All themes**) to search the full corpus again.
+
+Graph retrieval modes (WRAGS/GraphRAG/LazyGraphRAG) and the Wiki ignore the theme scope. Learn more about themes in [Knowledge Themes](04-Knowledge-Themes.md).
+
 ## Reading results
 
 Each result shows:
@@ -28,7 +39,7 @@ Instead of a generic "No results", Search Center tells you why:
 - **Corpus empty**: "No documents have been ingested yet. Upload a document and wait for the Activity panel to show Ready, then retry." It also shows example queries (e.g., `Scope of Work`) for a registered RFP Analysis document.
 - **Nothing matched**: the message suggests trying words from your document or asking Copilot.
 
-Operators can open the **RAGS status** chip (visible when internal search is enabled) for counts and recent template-gate skips.
+Operators can open the **RAGS status** chip (visible when internal search is enabled) for counts and recent uncategorized ingests. Search Center also includes an admin **Uncategorized documents** panel (visible when internal search is enabled) to list documents awaiting a template and re-evaluate them; see the Administrator Guide.
 
 ## Keyword fallback
 

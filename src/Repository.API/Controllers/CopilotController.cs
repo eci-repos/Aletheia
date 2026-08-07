@@ -218,7 +218,19 @@ public class CopilotController : ControllerBase
         var jobs = _chatExecutionService.List(200).Where(job => job.PlanId == planId).ToList();
         if (jobs.Count == 0)
         {
-            return NotFound(new { error = "No execution job found for this plan." });
+            // The plan exists but has not been executed yet. This is a normal "waiting for the user
+            // to approve" state, not an error — return it as 200 with an empty JobId so clients can
+            // tell "plan not started" apart from "plan not found" (404 above). Sprint 59 fix: without
+            // this, a Web client that restored a pending plan from browser state polled this endpoint
+            // and spun forever on 404.
+            return Ok(new ChatProgressRecord
+            {
+                JobId = Guid.Empty,
+                PlanId = planResult.Value!.PlanId,
+                Prompt = planResult.Value.Prompt,
+                Status = ChatJobStatus.Queued,
+                CreatedAt = planResult.Value.CreatedAt
+            });
         }
 
         var jobId = jobs.OrderByDescending(job => job.CreatedAt).First().JobId;

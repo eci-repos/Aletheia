@@ -15,7 +15,7 @@ public sealed class KnowledgeThemeServiceTests
         var sourceId = Guid.NewGuid();
         var service = CreateService(new List<FileThemeRow>
         {
-            new(sourceId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", "Analysis")
+            new(sourceId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis" })
         });
 
         var result = await service.ResolveSourceIdsAsync(new[] { "Analysis" });
@@ -46,7 +46,7 @@ public sealed class KnowledgeThemeServiceTests
         var sourceId = Guid.NewGuid();
         var service = CreateService(new List<FileThemeRow>
         {
-            new(sourceId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", "Analysis")
+            new(sourceId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis" })
         });
 
         var result = await service.ResolveSourceIdsAsync(new[] { "As-Built" });
@@ -62,8 +62,8 @@ public sealed class KnowledgeThemeServiceTests
         var asBuiltId = Guid.NewGuid();
         var service = CreateService(new List<FileThemeRow>
         {
-            new(analysisId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", "Analysis"),
-            new(asBuiltId, "CMP 2026 - As Built.docx", "2.0 - As Built", "As-Built")
+            new(analysisId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis" }),
+            new(asBuiltId, "CMP 2026 - As Built.docx", "2.0 - As Built", new[] { "As-Built" })
         });
 
         var result = await service.ResolveSourceIdsAsync(new[] { "Analysis", "As-Built" });
@@ -79,7 +79,7 @@ public sealed class KnowledgeThemeServiceTests
     {
         var service = CreateService(new List<FileThemeRow>
         {
-            new(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", "Analysis")
+            new(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis" })
         });
 
         var result = await service.ResolveSourceIdsAsync(Array.Empty<string>());
@@ -93,7 +93,7 @@ public sealed class KnowledgeThemeServiceTests
     {
         var service = CreateService(new List<FileThemeRow>
         {
-            new(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", "Analysis")
+            new(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis" })
         });
 
         var result = await service.GetThemesWithCountsAsync();
@@ -118,6 +118,36 @@ public sealed class KnowledgeThemeServiceTests
         Assert.True(result.IsSuccess);
         var uncategorized = result.Value!.First(theme => theme.Theme == "Uncategorized");
         Assert.Equal(1, uncategorized.DocumentCount);
+    }
+
+    [Fact]
+    public async Task ResolveSourceIdsAsync_matches_multi_theme_document_by_any_theme()
+    {
+        var sourceId = Guid.NewGuid();
+        var service = CreateService(new List<FileThemeRow>
+        {
+            new(sourceId, "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis", "As-Built" })
+        });
+
+        var result = await service.ResolveSourceIdsAsync(new[] { "As-Built" });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new[] { sourceId }, result.Value);
+    }
+
+    [Fact]
+    public async Task GetThemesWithCountsAsync_counts_multi_theme_document_in_each_theme()
+    {
+        var service = CreateService(new List<FileThemeRow>
+        {
+            new(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx", "3.0 - RFP Analysis", new[] { "Analysis", "As-Built" })
+        });
+
+        var result = await service.GetThemesWithCountsAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value!.First(theme => theme.Theme == "Analysis").DocumentCount);
+        Assert.Equal(1, result.Value!.First(theme => theme.Theme == "As-Built").DocumentCount);
     }
 
     private static KnowledgeThemeService CreateService(IReadOnlyList<FileThemeRow> rows)

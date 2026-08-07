@@ -4,6 +4,7 @@
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
 @inject RecentGraphContextService RecentGraphContext
+@inject SearchScopeStateService Scope
 @inject NavigationManager Navigation
 
 <PageTitle>Search Center - Aletheia</PageTitle>
@@ -20,6 +21,41 @@
             <button type="button" class="btn @(_mode == "lazygraphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetLazyGraphRagMode">LazyGraphRAG</button>
         }
     </div>
+</div>
+
+<div class="mb-3">
+    <div class="d-flex align-items-center justify-content-between mb-1">
+        <label class="form-label mb-0">Theme scope</label>
+        @if (_selectedThemes.Count > 0)
+        {
+            <button class="btn btn-sm btn-outline-secondary" @onclick="ClearThemeScopeAsync">All themes</button>
+        }
+    </div>
+    @if (_availableThemes.Count == 0)
+    {
+        <p class="text-muted small mb-0">No knowledge themes are available yet.</p>
+    }
+    else
+    {
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var theme in _availableThemes)
+            {
+                <button type="button" class="btn btn-sm @(_selectedThemes.Contains(theme.Theme) ? "btn-primary" : "btn-outline-primary")" @onclick="() => ToggleTheme(theme.Theme)">
+                    @theme.Theme <span class="text-muted">(@theme.DocumentCount)</span>
+                </button>
+            }
+        </div>
+    }
+    @if (_selectedThemes.Count > 0)
+    {
+        <p class="small mb-0 mt-1">
+            <span class="badge bg-info text-dark">Scoped to @_selectedThemes.Count theme(s): @string.Join(", ", _selectedThemes)</span>
+            @if (_mode != "semantic")
+            {
+                <span class="text-muted"> Theme scope applies to Semantic search only.</span>
+            }
+        </p>
+    }
 </div>
 
 <div class="input-group mb-3">
@@ -101,10 +137,10 @@
 {
     <div class="alert alert-secondary small mb-3">
         <strong>RAGS status:</strong> @_status.EmbeddedChunkCount chunks · @_status.IngestedSourceCount sources ingested · @_status.RegisteredDocumentCount registered documents ·
-        @_status.TemplateGateSkipCount template-gate skips · @_status.ExtractionFailureCount extraction failures
-        @if (_status.TemplateGateSkips.Count > 0)
+        @_status.UncategorizedIngestCount uncategorized ingests · @_status.ExtractionFailureCount extraction failures
+        @if (_status.UncategorizedIngests.Count > 0)
         {
-            <div>Recent gate skips: @string.Join("; ", _status.TemplateGateSkips)</div>
+            <div>Recent uncategorized ingests: @string.Join("; ", _status.UncategorizedIngests)</div>
         }
     </div>
 }
@@ -135,6 +171,46 @@
     <div class="alert @( _ingestSuccess ? "alert-success" : "alert-danger") mt-3">@_ingestStatus</div>
 }
 
+<hr />
+
+<h3>Uncategorized documents</h3>
+<p class="text-muted small">Documents ingested without a canonical template (Sprint 59 softened gate). Register a matching template under docs/doc-templates, then re-evaluate to promote them and generate document briefs.</p>
+<div class="mb-2">
+    <button class="btn btn-outline-primary" @onclick="LoadUncategorizedAsync">List uncategorized</button>
+    <button class="btn btn-outline-secondary" @onclick="ReevaluateAsync" disabled="@_reevaluating">
+        @(_reevaluating ? "Re-evaluating..." : "Re-evaluate all")
+    </button>
+</div>
+@if (!string.IsNullOrEmpty(_reevaluateResult))
+{
+    <div class="alert alert-success mt-2">@_reevaluateResult</div>
+}
+@if (_uncategorizedRows is not null)
+{
+    @if (_uncategorizedRows.Count == 0)
+    {
+        <p class="text-muted small mt-2">No uncategorized documents.</p>
+    }
+    else
+    {
+        <table class="table table-sm mt-2">
+            <thead>
+                <tr><th>File</th><th>Status</th><th>Template</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _uncategorizedRows)
+                {
+                    <tr>
+                        <td>@row.FileName</td>
+                        <td>@(string.IsNullOrWhiteSpace(row.TemplateStatus) ? "Not evaluated" : row.TemplateStatus)</td>
+                        <td>@(row.TemplateName ?? "-")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
 }
 
 @code {
@@ -156,6 +232,13 @@
     private string _reembedStatus = string.Empty;
     private bool _reembedSuccess;
 
+    private List<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount> _availableThemes = new();
+    private readonly HashSet<string> _selectedThemes = new(StringComparer.OrdinalIgnoreCase);
+
+    private List<Aletheia.Repository.Abstractions.Models.FileThemeRow>? _uncategorizedRows;
+    private bool _reevaluating;
+    private string _reevaluateResult = string.Empty;
+
     private bool ShowInternalSearch { get; set; }
 
     private string EmptyStateMessage =>
@@ -170,6 +253,15 @@
         {
             _mode = "semantic";
         }
+
+        // Sprint 59: restore the shared theme scope and load the theme catalog for the filter.
+        var restoredScope = await Scope.RestoreAsync();
+        foreach (var theme in restoredScope)
+        {
+            _selectedThemes.Add(theme);
+        }
+
+        _availableThemes = (await ApiClient.GetKnowledgeThemesAsync()).ToList();
 
         var query = ReadQueryParam("q");
         if (!string.IsNullOrWhiteSpace(query))
@@ -263,7 +355,8 @@
             else
             {
                 ActivityLog.Trace(activityId, "Search Center", "Semantic search", "Retrieving ranked semantic chunks.");
-                var results = await ApiClient.RagsRetrieveAsync(_query, _topK);
+                // Sprint 59: the shared theme scope filters semantic retrieval (themes -> source ids server-side).
+                var results = await ApiClient.RagsRetrieveAsync(_query, _topK, _mode == "semantic" ? _selectedThemes.ToList() : null);
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
 
@@ -383,6 +476,58 @@
         if (e.Key == "Enter")
         {
             await SearchAsync();
+        }
+    }
+
+    private async Task ToggleTheme(string theme)
+    {
+        if (!_selectedThemes.Add(theme))
+        {
+            _selectedThemes.Remove(theme);
+        }
+
+        await Scope.SetThemesAsync(_selectedThemes.ToList());
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearThemeScopeAsync()
+    {
+        _selectedThemes.Clear();
+        await Scope.SetThemesAsync(Array.Empty<string>());
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadUncategorizedAsync()
+    {
+        _uncategorizedRows = (await ApiClient.GetUncategorizedAsync()).ToList();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReevaluateAsync()
+    {
+        if (_reevaluating)
+        {
+            return;
+        }
+
+        _reevaluating = true;
+        _reevaluateResult = string.Empty;
+        try
+        {
+            var summary = await ApiClient.ReevaluateTemplatesAsync();
+            _reevaluateResult = summary is null
+                ? "Re-evaluation failed to run. Check the API logs."
+                : $"Re-evaluation complete: {summary.Evaluated} evaluated, {summary.Promoted} promoted to Canonical (briefs queued), {summary.Uncategorized} still Uncategorized.";
+            await LoadUncategorizedAsync();
+        }
+        catch (Exception ex)
+        {
+            _reevaluateResult = $"Re-evaluation failed: {ex.Message}";
+        }
+        finally
+        {
+            _reevaluating = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 }

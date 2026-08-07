@@ -5,16 +5,16 @@ namespace Repository.UnitTests.Services;
 public class IngestionDiagnosticsTests
 {
     [Fact]
-    public void Template_gate_skips_are_counted_and_recorded()
+    public void Uncategorized_ingests_are_counted_and_recorded()
     {
         var diagnostics = new IngestionDiagnostics();
 
-        diagnostics.RecordTemplateGateSkip("Q3 Report.xlsx");
-        diagnostics.RecordTemplateGateSkip("Q3 Report.xlsx");
+        diagnostics.RecordUncategorizedIngest("Q3 Report.xlsx");
+        diagnostics.RecordUncategorizedIngest("Q3 Report.xlsx");
 
-        Assert.Equal(2, diagnostics.TemplateGateSkipCount);
-        Assert.Equal(2, diagnostics.TemplateGateSkips.Count);
-        Assert.Contains("Q3 Report.xlsx", diagnostics.TemplateGateSkips);
+        Assert.Equal(2, diagnostics.UncategorizedIngestCount);
+        Assert.Equal(2, diagnostics.UncategorizedIngests.Count);
+        Assert.Contains("Q3 Report.xlsx", diagnostics.UncategorizedIngests);
         Assert.Equal(0, diagnostics.ExtractionFailureCount);
     }
 
@@ -26,21 +26,21 @@ public class IngestionDiagnosticsTests
         diagnostics.RecordExtractionFailure("broken.docx", "no text");
 
         Assert.Equal(1, diagnostics.ExtractionFailureCount);
-        Assert.Contains("broken.docx (no text)", diagnostics.TemplateGateSkips);
-        Assert.Equal(0, diagnostics.TemplateGateSkipCount);
+        Assert.Contains("broken.docx (no text)", diagnostics.UncategorizedIngests);
+        Assert.Equal(0, diagnostics.UncategorizedIngestCount);
     }
 
     [Fact]
-    public void Recent_skips_are_bounded()
+    public void Recent_ingests_are_bounded()
     {
         var diagnostics = new IngestionDiagnostics();
 
         for (var i = 0; i < 120; i++)
         {
-            diagnostics.RecordTemplateGateSkip($"doc-{i}.pdf");
+            diagnostics.RecordUncategorizedIngest($"doc-{i}.pdf");
         }
 
-        Assert.Equal(120, diagnostics.TemplateGateSkipCount);
-        Assert.True(diagnostics.TemplateGateSkips.Count <= 50);
+        Assert.Equal(120, diagnostics.UncategorizedIngestCount);
+        Assert.True(diagnostics.UncategorizedIngests.Count <= 50);
     }
 }

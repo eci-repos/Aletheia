@@ -25,7 +25,7 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
 
         var metadataRepository = new Mock<IMetadataRepository>();
         metadataRepository
-            .Setup(x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success());
 
         var service = CreateService(metadataRepository.Object);
@@ -34,27 +34,56 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
 
         Assert.True(result.IsSuccess);
         metadataRepository.Verify(
-            x => x.SetTemplateAsync(sourceId, "3.0 - RFP Analysis", "Analysis", It.IsAny<CancellationToken>()),
+            x => x.SetTemplateAsync(sourceId, "3.0 - RFP Analysis", new[] { "Analysis" }, "Canonical", It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
     [Fact]
-    public async Task EnsureIngestedAsync_does_not_persist_when_no_template_matches()
+    public async Task EnsureIngestedAsync_ingests_uncategorized_document_when_no_template_matches()
     {
-        var source = new KnowledgeSource(Guid.NewGuid(), "Q3 Financial Report.xlsx", DateTimeOffset.UtcNow);
+        var sourceId = Guid.NewGuid();
+        var source = new KnowledgeSource(sourceId, "Q3 Financial Report.xlsx", DateTimeOffset.UtcNow);
 
         var metadataRepository = new Mock<IMetadataRepository>();
+        metadataRepository
+            .Setup(x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+
         var service = CreateService(metadataRepository.Object);
 
+        // Sprint 59: the canonical gate is softened - the document is ingested as Uncategorized
+        // instead of being refused, so a new document kind is never lost.
         var result = await service.EnsureIngestedAsync(source);
 
-        Assert.True(result.IsFailure);
+        Assert.True(result.IsSuccess);
         metadataRepository.Verify(
-            x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            x => x.SetTemplateAsync(sourceId, null, null, "Uncategorized", It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
-    private static RepositoryKnowledgeSourceIngestionService CreateService(IMetadataRepository metadataRepository)
+    [Fact]
+    public async Task EnsureIngestedAsync_enqueues_brief_for_canonical_but_not_uncategorized()
+    {
+        var ingestionJobs = new Mock<IIngestionJobService>();
+        var lazyJobs = new Lazy<IIngestionJobService>(() => ingestionJobs.Object);
+
+        // Canonical document -> document brief is enqueued.
+        var canonicalSource = new KnowledgeSource(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx", DateTimeOffset.UtcNow);
+        var canonicalService = CreateService(new Mock<IMetadataRepository>().Object, lazyJobs);
+        await canonicalService.EnsureIngestedAsync(canonicalSource);
+        ingestionJobs.Verify(x => x.EnqueueDocumentBriefs(canonicalSource.SourceId, canonicalSource.SourceName), Times.Once);
+
+        // Uncategorized document -> no brief (no template sections to structure one).
+        ingestionJobs.Invocations.Clear();
+        var uncategorizedSource = new KnowledgeSource(Guid.NewGuid(), "Q3 Financial Report.xlsx", DateTimeOffset.UtcNow);
+        var uncategorizedService = CreateService(new Mock<IMetadataRepository>().Object, lazyJobs);
+        await uncategorizedService.EnsureIngestedAsync(uncategorizedSource);
+        ingestionJobs.Verify(x => x.EnqueueDocumentBriefs(It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    private static RepositoryKnowledgeSourceIngestionService CreateService(
+        IMetadataRepository metadataRepository,
+        Lazy<IIngestionJobService>? ingestionJobs = null)
     {
         var download = new Mock<IDownloadUseCase>();
         download
@@ -98,6 +127,7 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
             ragsService.Object,
             knowledgeIndexer.Object,
             templateRegistry: new DocumentTemplateRegistry(),
-            metadataRepository: metadataRepository);
+            metadataRepository: metadataRepository,
+            ingestionJobs: ingestionJobs);
     }
 }

@@ -24,7 +24,9 @@
 | **Retrieval strategy** | The path a result came from: `semantic`, `keyword`, `summary-entity`, `summary-community`. |
 | **Source** | An ingested document (identified by `source_id`, equal to the file ID). |
 | **Source scoping** | Deterministic restriction of retrieval to the document(s) named by a question (Sprint 51). |
-| **Template gate** | The ingestion rule: documents must match a canonical template or ingestion stops. |
-| **Theme filter** | Session-level restriction of Copilot retrieval to documents of selected themes (Sprint 58). |
+| **Template gate** | The canonical-template rule: a matching template unlocks the document's full experience (document brief, per-section retrieval, themes). Since Sprint 59 it is **softened** — no-match documents are still ingested as `Uncategorized` rather than refused. |
+| **Theme** | A category declared on a canonical template (first line `Theme: ...`, comma-separated for multiple). A document belongs to all its template's themes; documents with no template are `Uncategorized`. |
+| **Theme filter** | Restriction of retrieval to documents of selected themes: session-level in Copilot (Sprint 58), a shared scope on semantic search in Search Center (Sprint 59). |
+| **Template status** | `file_metadata.template_status`: `Canonical` (template matched) or `Uncategorized` (no template yet). |
 | **Wiki** | The end-user knowledge surface (document briefs + editable pages). "WRAGS" is the internal name. |
 | **WRAGS** | Internal name for Wiki Retrieval-Augmented Generation System. |

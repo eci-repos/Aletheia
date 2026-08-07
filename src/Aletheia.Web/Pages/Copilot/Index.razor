@@ -530,11 +530,12 @@
 
         try
         {
+            var consecutiveFailures = 0;
             while (!pollingToken.IsCancellationRequested)
             {
-                await RefreshProgressAsync();
+                var hasActiveExecution = await RefreshProgressAsync();
 
-                if (_progress?.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed or ChatJobStatus.Cancelled)
+                if (hasActiveExecution && _progress?.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed or ChatJobStatus.Cancelled)
                 {
                     if (_progress.Status == ChatJobStatus.Succeeded && !string.IsNullOrWhiteSpace(_progress.FinalResult))
                     {
@@ -569,6 +570,24 @@
                     break;
                 }
 
+                if (!hasActiveExecution)
+                {
+                    // No execution is reporting progress: the plan is not started yet, its job is
+                    // gone (e.g. the API container restarted and in-memory chat jobs were lost), or
+                    // the API could not be reached. Stop after a few attempts instead of polling
+                    // forever — the plan preview (or the "no active execution" panel) stays visible
+                    // so the user can act.
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= 3)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    consecutiveFailures = 0;
+                }
+
                 await Task.Delay(TimeSpan.FromSeconds(2), pollingToken).ConfigureAwait(false);
             }
         }
@@ -577,47 +596,63 @@
         }
     }
 
-    private async Task RefreshProgressAsync()
+    private async Task<bool> RefreshProgressAsync()
     {
         if (_pendingPlan is null)
         {
-            return;
+            return false;
         }
 
         var progress = await ApiClient.GetChatPlanProgressAsync(_pendingPlan.PlanId);
-        if (progress is not null)
+        if (progress is null)
         {
-            if (progress.PlanId != _pendingPlan.PlanId)
-            {
-                return;
-            }
+            return false;
+        }
 
-            _progress = progress;
-            if (progress.JobId != Guid.Empty)
-            {
-                _activeJobId = progress.JobId;
-            }
-
-            ActivityLog.UpsertChatJob(ToChatJobSnapshot(progress));
-            MirrorProgressMessagesToActivity(progress);
-
-            if (progress.Telemetry is not null)
-            {
-                _telemetry = progress.Telemetry;
-            }
-            else if (_activeJobId.HasValue && progress.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed)
-            {
-                var telemetry = await ApiClient.GetChatJobTelemetryAsync(_activeJobId.Value);
-                _telemetry = telemetry;
-            }
-            else
-            {
-                _telemetry = null;
-            }
-
+        if (progress.JobId == Guid.Empty)
+        {
+            // The plan exists but has no execution job yet (not started). Clear any stale execution
+            // state restored from a previous session and keep the plan preview visible so the user
+            // can run the plan.
+            _activeJobId = null;
+            _progress = null;
+            _telemetry = null;
             await SaveStateAsync();
             await InvokeAsync(StateHasChanged);
+            return false;
         }
+
+        if (progress.PlanId != _pendingPlan.PlanId)
+        {
+            return false;
+        }
+
+        _progress = progress;
+        if (progress.JobId != Guid.Empty)
+        {
+            _activeJobId = progress.JobId;
+        }
+
+        ActivityLog.UpsertChatJob(ToChatJobSnapshot(progress));
+        MirrorProgressMessagesToActivity(progress);
+
+        if (progress.Telemetry is not null)
+        {
+            _telemetry = progress.Telemetry;
+        }
+        else if (_activeJobId.HasValue && progress.Status is ChatJobStatus.Succeeded or ChatJobStatus.Failed)
+        {
+            var telemetry = await ApiClient.GetChatJobTelemetryAsync(_activeJobId.Value);
+            _telemetry = telemetry;
+        }
+        else
+        {
+            _telemetry = null;
+        }
+
+        await SaveStateAsync();
+        await InvokeAsync(StateHasChanged);
+        return true;
     }
 
     private async Task RestoreActiveExecutionAsync()

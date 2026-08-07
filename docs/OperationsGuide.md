@@ -130,7 +130,7 @@ curl -X POST http://localhost:8080/api/wiki/briefs/regenerate -H "Authorization:
 curl -X POST http://localhost:8080/api/wiki/briefs/regenerate -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"sourceId":"<source-id>","sourceName":"<file name>"}'
 `
 
-The response is an IngestionJobSnapshot (kind DocumentBriefs); watch progress in the Activity panel or GET /api/jobs. Documents without a canonical template are skipped (the ingestion gate already prevents them).
+The response is an IngestionJobSnapshot (kind DocumentBriefs); watch progress in the Activity panel or GET /api/jobs. Documents without a canonical template are skipped (briefs are generated only for `Canonical` documents; uncategorized rows can be promoted first via `POST /api/knowledge/reevaluate`).
 
 Internal retrieval surfaces (raw Wiki/WRAGS modes, GraphRAG, LazyGraphRAG, global-graph search) are hidden from end users by default. Set FeatureFlags:ShowInternalSearch=true (or FeatureFlags__ShowInternalSearch=true) to re-enable them for admin/diagnostics work.
 
@@ -165,12 +165,11 @@ WRAGS pages are durable generated or edited knowledge snapshots. Operators can e
 
 The Search Center's default **Semantic** mode searches the `embeddings` table (pgvector). A query that returns **zero results almost always means there are no embeddings** for the corpus: `PgVectorStore.SearchAsync` has no similarity threshold, so any embedded chunk would rank in the top-K (even a weak match). Causes and checks:
 
-1. **Ingestion job did not complete.** Open the Activity panel or `GET /api/jobs`; the `Upload` job must reach `Succeeded` ("Ready - fully ingested and searchable"). A failed job shows the reason (template gate, extraction, AI provider).
-2. **Canonical template gate.** Ingestion is stopped when the document name does not token-match a template in `docs/doc-templates` (e.g., `CMP 2026 - 3. RFP Analysis.docx` -> `3.0 - RFP Analysis`). Renamed copies are silently blocked.
-3. **No extractable text.** If extraction yields no text, ingestion marks the source "not ingestable" and writes no embeddings.
-4. **Fresh database / stack restart with a new volume** - embeddings are gone even when blobs/metadata still exist.
+1. **Ingestion job did not complete.** Open the Activity panel or `GET /api/jobs`; the `Upload` job must reach `Succeeded` ("Ready - fully ingested and searchable"). A failed job shows the reason (template, extraction, AI provider).
+2. **No extractable text.** If extraction yields no text, ingestion marks the source "not ingestable" and writes no embeddings.
+3. **Fresh database / stack restart with a new volume** - embeddings are gone even when blobs/metadata still exist.
 
-Status endpoint (Sprint 57): `GET /api/rags/status` returns `EmbeddedChunkCount`, `IngestedSourceCount`, `RegisteredDocumentCount`, `TemplateGateSkipCount`, `ExtractionFailureCount`, recent template-gate skips, and the last 10 `UploadIngestion` jobs with status/error. The Search Center uses it to tell users why a search returned nothing (empty corpus vs no match); an operator status chip is shown when `FeatureFlags:ShowInternalSearch=true`.
+Status endpoint (Sprint 57/59): `GET /api/rags/status` returns `EmbeddedChunkCount`, `IngestedSourceCount`, `RegisteredDocumentCount`, `UncategorizedIngestCount`, `ExtractionFailureCount`, recent uncategorized ingests, and the last 10 `UploadIngestion` jobs with status/error. The Search Center uses it to tell users why a search returned nothing (empty corpus vs no match); an operator status chip is shown when `FeatureFlags:ShowInternalSearch=true`.
 
 Verification query (run against PostgreSQL):
 
@@ -194,8 +193,13 @@ Example queries that should return results for an ingested RFP Analysis document
 
 ### Knowledge Theme Filtering (Sprint 58)
 
-- A Copilot session can be scoped to knowledge themes (Analysis, As-Built, As-Proposed, ...). Themes come from the canonical templates (`docs/doc-templates`, first-line `Theme: ...`) and are persisted per document at ingestion.
-- **Symptom: Copilot returns nothing for a document that exists.** Check the session header chips: if a theme is active, the document may be outside the selected themes. Remove the theme (Edit next to the chips, then "All themes") and retry.
-- **Symptom: `GET /api/knowledge/themes` shows `Uncategorized` for a document.** The document name does not match a canonical template (or its template lacks a `Theme:` line). Register/update the template and re-ingest (or run the Reembed job) to persist the theme.
-- Verify the persisted mapping: `SELECT file_name, template_name, theme FROM file_metadata ORDER BY uploaded_at DESC;`
+- A Copilot session can be scoped to knowledge themes (Analysis, As-Built, As-Proposed, ...), and Search Center has its own shared **Theme scope** (semantic search). Themes come from the canonical templates (`docs/doc-templates`, first-line `Theme: ...`, comma-separated for multiple) and are persisted per document at ingestion. A template can declare multiple themes; a document in any selected theme matches.
+- **Symptom: Copilot returns nothing for a document that exists.** Check the session header chips: if a theme is active, the document may be outside the selected themes. Remove the theme (Edit next to the chips, then "All themes") and retry. In Search Center, clear the **Theme scope** indicator if a scope is active.
+- **Symptom: `GET /api/knowledge/themes` shows `Uncategorized` for a document.** The document name does not match a canonical template (or its template lacks a `Theme:` line). Since Sprint 59 the document is still ingested and searchable (template_status = `Uncategorized`); to promote it, register/update the template, then either re-ingest (run the Reembed job) or run the re-evaluation without re-ingesting:
+  ```http
+  GET  /api/knowledge/uncategorized   # list rows awaiting a template
+  POST /api/knowledge/reevaluate      # re-resolve all (or { "sourceId": "..." } for one)
+  ```
+  Re-evaluation persists `template_name`/`theme`/`template_status` (also serving as the backfill for pre-Sprint-58 rows) and generates the document brief for rows that become `Canonical`. In the Web UI, the Search Center admin section has **List uncategorized** / **Re-evaluate all** buttons.
+- Verify the persisted mapping: `SELECT file_name, template_name, theme, template_status FROM file_metadata ORDER BY uploaded_at DESC;`
 - Themes with zero documents are still listed; selecting them simply matches nothing.

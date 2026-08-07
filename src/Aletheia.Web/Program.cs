@@ -14,6 +14,7 @@ builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<ActivityLogService>();
 builder.Services.AddScoped<CopilotStateService>();
 builder.Services.AddScoped<RecentGraphContextService>();
+builder.Services.AddScoped<SearchScopeStateService>();
 builder.Services.AddScoped<AuthenticationStateProvider, AuthService>();
 builder.Services.AddScoped<AuthService>(sp => (AuthService)sp.GetRequiredService<AuthenticationStateProvider>());
 builder.Services.AddTransient<BearerTokenHandler>();

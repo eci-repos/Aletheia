@@ -80,40 +80,55 @@
             URL.revokeObjectURL(url);
         };
 
-        window.initGraph = (containerId, nodes, edges) => {
+        window.initGraph = (containerId, nodes, edges, dotNetRef, preservePositions) => {
             const container = document.getElementById(containerId);
             if (!container) return;
             container.innerHTML = '';
             if (!window.cytoscape) {
                 renderFallbackGraph(container, nodes, edges);
+                if (dotNetRef) dotNetRef.invokeMethodAsync('OnGraphLayoutSettled');
                 return;
             }
             const visualGraph = buildGraphVisuals(nodes, edges);
+            const elements = [
+                ...visualGraph.nodes.map(n => ({
+                    data: {
+                        id: n.id,
+                        label: n.label,
+                        displayLabel: n.label,
+                        type: n.type,
+                        fillColor: n.fillColor,
+                        groupColor: n.groupColor
+                    }
+                })),
+                ...visualGraph.edges.map(e => ({
+                    data: {
+                        id: e.id,
+                        source: e.sourceId,
+                        target: e.targetId,
+                        label: e.relationshipType,
+                        displayLabel: '',
+                        edgeColor: e.edgeColor,
+                        edgeWidth: e.edgeWidth
+                    }
+                }))
+            ];
+            const layoutOpts = getGraphLayoutOptions(false);
+            if (preservePositions && window.cy) {
+                // Scope changes (context selection, chunk toggle) re-render the graph. Keep nodes
+                // where they are instead of re-randomizing, so the view does not jump around.
+                const oldPositions = {};
+                window.cy.nodes().forEach(n => { oldPositions[n.id()] = { x: n.position('x'), y: n.position('y') }; });
+                elements.forEach(el => {
+                    if (el.data && oldPositions[el.data.id]) {
+                        el.position = oldPositions[el.data.id];
+                    }
+                });
+                layoutOpts.randomize = false;
+            }
             window.cy = cytoscape({
                 container: container,
-                elements: [
-                    ...visualGraph.nodes.map(n => ({
-                        data: {
-                            id: n.id,
-                            label: n.label,
-                            displayLabel: n.label,
-                            type: n.type,
-                            fillColor: n.fillColor,
-                            groupColor: n.groupColor
-                        }
-                    })),
-                    ...visualGraph.edges.map(e => ({
-                        data: {
-                            id: e.id,
-                            source: e.sourceId,
-                            target: e.targetId,
-                            label: e.relationshipType,
-                            displayLabel: '',
-                            edgeColor: e.edgeColor,
-                            edgeWidth: e.edgeWidth
-                        }
-                    }))
-                ],
+                elements: elements,
                 style: [
                     {
                         selector: 'node',
@@ -175,9 +190,14 @@
                         }
                     }
                 ],
-                layout: getGraphLayoutOptions(false)
+                layout: layoutOpts
             });
             configureGraphLabels(window.cy);
+            if (dotNetRef) {
+                // Tell the page when the layout has settled so it can clear the "preparing graph"
+                // overlay. layoutstop fires on the graph once the layout (including animation) ends.
+                window.cy.on('layoutstop', () => dotNetRef.invokeMethodAsync('OnGraphLayoutSettled'));
+            }
         };
 
         function getGraphLayoutOptions(spread) {

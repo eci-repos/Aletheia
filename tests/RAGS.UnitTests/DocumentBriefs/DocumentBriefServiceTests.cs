@@ -132,9 +132,9 @@ public sealed class DocumentBriefServiceTests
             return fileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase) && _canonical is not null ? _canonical : null;
         }
 
-        public string? TryGetTheme(string fileName)
+        public IReadOnlyList<string>? TryGetThemes(string fileName)
         {
-            return TryGetCanonicalName(fileName) is null ? null : "Analysis";
+            return TryGetCanonicalName(fileName) is null ? null : new[] { "Analysis" };
         }
 
         public IReadOnlyList<string> ListThemes()

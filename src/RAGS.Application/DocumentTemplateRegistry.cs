@@ -8,7 +8,7 @@ namespace Aletheia.RAGS.Application;
 /// <summary>
 /// Loads document templates from <c>docs/doc-templates</c>. Each template enumerates the ordered
 /// sections (headings with a short description) that every document of that kind is expected to
-/// cover, and declares a knowledge theme on its first line (e.g. <c>Theme: Analysis</c>).
+/// cover, and declares one or more knowledge themes on its first line (e.g. <c>Theme: Analysis, As-Built</c>).
 /// </summary>
 public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
 {
@@ -18,7 +18,7 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
     private const int MaxDescriptionLength = 250;
 
     private readonly IReadOnlyDictionary<string, IReadOnlyList<DocumentTemplateSection>> _templates;
-    private readonly IReadOnlyDictionary<string, string> _themes;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _themes;
 
     public DocumentTemplateRegistry()
     {
@@ -48,7 +48,7 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
         return FindTemplateName(fileName);
     }
 
-    public string? TryGetTheme(string fileName)
+    public IReadOnlyList<string>? TryGetThemes(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName))
         {
@@ -63,11 +63,14 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var themes = new List<string>();
-        foreach (var theme in _themes.Values)
+        foreach (var themeSet in _themes.Values)
         {
-            if (seen.Add(theme))
+            foreach (var theme in themeSet)
             {
-                themes.Add(theme);
+                if (seen.Add(theme))
+                {
+                    themes.Add(theme);
+                }
             }
         }
 
@@ -132,9 +135,9 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
         return templates;
     }
 
-    private static Dictionary<string, string> LoadThemes(IEnumerable<string> templateNames)
+    private static Dictionary<string, IReadOnlyList<string>> LoadThemes(IEnumerable<string> templateNames)
     {
-        var themes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var themes = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var folder = LocateDocTemplatesFolder();
         if (folder is null)
         {
@@ -144,14 +147,14 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
         foreach (var name in templateNames)
         {
             var file = Path.Combine(folder, name + ".md");
-            var theme = File.Exists(file) ? ReadTheme(file) : null;
-            themes[name] = string.IsNullOrWhiteSpace(theme) ? Uncategorized : theme.Trim();
+            var themeSet = File.Exists(file) ? ReadThemes(file) : null;
+            themes[name] = themeSet is { Count: > 0 } ? themeSet : new List<string> { Uncategorized };
         }
 
         return themes;
     }
 
-    private static string? ReadTheme(string file)
+    private static IReadOnlyList<string>? ReadThemes(string file)
     {
         foreach (var rawLine in File.ReadLines(file))
         {
@@ -167,7 +170,22 @@ public sealed class DocumentTemplateRegistry : IDocumentTemplateRegistry
             }
 
             var match = ThemePattern.Match(line);
-            return match.Success ? match.Groups[1].Value.Trim() : null;
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            var themes = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var part in match.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!string.IsNullOrWhiteSpace(part) && seen.Add(part))
+                {
+                    themes.Add(part);
+                }
+            }
+
+            return themes;
         }
 
         return null;

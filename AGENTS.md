@@ -5,7 +5,13 @@
 - Follow documentation order: `docs/File 00-Aletheia-Charter.md`, `docs/File 01-Aletheia-WorkPlan.md`, `docs/File 02-Current-Sprint.md`, `docs/File 03-openhands.md`.
 - `docs/File 02-Current-Sprint.md` is the active implementation authority. Work on any phase, module, or capability is authorized when it is explicitly described in the current sprint file or in a sprint file referenced by the current sprint.
 - Do not force Phase 21 as a scope limit. Phase 21 remains historical context for RAGS v2/background operations, not a repository-wide gate.
-- Canonical document templates: every ingested document must match a canonical template in `docs/doc-templates` (the file name carries the clue, e.g., `CMP 2026 - 3. RFP Analysis.docx` -> `3.0 - RFP Analysis`). Ingestion stops when no canonical is found. New document kinds require a new template before documents of that kind can be ingested.
+- Canonical document templates: `docs/doc-templates/*.md` define the canonical format for a document kind; the file name carries the clue (e.g., `CMP 2026 - 3. RFP Analysis.docx` -> `3.0 - RFP Analysis`). Since Sprint 59 the ingestion gate is **softened**: a document with no matching template is ingested anyway with `template_status = Uncategorized` (no document brief), so a new document kind arriving before its template is written is never lost. Document briefs and per-section retrieval stay gated on `Canonical`. To give a document kind its full experience, add its template to `docs/doc-templates`, then promote existing uncategorized rows via `POST /api/knowledge/reevaluate`.
+
+## Documentation Maintenance (Mandatory)
+
+- Keep AGENTS.md, `docs/File 02-Current-Sprint.md`, `docs/File 03-openhands.md`, and all history/handoff/log files under `docs/` up to date with every change that advances the project. This is a standing mandate, not an optional step.
+- Whenever any work is completed, partially completed, or parked: update the current sprint file, the relevant handoff notes, and the roadmap/log files that record progress. Do not leave the documentation describing a stale state.
+- Backlog / proposed work lives under `docs/backlog/`. Keep `docs/backlog/*` current as items are promoted (move to a sprint file), dropped (delete/archive), or re-scoped (update). A backlog item is not authorized work until the current sprint promotes it.
 
 ## Wiki / Document Briefs (Sprint 55+)
 
@@ -65,6 +71,10 @@
 - Return `BadRequest(new { error = result.Error })` on failure.
 - Use `[Route("api/...")]` attribute routing.
 
+## Graph Explorer Render Contract (Sprint 59)
+- `window.initGraph(containerId, nodes, edges, dotNetRef, preservePositions)` (in `wwwroot/index.html`) renders the cytoscape graph. `preservePositions` keeps existing node positions on scope changes (`randomize: false`) so the view does not jump around; the JS hooks `layoutstop` to invoke `dotNetRef.invokeMethodAsync('OnGraphLayoutSettled')`.
+- `GraphExplorer.razor` owns a `DotNetObjectReference<GraphExplorer>` (created in `OnAfterRenderAsync` firstRender, disposed in `Dispose`) and exposes `[JSInvokable] OnGraphLayoutSettled()` which clears the `_isLoadingGraph` overlay. The page shows a spinner + staged status ("Loading graph…" → "Loading edges…" → "Rendering layout…") and disables the graph-action buttons while loading.
+
 # OpenHands Instructions
 
 Current Sprint is authoritative for active implementation scope.
@@ -81,10 +91,14 @@ Do not request clarification if Current-Sprint.md clearly identifies
 the authorized work.
 
 
-## Knowledge Theme Filtering (Sprint 58)
+## Knowledge Theme Filtering (Sprint 58) / Multi-Theme + Shared Scope (Sprint 59)
 
-- Theme = category label on a canonical template (e.g., `3.0 - RFP Analysis` -> `Analysis`). Template files in `docs/doc-templates` declare it with a first-line `Theme: <theme>`; `DocumentTemplateRegistry` exposes `TryGetTheme(fileName)` and `ListThemes()` (missing/mismatched => `Uncategorized`).
-- `file_metadata` persists `template_name` + `theme` (idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-06-file-metadata-template-theme.sql` + init.sql); ingestion writes them in `RepositoryKnowledgeSourceIngestionService`; read-time fallback derives theme from the file name when columns are null.
-- Session scoping: `ChatSession.ThemeFilter` (empty = all documents) rides `ChatPayload` -> `ChatRequestOptions` -> `ChatExecutionEngine`; the engine resolves themes to source ids (`IMetadataRepository.ListSourceIdsByThemeAsync`) and enforces them in the RAGS retrieval paths via `RetrievalRequest.SourceIds` (PgVectorStore `source_id = ANY(...)` predicate on both `SearchAsync` and `SearchKeywordAsync`). Named-document scope (Sprint 51) intersects with the theme filter; collection paths take the union of theme-matched sources.
-- `GET /api/knowledge/themes` (authenticated) returns `[{ theme, documentCount }]` for the UI picker. Web: theme picker on New chat + theme chips in the Copilot session header, persisted in `CopilotStateService` (localStorage key `aletheia.copilot.session.v2`) and sent on every chat call.
-- GraphRAG/LazyGraphRAG internals, community summaries, and Search Center / Wiki surfaces are not theme-filtered.
+- Theme = category label on a canonical template (e.g., `3.0 - RFP Analysis` -> `Analysis`). Templates in `docs/doc-templates` declare a **theme set** on the first line (`Theme: Analysis, As-Built`, comma-separated; a single value remains valid). `DocumentTemplateRegistry` exposes `TryGetThemes(fileName)` -> `IReadOnlyList<string>?` and `ListThemes()` (flattened, distinct; missing/mismatched => `Uncategorized`).
+- `file_metadata` persists `template_name` + `theme` (`text[]`) + `template_status` (`Canonical`/`Uncategorized`) — idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-07-file-metadata-template-status-themes.sql` (casts existing TEXT `theme` to `text[]`, GIN index) + init.sql. Ingestion writes them in `RepositoryKnowledgeSourceIngestionService`; `SetTemplateAsync` persists all three. Read-time fallback derives the theme set from the file name via the registry, but only as a safety net — persisted values win.
+- Theme resolution: `IKnowledgeThemeService.ResolveSourceIdsAsync(IReadOnlyList<string> themes)` (singleton) matches a row when **any** of its themes is in the requested set; `GetThemesWithCountsAsync` counts a document in **each** of its themes. Used by Copilot (session filter) and Search Center (shared scope).
+- Session scoping (Copilot): `ChatSession.ThemeFilter` (empty = all documents) rides `ChatPayload` -> `ChatRequestOptions` -> `ChatExecutionEngine`; the engine resolves themes to source ids via `ResolveSourceIdsAsync` and enforces them in the RAGS retrieval paths via `RetrievalRequest.SourceIds` (PgVectorStore `source_id = ANY(...)` predicate on both `SearchAsync` and `SearchKeywordAsync`). Named-document scope (Sprint 51) intersects with the theme filter; collection paths take the union of theme-matched sources.
+- Shared scope (Search Center): `SearchScopeStateService` (scoped, localStorage `aletheia.search.scope.v1`) holds a shared theme selection (empty = all). Search Center applies it to **semantic** search via `GET /api/rags/retrieve?themes=` (controller resolves -> `RetrievalRequest.SourceIds`) with a visible "Scoped to N themes" indicator. Copilot keeps its session-scoped filter; Wiki stays curated; graph modes are not theme-filtered.
+- Uncategorized admin surface: `GET /api/knowledge/uncategorized` lists non-Canonical rows; `POST /api/knowledge/reevaluate` re-resolves the template for one or all (backfill + promotion), persists `template_name`/`theme`/`template_status`, and enqueues a document brief for rows that become `Canonical`. `TemplateReevaluationService` (singleton) implements it.
+- `GET /api/knowledge/themes` (authenticated) returns `[{ theme, documentCount }]` for the UI pickers. Web: theme chips in Copilot session header persisted in `CopilotStateService` (localStorage `aletheia.copilot.session.v2`); theme filter chips in Search Center persisted in `SearchScopeStateService`.
+- `GET /api/rags/status` diagnostics report uncategorized ingests (`UncategorizedIngestCount`/`UncategorizedIngests`) so operators can see documents awaiting a template.
+- Copilot plan-progress contract: `GET /api/copilot/plans/{planId}/progress` returns **200 with `JobId == Guid.Empty`** when the plan exists but has no execution job yet (the normal "waiting for approval" state); "plan not found" is a 404. The Web polling loop (`Index.razor` `StartProgressPollingAsync`/`RefreshProgressAsync`) treats empty `JobId` as "not started" — it clears stale restored execution state, keeps the plan preview, and stops polling after 3 consecutive no-progress polls. Chat plans and execution jobs are both in-memory (`InMemoryChatPlanRepository`, `InMemoryChatProgressStore`), so a container restart invalidates any browser-restored plan/job; the client must fall back to the plan preview instead of polling forever.

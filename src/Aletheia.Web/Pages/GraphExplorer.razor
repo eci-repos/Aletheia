@@ -17,13 +17,13 @@
         </div>
 
         <div class="graph-actions">
-            <button class="btn btn-outline-primary" @onclick="ImportGraphAsync" disabled="@_importing">
+            <button class="btn btn-outline-primary" @onclick="ImportGraphAsync" disabled="@(_importing || _isLoadingGraph)">
                 @(_importing ? "Importing..." : "Import from Ontology")
             </button>
-            <button class="btn btn-outline-secondary" @onclick="LoadGraphAsync">Refresh Graph</button>
-            <button class="btn btn-outline-secondary" title="Fit graph to window" @onclick="FitGraphAsync">Fit</button>
-            <button class="btn btn-outline-secondary" title="Run layout again" @onclick="RelayoutGraphAsync">Re-layout</button>
-            <button class="btn btn-outline-secondary" title="Spread nodes farther apart" @onclick="SpreadGraphAsync">Spread</button>
+            <button class="btn btn-outline-secondary" @onclick="LoadGraphAsync" disabled="@_isLoadingGraph">Refresh Graph</button>
+            <button class="btn btn-outline-secondary" title="Fit graph to window" @onclick="FitGraphAsync" disabled="@_isLoadingGraph">Fit</button>
+            <button class="btn btn-outline-secondary" title="Run layout again" @onclick="RelayoutGraphAsync" disabled="@_isLoadingGraph">Re-layout</button>
+            <button class="btn btn-outline-secondary" title="Spread nodes farther apart" @onclick="SpreadGraphAsync" disabled="@_isLoadingGraph">Spread</button>
         </div>
 
         <div class="path-finder">
@@ -51,7 +51,7 @@
                 }
             </select>
 
-            <button class="btn btn-primary" @onclick="FindPathAsync">Find Path</button>
+            <button class="btn btn-primary" @onclick="FindPathAsync" disabled="@_isLoadingGraph">Find Path</button>
         </div>
     </div>
 
@@ -80,6 +80,13 @@
     <div class="graph-main">
         <div class="graph-canvas">
             <div id="graph-container"></div>
+            @if (_isLoadingGraph)
+            {
+                <div class="graph-loading-overlay" role="status" aria-live="polite">
+                    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <span>@_graphStatus</span>
+                </div>
+            }
         </div>
 
         <aside class="graph-context-panel">
@@ -148,11 +155,16 @@
     private string _pathTo = string.Empty;
     private List<GraphPath>? _pathResult;
     private bool _renderGraphAfterRender;
+    private bool _isLoadingGraph;
+    private string _graphStatus = string.Empty;
+    private bool _graphRendered;
+    private DotNetObjectReference<GraphExplorer>? _dotNetRef;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
+            _dotNetRef = DotNetObjectReference.Create(this);
             await LoadRecentContextAsync(render: false);
             await LoadGraphAsync();
         }
@@ -160,34 +172,66 @@
         if (_renderGraphAfterRender && _nodes is not null && _edges is not null)
         {
             _renderGraphAfterRender = false;
-            await JS.InvokeVoidAsync("initGraph", "graph-container", _nodes, _edges);
+            await JS.InvokeVoidAsync("initGraph", "graph-container", _nodes, _edges, _dotNetRef, _graphRendered);
+            _graphRendered = true;
         }
     }
 
     private async Task LoadGraphAsync()
     {
+        _isLoadingGraph = true;
+        _graphStatus = "Loading graph…";
         _statusMessage = string.Empty;
-        _allNodes = await ApiClient.GraphGetNodesAsync();
-        _allEdges = await ApiClient.GraphGetEdgesAsync();
+        StateHasChanged();
 
-        if (_allNodes is null || _allEdges is null)
+        try
         {
-            _nodes = null;
-            _edges = null;
+            _allNodes = await ApiClient.GraphGetNodesAsync();
+            _graphStatus = "Loading edges…";
+            StateHasChanged();
+            _allEdges = await ApiClient.GraphGetEdgesAsync();
+
+            if (_allNodes is null || _allEdges is null)
+            {
+                _nodes = null;
+                _edges = null;
+                _statusSuccess = false;
+                _statusMessage = "Graph load failed. Refresh the graph or check the API response.";
+                _isLoadingGraph = false;
+                StateHasChanged();
+                return;
+            }
+
+            if (_allNodes.Count == 0)
+            {
+                _statusSuccess = true;
+                _statusMessage = "Graph is empty. Import from Ontology to populate it.";
+            }
+
+            ApplyGraphScope();
+            _graphStatus = "Rendering layout…";
+            StateHasChanged();
+        }
+        catch
+        {
             _statusSuccess = false;
             _statusMessage = "Graph load failed. Refresh the graph or check the API response.";
+            _isLoadingGraph = false;
             StateHasChanged();
-            return;
         }
+    }
 
-        if (_allNodes.Count == 0)
-        {
-            _statusSuccess = true;
-            _statusMessage = "Graph is empty. Import from Ontology to populate it.";
-        }
+    [JSInvokable]
+    public Task OnGraphLayoutSettled()
+    {
+        _isLoadingGraph = false;
+        _graphStatus = string.Empty;
+        return InvokeAsync(StateHasChanged);
+    }
 
-        ApplyGraphScope();
-        StateHasChanged();
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
     }
 
     private async Task ImportGraphAsync()

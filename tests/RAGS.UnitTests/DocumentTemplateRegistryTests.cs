@@ -72,20 +72,22 @@ public sealed class DocumentTemplateRegistryTests
     }
 
     [Fact]
-    public void TryGetTheme_returns_template_theme()
+    public void TryGetThemes_returns_template_themes()
     {
         var registry = new DocumentTemplateRegistry();
 
-        Assert.Equal("Analysis", registry.TryGetTheme("CMP 2026 - 3. RFP Analysis.docx"));
-        Assert.Equal("Analysis", registry.TryGetTheme("CMP 2022 - 3. RFP Analysis.docx"));
+        var themes = registry.TryGetThemes("CMP 2026 - 3. RFP Analysis.docx");
+
+        Assert.NotNull(themes);
+        Assert.Contains("Analysis", themes);
     }
 
     [Fact]
-    public void TryGetTheme_returns_null_for_unmatched_document()
+    public void TryGetThemes_returns_null_for_unmatched_document()
     {
         var registry = new DocumentTemplateRegistry();
 
-        Assert.Null(registry.TryGetTheme("Q3 Financial Report.xlsx"));
+        Assert.Null(registry.TryGetThemes("Q3 Financial Report.xlsx"));
     }
 
     [Fact]

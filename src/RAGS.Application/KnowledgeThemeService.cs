@@ -18,6 +18,9 @@ public sealed class KnowledgeThemeService : IKnowledgeThemeService
 {
     public const string Uncategorized = "Uncategorized";
 
+    /// <summary>Template status for documents that matched a canonical template at ingestion.</summary>
+    public const string Canonical = "Canonical";
+
     private readonly IMetadataRepository? _metadataRepository;
     private readonly IDocumentTemplateRegistry? _templateRegistry;
     private readonly ILogger<KnowledgeThemeService> _logger;
@@ -52,8 +55,8 @@ public sealed class KnowledgeThemeService : IKnowledgeThemeService
         var seen = new HashSet<Guid>();
         foreach (var row in rows)
         {
-            var theme = ResolveTheme(row);
-            if (requested.Contains(theme) && seen.Add(row.FileId))
+            // Multi-theme: a document matches when any of its themes is in the requested set.
+            if (seen.Add(row.FileId) && ResolveThemes(row).Any(requested.Contains))
             {
                 sourceIds.Add(row.FileId);
             }
@@ -79,8 +82,11 @@ public sealed class KnowledgeThemeService : IKnowledgeThemeService
                     continue;
                 }
 
-                var theme = ResolveTheme(row);
-                counts[theme] = counts.GetValueOrDefault(theme) + 1;
+                // Multi-theme: a document counts in each of its themes.
+                foreach (var theme in ResolveThemes(row))
+                {
+                    counts[theme] = counts.GetValueOrDefault(theme) + 1;
+                }
             }
         }
 
@@ -122,14 +128,15 @@ public sealed class KnowledgeThemeService : IKnowledgeThemeService
         return result.IsSuccess ? result.Value : null;
     }
 
-    private string ResolveTheme(FileThemeRow row)
+    private IReadOnlyList<string> ResolveThemes(FileThemeRow row)
     {
-        if (!string.IsNullOrWhiteSpace(row.Theme))
+        if (row.Theme is { Count: > 0 })
         {
-            return row.Theme!;
+            return row.Theme;
         }
 
-        var derived = _templateRegistry?.TryGetTheme(row.FileName);
-        return string.IsNullOrWhiteSpace(derived) ? Uncategorized : derived!;
+        // Read-time fallback (safety net): derive the theme set from the file name via the registry.
+        var derived = _templateRegistry?.TryGetThemes(row.FileName);
+        return derived is { Count: > 0 } ? derived : new List<string> { Uncategorized };
     }
 }

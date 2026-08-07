@@ -13,7 +13,8 @@ public sealed class FileMetadata
         AuditInfo? auditInfo = null,
         string? contentHash = null,
         string? templateName = null,
-        string? theme = null)
+        IReadOnlyList<string>? theme = null,
+        string? templateStatus = null)
     {
         Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
 
@@ -34,7 +35,8 @@ public sealed class FileMetadata
         AuditInfo = auditInfo;
         ContentHash = string.IsNullOrWhiteSpace(contentHash) ? null : contentHash;
         TemplateName = string.IsNullOrWhiteSpace(templateName) ? null : templateName;
-        Theme = string.IsNullOrWhiteSpace(theme) ? null : theme;
+        Theme = NormalizeThemes(theme);
+        TemplateStatus = string.IsNullOrWhiteSpace(templateStatus) ? null : templateStatus;
     }
 
     public FileDescriptor Descriptor { get; }
@@ -55,6 +57,24 @@ public sealed class FileMetadata
     /// <summary>Canonical template name resolved at ingestion (docs/doc-templates). Null for pre-Sprint-58 rows.</summary>
     public string? TemplateName { get; }
 
-    /// <summary>Knowledge theme of the canonical template (e.g. Analysis, As-Built, As-Proposed). Null for pre-Sprint-58 rows.</summary>
-    public string? Theme { get; }
+    /// <summary>Knowledge themes of the canonical template (e.g. Analysis, As-Built, As-Proposed). Null for pre-Sprint-58 rows.</summary>
+    public IReadOnlyList<string>? Theme { get; }
+
+    /// <summary>Canonical template status (Canonical / Uncategorized). Null for pre-Sprint-59 rows awaiting re-evaluation.</summary>
+    public string? TemplateStatus { get; }
+
+    private static IReadOnlyList<string>? NormalizeThemes(IReadOnlyList<string>? theme)
+    {
+        if (theme is null || theme.Count == 0)
+        {
+            return null;
+        }
+
+        var normalized = theme
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return normalized.Count == 0 ? null : normalized;
+    }
 }

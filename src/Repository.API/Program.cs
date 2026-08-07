@@ -118,6 +118,7 @@ builder.Services.AddSingleton<IVectorStore>(sp =>
 });
 builder.Services.AddSingleton<IRagsService, RagsService>();
 builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IKnowledgeThemeService, Aletheia.RAGS.Application.KnowledgeThemeService>();
+builder.Services.AddSingleton<Aletheia.Repository.API.Services.TemplateReevaluationService>();
 builder.Services.AddHostedService(sp =>
 {
     var connectionFactory = sp.GetRequiredService<PostgreSqlConnectionFactory>();

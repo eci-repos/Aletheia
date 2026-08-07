@@ -14,9 +14,9 @@ public sealed record RagsStatusSnapshot(
     int EmbeddedChunkCount,
     int IngestedSourceCount,
     int RegisteredDocumentCount,
-    long TemplateGateSkipCount,
+    long UncategorizedIngestCount,
     long ExtractionFailureCount,
-    IReadOnlyList<string> TemplateGateSkips,
+    IReadOnlyList<string> UncategorizedIngests,
     IReadOnlyList<UploadJobSummary> RecentUploadJobs);
 
 public sealed record UploadJobSummary(
@@ -85,9 +85,9 @@ public sealed class RagsStatusService : IRagsStatusService
                 chunkCount,
                 sourceCount,
                 documentCount,
-                _diagnostics.TemplateGateSkipCount,
+                _diagnostics.UncategorizedIngestCount,
                 _diagnostics.ExtractionFailureCount,
-                _diagnostics.TemplateGateSkips,
+                _diagnostics.UncategorizedIngests,
                 recentUploadJobs);
 
             return Result<RagsStatusSnapshot>.Success(snapshot);

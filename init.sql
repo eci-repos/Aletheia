@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     tags JSONB NOT NULL DEFAULT '{}',
     content_hash TEXT,
     template_name TEXT,
-    theme TEXT,
+    theme TEXT[],
+    template_status TEXT,
     created_at TIMESTAMPTZ,
     created_by_id TEXT,
     created_by_type TEXT,
@@ -29,7 +30,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_file_metadata_unique_version ON file_metad
 CREATE INDEX IF NOT EXISTS idx_file_metadata_file_id ON file_metadata(file_id);
 CREATE INDEX IF NOT EXISTS idx_file_metadata_file_name ON file_metadata USING gin(to_tsvector('simple', file_name));
 CREATE INDEX IF NOT EXISTS idx_file_metadata_content_hash ON file_metadata(content_hash);
-CREATE INDEX IF NOT EXISTS idx_file_metadata_theme ON file_metadata(theme);
+CREATE INDEX IF NOT EXISTS idx_file_metadata_theme ON file_metadata USING GIN (theme);
+CREATE INDEX IF NOT EXISTS idx_file_metadata_template_status ON file_metadata(template_status);
 
 CREATE TABLE IF NOT EXISTS security_users (
     user_id TEXT PRIMARY KEY,

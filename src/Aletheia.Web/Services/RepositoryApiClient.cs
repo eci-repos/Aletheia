@@ -188,9 +188,15 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<SearchResult>?> RagsRetrieveAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SearchResult>?> RagsRetrieveAsync(string query, int topK = 5, IReadOnlyList<string>? themes = null, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"/api/rags/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}", cancellationToken).ConfigureAwait(false);
+        var url = $"/api/rags/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}";
+        if (themes is { Count: > 0 })
+        {
+            url += $"&themes={Uri.EscapeDataString(string.Join(",", themes))}";
+        }
+
+        var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(await BuildApiFailureAsync(
@@ -712,7 +718,7 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<ChatExecutionTelemetry>(cancellationToken).ConfigureAwait(false);
     }
 
-    // Knowledge themes (Sprint 58)
+    // Knowledge themes (Sprint 58/59)
     public async Task<IReadOnlyList<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>> GetKnowledgeThemesAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -729,6 +735,43 @@ public sealed class RepositoryApiClient
         catch
         {
             return Array.Empty<Aletheia.RAGS.Abstractions.Models.KnowledgeThemeCount>();
+        }
+    }
+
+    public async Task<IReadOnlyList<Aletheia.Repository.Abstractions.Models.FileThemeRow>> GetUncategorizedAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("/api/knowledge/uncategorized", cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return Array.Empty<Aletheia.Repository.Abstractions.Models.FileThemeRow>();
+            }
+
+            return await response.Content.ReadFromJsonAsync<IReadOnlyList<Aletheia.Repository.Abstractions.Models.FileThemeRow>>(cancellationToken).ConfigureAwait(false)
+                ?? Array.Empty<Aletheia.Repository.Abstractions.Models.FileThemeRow>();
+        }
+        catch
+        {
+            return Array.Empty<Aletheia.Repository.Abstractions.Models.FileThemeRow>();
+        }
+    }
+
+    public async Task<TemplateReevaluationClientSummary?> ReevaluateTemplatesAsync(Guid? sourceId = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("/api/knowledge/reevaluate", new { SourceId = sourceId }, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content.ReadFromJsonAsync<TemplateReevaluationClientSummary>(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -1072,10 +1115,12 @@ public sealed record RagsStatusClientSnapshot(
     int EmbeddedChunkCount,
     int IngestedSourceCount,
     int RegisteredDocumentCount,
-    long TemplateGateSkipCount,
+    long UncategorizedIngestCount,
     long ExtractionFailureCount,
-    IReadOnlyList<string> TemplateGateSkips,
+    IReadOnlyList<string> UncategorizedIngests,
     IReadOnlyList<RagsUploadJobClientSummary> RecentUploadJobs);
+
+public sealed record TemplateReevaluationClientSummary(int Evaluated, int Promoted, int Uncategorized);
 
 public sealed record RagsUploadJobClientSummary(
     Guid JobId,

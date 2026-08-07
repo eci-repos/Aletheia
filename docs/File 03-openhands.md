@@ -36,7 +36,7 @@ Always:
 - Keep the solution compiling
 - Write or update tests appropriate to the sprint
 - Update documentation and handoff notes
-- Match every ingested document to a canonical template in `docs/doc-templates` (the ingestion gate enforces this); when introducing a new document kind, add its template first
+- Match every ingested document to a canonical template in `docs/doc-templates` when one exists; since Sprint 59 the gate is softened, so a document with no matching template is ingested anyway with `template_status = Uncategorized` (no document brief) — add its template first for the full experience, then promote existing rows via `POST /api/knowledge/reevaluate`
 
 Never:
 
@@ -200,3 +200,31 @@ Implementation status (2026-08-05):
 
 - D1-D4 implemented: theme metadata on templates (`Theme: Analysis` + registry `TryGetTheme`/`ListThemes`), `file_metadata.template_name`/`theme` persistence (migration 2026-08-06), `RetrievalRequest.SourceIds` + PgVectorStore set predicates, `KnowledgeThemeService` singleton + `GET /api/knowledge/themes`, theme filter through `ChatSession` -> `ChatPayload`/`PlanPayload` -> `ChatRequestOptions`/`ChatPlanRecord` (preserved through approval), engine enforcement (RAGS paths + Sprint 51 intersection + tool-result post-filter), Web picker + header chips (session storage v2).
 - D5: RAGS 249 / Repository 113 / Foundation 55 green; Web CoreCompile 0 errors. Remaining: Docker smoke test + commit.
+
+# Sprint 59 Notes (Canonical Gate Softening, Multi-Theme, Shared Theme Scope)
+
+- Active sprint: `docs/sprints/Sprint-59 - Canonical Gate Softening, Multi-Theme, and Shared Theme Scope.md` (created 2026-08-07). Sprint 58 complete/committed/pushed (HEAD `4fdfaf0`).
+- **Softer gate**: `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` no longer stops when no canonical template matches. It persists `template_status = Uncategorized` (template_name/theme null) and continues ingestion (download, extract, RAGS, knowledge index, graph seed). Document briefs enqueued only for `Canonical` documents. Content-quality gates unchanged.
+- **template_status** column (`Canonical`/`Uncategorized`; null = pre-Sprint-59 row). Backlog's `PendingTemplate` folded into `Uncategorized`.
+- **Multi-theme**: `Theme: Analysis, As-Built` (comma-separated); `IDocumentTemplateRegistry.TryGetTheme` -> `TryGetThemes(string fileName) -> IReadOnlyList<string>?`; `file_metadata.theme` is `text[]` with a GIN index (migration 2026-08-07 casts existing TEXT). `KnowledgeThemeService.ResolveSourceIdsAsync` matches ANY theme; `GetThemesWithCountsAsync` counts a doc in each theme. Read-time fallback demoted to safety net.
+- **Backfill/promotion**: `TemplateReevaluationService` (singleton) — `GET /api/knowledge/uncategorized` lists non-Canonical rows; `POST /api/knowledge/reevaluate` re-resolves template for one or all, persists template_name/theme/template_status, enqueues brief on promotion; returns summary (evaluated/promoted/uncategorized).
+- **Shared scope (Phase 1)**: `SearchScopeStateService` (scoped, localStorage `aletheia.search.scope.v1`); Search Center theme filter chips applied to semantic search only (`GET /api/rags/retrieve?themes=`) with "Scoped to N themes" indicator; Copilot keeps session-scoped filter; Wiki curated. Backlog item 5 (theme-aware graph retrieval) parked.
+- Diagnostics repurposed: `UncategorizedIngestCount`/`UncategorizedIngests` replace template-gate-skip counters in `GET /api/rags/status`.
+
+### Sprint 59 Implementation Status (2026-08-07)
+
+- Deliverables 1-4 implemented (see above): migration + init.sql, models (`FileMetadata.Theme` -> `IReadOnlyList<string>?`, `TemplateStatus`), `PostgreSqlMetadataRepository` text[] mapping + `ListUncategorizedAsync`, `DocumentTemplateRegistry.TryGetThemes`, `KnowledgeThemeService` match-any/per-theme counts, softened ingestion gate, `IngestionDiagnostics` rename, `TemplateReevaluationService`, `KnowledgeController` uncategorized + reevaluate, `RagsController` `?themes=`, `SearchScopeStateService`, SearchCenter theme scope + admin panel, `RepositoryApiClient` themes/uncategorized/reevaluate.
+- Tests: RAGS 251 / Repository 121 / Foundation 55 green; `dotnet build Aletheia.slnx` succeeds. Aletheia.Web.UnitTests 33/39 — 6 failures are **pre-existing** (verified identical on clean `4fdfaf0` via git stash; unrelated files: `RepositoryApiClientUploadTests` x4, Copilot page/state tests), tracked for a separate fix.
+- Remaining: optional Docker smoke test.
+
+### Sprint 59 post-implementation chat fix (2026-08-07)
+
+- **Bug**: "Chat does not work at all" during smoke test. The Web page, after a reload, restored a pending plan from browser state and polled `GET /api/copilot/plans/{planId}/progress`; the API returned **404** for a plan with no execution job yet, so `StartProgressPollingAsync` polled every 2s forever (nine 404s observed in ~30s). Container restarts made it worse: in-memory plans (`InMemoryChatPlanRepository`) and chat jobs are lost, so restored browser state referenced dead plans.
+- **Fix**: API `GetPlanProgress` now returns **200 with `JobId = Guid.Empty`** (not-started, status Queued) when the plan exists but has no execution job; true "plan not found" remains 404. Web `Index.razor` `RefreshProgressAsync` treats empty `JobId` as "not started" — clears stale restored `_activeJobId`/`_progress`/`_telemetry`, keeps the plan preview so the user can click Run — and `StartProgressPollingAsync` stops after **3 consecutive** no-progress polls instead of looping.
+- Verified: build ok; RAGS 251 / Repository 121 / Foundation 55 green; Web.UnitTests unchanged (6 pre-existing). End-to-end curl: plan -> progress-before-execute 200/empty jobId -> approve -> execute -> job completes. Containers rebuilt. **User must hard-refresh (Ctrl+F5)** to load the new WASM bundle.
+
+### Sprint 59 post-implementation graph UX fix (2026-08-07)
+
+- **Bug**: Graph Explorer "jumps around" while the `cose` layout runs and gives no feedback; users press buttons and think it is running wild.
+- **Fix**: (1) `GraphExplorer.razor` shows a spinner + staged status line over the canvas ("Loading graph…" → "Loading edges…" → "Rendering layout…") and disables Refresh/Import/Fit/Re-layout/Spread/Find Path while loading; (2) `window.initGraph` gained `dotNetRef` + `preservePositions` params — scope changes keep existing node positions (`randomize: false`) instead of re-randomizing, and `layoutstop` invokes the page's `[JSInvokable] OnGraphLayoutSettled()` to clear the overlay. The page owns a `DotNetObjectReference<GraphExplorer>` (disposed in `Dispose`).
+- Contract: `initGraph(containerId, nodes, edges, dotNetRef, preservePositions)`; `OnGraphLayoutSettled` clears the loading state. Web project builds clean.

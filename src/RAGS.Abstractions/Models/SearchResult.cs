@@ -29,4 +29,9 @@ public sealed class SearchResult
     public string RetrievalStrategy { get; }
 
     public int Rank { get; }
+
+    /// <summary>
+    /// Per-query diagnostic trace (GraphRAG / LazyGraphRAG). Null for plain semantic retrieval.
+    /// </summary>
+    public RetrievalTrace? Trace { get; set; }
 }

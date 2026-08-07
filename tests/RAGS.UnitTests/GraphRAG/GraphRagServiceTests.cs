@@ -183,6 +183,46 @@ public sealed class GraphRagServiceTests
         Assert.True(result.IsFailure);
     }
 
+    [Fact]
+    public async Task IngestAsync_does_not_persist_keyword_noise_entities()
+    {
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            entityExtraction: new NoiseEntityExtractionService());
+
+        var result = await service.IngestAsync(new IngestionRequest(
+            Guid.NewGuid(),
+            $"{new string('a', 1100)} alpha Bravo. {new string('b', 1100)}"));
+
+        Assert.True(result.IsSuccess);
+        Assert.DoesNotContain(graphProvider.NodesCreated, n =>
+            n.Type.Equals("keyword", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(graphProvider.NodesCreated, n =>
+            n.Type.Equals("project", StringComparison.OrdinalIgnoreCase) && n.Label == "Bravo");
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_populates_retrieval_trace()
+    {
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var service = CreateService(ragsService, graphProvider);
+
+        var result = await service.RetrieveAsync("query", topK: 2);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotEmpty(result.Value!);
+        var first = result.Value!.First();
+        Assert.NotNull(first.Trace);
+        Assert.False(string.IsNullOrEmpty(first.Trace!.Strategy));
+        Assert.NotEmpty(first.Trace.Steps);
+        Assert.True(first.Trace.ElapsedMs >= 0);
+        Assert.Contains("entity-resolution", first.Trace.Steps);
+    }
+
     private static GraphRagService CreateService(
         IRagsService ragsService,
         IGraphProvider graphProvider,
@@ -208,7 +248,7 @@ public sealed class GraphRagServiceTests
 
     private sealed class ChunkEntityExtractionService : IEntityExtractionService
     {
-        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
         {
             IReadOnlyList<ExtractedEntity> entities = new[]
             {
@@ -264,9 +304,33 @@ public sealed class GraphRagServiceTests
 
     private sealed class MockEntityExtractionService : IEntityExtractionService
     {
-        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(Array.Empty<ExtractedEntity>()));
+        }
+
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> ClassifyAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(entities));
+        }
+
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> ScoreConfidenceAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(entities));
+        }
+    }
+
+    private sealed class NoiseEntityExtractionService : IEntityExtractionService
+    {
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<ExtractedEntity> entities = new[]
+            {
+                new ExtractedEntity { Name = "alpha", Type = "keyword", Confidence = 0.5 },
+                new ExtractedEntity { Name = "Bravo", Type = "project", Confidence = 0.9 }
+            };
+
+            return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(entities));
         }
 
         public Task<Result<IReadOnlyList<ExtractedEntity>>> ClassifyAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default)

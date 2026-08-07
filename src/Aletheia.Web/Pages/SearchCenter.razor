@@ -126,6 +126,25 @@
                     {
                         <div class="small text-muted mb-2">Final rank score: @finalScore.ToString("P2")</div>
                     }
+                    @if (result.Trace is not null)
+                    {
+                        <div class="small text-muted mb-2 p-2 border rounded bg-light">
+                            <strong>Retrieval trace:</strong> strategy @result.Trace.Strategy ·
+                            @result.Trace.LlmCalls LLM calls ·
+                            @result.Trace.TokensConsumed tokens ·
+                            @result.Trace.NodesVisited nodes ·
+                            @result.Trace.RelationshipsTraversed relationships
+                            @if (result.Trace.PruningRatio is not null)
+                            {
+                                <text> · pruning retained @result.Trace.PruningRatio.Value.ToString("P0")</text>
+                            }
+                            · @result.Trace.ElapsedMs ms
+                            @if (result.Trace.Steps.Count > 0)
+                            {
+                                <div>Steps: @string.Join(" → ", result.Trace.Steps)</div>
+                            }
+                        </div>
+                    }
                     <small class="text-muted">Chunk @result.Chunk.Index from source @result.Chunk.SourceId</small>
                 </div>
             </div>

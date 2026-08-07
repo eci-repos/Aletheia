@@ -37,3 +37,11 @@
 - Every template file declares its knowledge theme **set** on the **first line**: `Theme: <Theme>` (e.g. `Theme: Analysis`, or `Theme: Analysis, As-Built` for multiple). Missing or unknown themes resolve to `Uncategorized`. `file_metadata.theme` is a `text[]` set; a document in multiple themes is matched by any and counted in each.
 - Themes drive the knowledge filter: the end-user picks themes in Copilot (session-level, Sprint 58) and in Search Center (shared scope on semantic search, Sprint 59). New document kinds still require a template (and themes) for the full experience, but can be ingested as `Uncategorized` first and promoted later via `POST /api/knowledge/reevaluate`.
 - When adding a new document kind: write its template under `docs/doc-templates`, upload a document of that kind, then run re-evaluation (Search Center admin panel or the API) to promote existing uncategorized rows and generate their document briefs.
+
+## GraphRAG / LazyGraphRAG (Sprint 60)
+
+- **Traversal budgets are per-request** — never register a shared `IGraphTraversalBudget` singleton. `LazyGraphRagService` holds a template and calls `CreatePerRequest()` inside `RetrieveAsync`; `GraphRagService` constructs one inline. Guard shared mutable state (e.g. `_indexedSources`) with a lock.
+- **Token accounting** records real SemanticKernel usage via `TokenUsageHelper.GetTotalTokens(ChatMessageContent?)` (reads `Metadata`). `GraphTraversalBudget.RecordTokens` records actual consumption even when it breaches the budget and returns `updated <= MaxTokenBudget` — do not "cap and ignore", or the token budget silently stops firing `IsExceeded()`.
+- **Hard deadline**: every `RetrieveAsync` should flow a linked `CancellationTokenSource.CancelAfter(MaxExecutionTime)` token through all LLM/traversal calls.
+- **Noise entities**: never persist `keyword` / `statistical-candidate` entities to the graph — filter with `NoiseEntityFilter.IsNoise` before persistence.
+- **Retrieval trace**: populate `SearchResult.Trace` (`RetrievalTrace`) with the fired strategy, LLM calls, tokens, traversed nodes/relationships, pruning ratio, elapsed ms, and step labels. The Web Search Center renders it on each GraphRAG / LazyGraphRAG result card; keep the addition non-breaking.

@@ -126,6 +126,70 @@ public sealed class LazyGraphRagServiceTests
         Assert.NotEmpty(result.Value!);
     }
 
+    [Fact]
+    public async Task RetrieveAsync_uses_a_per_request_budget_and_does_not_mutate_the_template()
+    {
+        var ragsService = new MockRagsService();
+        var lazyRelationships = new CountingLazyRelationshipDiscoveryService();
+        var template = new GraphTraversalBudget(maxLLMCalls: 30, maxDepth: 2, maxNodes: 100, maxRelationships: 100);
+        var service = CreateService(
+            ragsService,
+            budget: template,
+            lazyRelationshipDiscovery: lazyRelationships);
+
+        await service.IngestAsync(new IngestionRequest(
+            Guid.NewGuid(),
+            "alpha beta launch roadmap alpha beta governance"));
+
+        var result = await service.RetrieveAsync("alpha beta launch", topK: 2);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(lazyRelationships.DiscoverCalls > 0);
+        // The template budget itself must never be mutated: each request works on its own copy.
+        Assert.Equal(0, template.LlmCalls);
+        Assert.Equal(0, template.NodesVisited);
+        Assert.Equal(0, template.RelationshipsTraversed);
+        Assert.Equal(0, template.TokensConsumed);
+    }
+
+    [Fact]
+    public async Task Concurrent_retrievals_do_not_corrupt_each_other_budgets()
+    {
+        var ragsService = new MockRagsService();
+        var lazyRelationships = new CountingLazyRelationshipDiscoveryService();
+        var template = new GraphTraversalBudget();
+        var service = CreateService(ragsService, budget: template, lazyRelationshipDiscovery: lazyRelationships);
+
+        var tasks = Enumerable.Range(0, 5)
+            .Select(_ => service.RetrieveAsync("alpha beta launch", topK: 2))
+            .ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        Assert.All(results, r => Assert.True(r.IsSuccess));
+        Assert.True(lazyRelationships.DiscoverCalls > 0);
+        Assert.Equal(0, template.LlmCalls);
+        Assert.Equal(0, template.TokensConsumed);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_populates_retrieval_trace()
+    {
+        var ragsService = new MockRagsService();
+        var service = CreateService(ragsService);
+
+        var result = await service.RetrieveAsync("alpha beta launch", topK: 2);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotEmpty(result.Value!);
+        var first = result.Value!.First();
+        Assert.NotNull(first.Trace);
+        Assert.False(string.IsNullOrEmpty(first.Trace!.Strategy));
+        Assert.NotEmpty(first.Trace.Steps);
+        Assert.True(first.Trace.ElapsedMs >= 0);
+        Assert.Contains("traversal", first.Trace.Steps);
+    }
+
     private static LazyGraphRagService CreateService(
         IRagsService ragsService,
         IGraphTraversalBudget? budget = null,
@@ -138,7 +202,6 @@ public sealed class LazyGraphRagServiceTests
             new ChunkingPipeline(),
             new CorpusDiscoveryIndex(),
             new MockGraphReasoningService(ragsService, graphProvider),
-            budget ?? new GraphTraversalBudget(),
             new SubgraphPruningService(),
             new MockGraphSummaryService(),
             new MockHierarchicalSummaryService(),
@@ -148,14 +211,15 @@ public sealed class LazyGraphRagServiceTests
             new MockGlobalGraphSearchService(),
             graphProvider,
             lazyDiscovery,
-            lazyRelationshipDiscovery);
+            lazyRelationshipDiscovery,
+            budget ?? new GraphTraversalBudget());
     }
 
     private sealed class CountingLazyEntityDiscoveryService : ILazyEntityDiscoveryService
     {
         public int DiscoverCalls { get; private set; }
 
-        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAtQueryTimeAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAtQueryTimeAsync(string query, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
         {
             DiscoverCalls++;
             return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(new[]
@@ -183,6 +247,7 @@ public sealed class LazyGraphRagServiceTests
         public Task<Result<IReadOnlyList<ExtractedRelationship>>> DiscoverAtQueryTimeAsync(
             string query,
             IReadOnlyList<ExtractedEntity> entities,
+            IGraphTraversalBudget? budget = null,
             CancellationToken cancellationToken = default)
         {
             DiscoverCalls++;

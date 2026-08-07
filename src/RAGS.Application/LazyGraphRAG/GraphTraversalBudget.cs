@@ -39,6 +39,16 @@ public sealed class GraphTraversalBudget : IGraphTraversalBudget
     public int MaxTokenBudget { get; }
     public TimeSpan MaxExecutionTime { get; }
 
+    public int LlmCalls => Volatile.Read(ref _llmCalls);
+    public int TokensConsumed => Volatile.Read(ref _tokensConsumed);
+    public int NodesVisited => Volatile.Read(ref _nodesVisited);
+    public int RelationshipsTraversed => Volatile.Read(ref _relationshipsTraversed);
+
+    public IGraphTraversalBudget CreatePerRequest()
+    {
+        return new GraphTraversalBudget(MaxLLMCalls, MaxDepth, MaxNodes, MaxRelationships, MaxTokenBudget, MaxExecutionTime);
+    }
+
     public bool RecordLLMCall()
     {
         return TryIncrementWithinLimit(ref _llmCalls, MaxLLMCalls);
@@ -56,17 +66,16 @@ public sealed class GraphTraversalBudget : IGraphTraversalBudget
 
     public bool RecordTokens(int tokenCount)
     {
+        // The tokens were genuinely consumed by the LLM, so always record them to
+        // keep accounting honest. Return whether the new total is still within the
+        // budget so callers and IsExceeded() can halt the traversal on a breach.
         while (true)
         {
             var current = Volatile.Read(ref _tokensConsumed);
-            if (current + tokenCount > MaxTokenBudget)
+            var updated = current + tokenCount;
+            if (Interlocked.CompareExchange(ref _tokensConsumed, updated, current) == current)
             {
-                return false;
-            }
-
-            if (Interlocked.CompareExchange(ref _tokensConsumed, current + tokenCount, current) == current)
-            {
-                return true;
+                return updated <= MaxTokenBudget;
             }
         }
     }

@@ -4,7 +4,7 @@ namespace Aletheia.RAGS.Abstractions.Interfaces;
 
 public interface IEntityExtractionService
 {
-    Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<ExtractedEntity>>> ClassifyAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default);
 

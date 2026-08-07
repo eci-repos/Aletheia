@@ -14,7 +14,7 @@ public sealed class EntityExtractionService : IEntityExtractionService
         _kernel = kernel ?? throw new ArgumentNullException(nameof(kernel));
     }
 
-    public async Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, CancellationToken cancellationToken = default)
+    public async Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
             return Result<IReadOnlyList<ExtractedEntity>>.Success(Array.Empty<ExtractedEntity>());
@@ -30,6 +30,7 @@ public sealed class EntityExtractionService : IEntityExtractionService
             history.AddUserMessage(text);
 
             var response = await chatCompletion.GetChatMessageContentAsync(history, cancellationToken: cancellationToken).ConfigureAwait(false);
+            budget?.RecordTokens(TokenUsageHelper.GetTotalTokens(response));
             var content = response.Content ?? string.Empty;
 
             var parsed = TryParseJsonEntities(content);

@@ -76,8 +76,9 @@ LazyGraphRAG follows a different cost model:
 - Ingestion updates chunks and corpus text statistics without LLM entity extraction.
 - Query-time discovery uses TF-IDF/BM25-style candidate selection.
 - Traversal uses a budgeted best-first search instead of blind BFS.
-- `IGraphTraversalBudget` limits LLM calls, depth, nodes, relationships, token budget, and execution time.
+- `IGraphTraversalBudget` limits LLM calls, depth, nodes, relationships, token budget, and execution time. Since Sprint 60 the budget is **per-request**: LazyGraphRAG keeps an injected template and calls `CreatePerRequest()` inside `RetrieveAsync`, GraphRAG constructs one inline, and no singleton registration exists. Token consumption is recorded from real SemanticKernel usage (`TokenUsageHelper` reads `ChatMessageContent.Metadata`); `RecordTokens` records actual consumption even when it breaches the budget so `IsExceeded()` halts traversal. Both `RetrieveAsync` paths enforce a hard deadline via `CancellationTokenSource.CancelAfter(MaxExecutionTime)`.
 - `ISubgraphPruningService` removes low-relevance nodes and relationships before final ranking.
+- Retrieval results carry a per-query `RetrievalTrace` (on `SearchResult.Trace`): the fired strategy, LLM calls, tokens consumed, nodes/relationships traversed, pruning ratio, elapsed time, and an ordered step list. LazyGraphRAG reports real per-request budget counters; GraphRAG reports an approximate LLM-call count plus budget tokens. Noise entities (`keyword` / `statistical-candidate`) discovered at query time are never persisted to the graph (retrieval-only).
 
 Copilot chat responses include operational telemetry on the assistant message: elapsed seconds, estimated prompt/completion tokens, estimated token throughput, retrieved context count, citation count, retrieval scores, and a retrieval-based alignment confidence estimate. When a plan-based execution completes, the response also includes a plan-versus-actual estimate comparison summary.
 
@@ -90,7 +91,7 @@ The conversational planning system added in Sprints 22.1–22.7 is documented in
 - Semantic mode calls standard RAGS retrieval over chunks and embeddings and is always visible.
 - WRAGS, GraphRAG, and LazyGraphRAG are internal operator modes, hidden from end users unless FeatureFlags:ShowInternalSearch is enabled (default false). When enabled, they are visible in Search Center and the Wiki; when hidden, their API endpoints return HTTP 404. Copilot still uses graph-backed retrieval internally for broad/global corpus prompts, while scoped document prompts continue to prefer Semantic RAGS evidence.
 - Direct content ingestion from the page queues background jobs for the visible RAG/WRAGS modes.
-- Search results show rank, score, retrieval strategy, citations, chunk/source details, and technical API errors when failures occur.
+- Search results show rank, score, retrieval strategy, citations, chunk/source details, and technical API errors when failures occur. For GraphRAG / LazyGraphRAG modes, each result card also renders the per-query retrieval trace (strategy, LLM calls, tokens, nodes/relationships traversed, pruning retention %, elapsed ms, and the ordered step chain) when the API returned one.
 
 #### WRAGS Wiki
 

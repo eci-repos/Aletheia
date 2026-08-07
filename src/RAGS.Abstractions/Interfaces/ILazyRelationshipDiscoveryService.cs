@@ -11,6 +11,7 @@ public interface ILazyRelationshipDiscoveryService
     Task<Result<IReadOnlyList<ExtractedRelationship>>> DiscoverAtQueryTimeAsync(
         string query,
         IReadOnlyList<ExtractedEntity> entities,
+        IGraphTraversalBudget? budget = null,
         CancellationToken cancellationToken = default);
 
     Task<Result> PersistAsync(

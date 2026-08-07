@@ -92,7 +92,7 @@ public sealed class UploadedContentKnowledgeIndexerTests
 
     private sealed class EmptyEntityExtractionService : IEntityExtractionService
     {
-        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(Array.Empty<ExtractedEntity>()));
         }

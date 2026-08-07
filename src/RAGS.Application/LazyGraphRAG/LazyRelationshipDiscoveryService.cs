@@ -1,6 +1,7 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.KnowledgeGraph.Abstractions.Models;
 using Aletheia.RAGS.Abstractions.Interfaces;
+using Aletheia.RAGS.Application.GraphIntelligence;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using System.Text;
@@ -26,6 +27,7 @@ public sealed class LazyRelationshipDiscoveryService : ILazyRelationshipDiscover
     public async Task<Result<IReadOnlyList<ExtractedRelationship>>> DiscoverAtQueryTimeAsync(
         string query,
         IReadOnlyList<ExtractedEntity> entities,
+        IGraphTraversalBudget? budget = null,
         CancellationToken cancellationToken = default)
     {
         if (!entities.Any())
@@ -57,6 +59,7 @@ public sealed class LazyRelationshipDiscoveryService : ILazyRelationshipDiscover
             history.AddUserMessage($"Query: {query}\n\nEntities:\n{entityDescriptions}");
 
             var response = await chatCompletion.GetChatMessageContentAsync(history, cancellationToken: cancellationToken).ConfigureAwait(false);
+            budget?.RecordTokens(TokenUsageHelper.GetTotalTokens(response));
             var parsed = TryParseJsonRelationships(response.Content ?? string.Empty, entities);
             
             if (parsed.Any())

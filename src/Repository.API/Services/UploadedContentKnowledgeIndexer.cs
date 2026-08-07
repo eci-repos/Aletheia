@@ -642,7 +642,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
 
         private async Task<IReadOnlyList<ExtractedEntity>> DiscoverEntitiesAsync(string content, CancellationToken cancellationToken)
     {
-        var result = await _entityExtraction.DiscoverAsync(content, cancellationToken).ConfigureAwait(false);
+        var result = await _entityExtraction.DiscoverAsync(content, null, cancellationToken).ConfigureAwait(false);
         if (result.IsSuccess && result.Value is not null && result.Value.Count > 0)
         {
             var normalized = result.Value

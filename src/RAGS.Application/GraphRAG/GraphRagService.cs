@@ -2,6 +2,8 @@ using Aletheia.Foundation.Shared;
 using Aletheia.KnowledgeGraph.Abstractions.Models;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.RAGS.Application.GraphIntelligence;
+using Aletheia.RAGS.Application.LazyGraphRAG;
 using Aletheia.RAGS.Application.Pipelines;
 using Aletheia.RAGS.Application.Ranking;
 using System.Security.Cryptography;
@@ -118,7 +120,7 @@ public sealed class GraphRagService : IGraphRagService
                     }),
                 cancellationToken).ConfigureAwait(false);
 
-            var extractionResult = await _entityExtraction.DiscoverAsync(chunk.Content, cancellationToken).ConfigureAwait(false);
+            var extractionResult = await _entityExtraction.DiscoverAsync(chunk.Content, null, cancellationToken).ConfigureAwait(false);
             if (extractionResult.IsFailure || extractionResult.Value is null || !extractionResult.Value.Any())
             {
                 continue;
@@ -126,6 +128,7 @@ public sealed class GraphRagService : IGraphRagService
 
             var entities = extractionResult.Value
                 .Where(e => !string.IsNullOrWhiteSpace(e.Name))
+                .Where(e => !NoiseEntityFilter.IsNoise(e))
                 .Take(MaxEntitiesPerChunk)
                 .Select(e => WithStableEntityId(e))
                 .ToList();
@@ -227,19 +230,32 @@ public sealed class GraphRagService : IGraphRagService
             throw new ArgumentException("Query is required.", nameof(query));
         }
 
+        // Each request gets its own budget and a hard execution deadline so a single
+        // slow LLM call cannot blow the budget or hang the request.
+        var budget = new GraphTraversalBudget();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(budget.MaxExecutionTime);
+        var ct = timeoutCts.Token;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var steps = new List<string>();
+        var llmCalls = 0;
+
         try
         {
             // === Execution Trace: Query → Entity Resolution ===
-            var entityResolution = await _graphReasoning.SelectEntitiesAsync(query, cancellationToken).ConfigureAwait(false);
+            llmCalls++;
+            var entityResolution = await _graphReasoning.SelectEntitiesAsync(query, ct).ConfigureAwait(false);
             var resolvedEntities = entityResolution.IsSuccess && entityResolution.Value is not null
                 ? entityResolution.Value.ToList()
                 : new List<GraphNode>();
+            steps.Add("entity-resolution");
 
             // === Execution Trace: Entity Resolution → Community Resolution ===
             var communityIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entity in resolvedEntities.Take(5))
             {
-                var communitiesResult = await _communityDetection.GetCommunitiesForNodeAsync(entity.Id, cancellationToken).ConfigureAwait(false);
+                var communitiesResult = await _communityDetection.GetCommunitiesForNodeAsync(entity.Id, ct).ConfigureAwait(false);
                 if (communitiesResult.IsSuccess && communitiesResult.Value is not null)
                 {
                     foreach (var community in communitiesResult.Value)
@@ -248,33 +264,39 @@ public sealed class GraphRagService : IGraphRagService
                     }
                 }
             }
+            steps.Add("community-resolution");
 
             // === Execution Trace: Community Resolution → Summary Retrieval ===
+            llmCalls += resolvedEntities.Take(3).Count() * 2;
             foreach (var entity in resolvedEntities.Take(3))
             {
-                await _graphSummary.SummarizeEntityAsync(entity.Id, cancellationToken).ConfigureAwait(false);
-                await _hierarchicalSummary.SummarizeEntityAsync(entity.Id, cancellationToken).ConfigureAwait(false);
+                await _graphSummary.SummarizeEntityAsync(entity.Id, ct).ConfigureAwait(false);
+                await _hierarchicalSummary.SummarizeEntityAsync(entity.Id, ct).ConfigureAwait(false);
             }
 
+            llmCalls += communityIds.Take(3).Count() * 2;
             foreach (var communityId in communityIds.Take(3))
             {
-                await _graphSummary.SummarizeCommunityAsync(communityId, cancellationToken).ConfigureAwait(false);
-                await _hierarchicalSummary.SummarizeCommunityAsync(communityId, cancellationToken).ConfigureAwait(false);
+                await _graphSummary.SummarizeCommunityAsync(communityId, ct).ConfigureAwait(false);
+                await _hierarchicalSummary.SummarizeCommunityAsync(communityId, ct).ConfigureAwait(false);
             }
+            steps.Add("summary-retrieval");
 
             // === Execution Trace: Summary Retrieval → Context Builder ===
             var contextResult = await _contextBuilder.BuildContextAsync(
                 query,
                 GraphContextSources.Entities | GraphContextSources.Communities | GraphContextSources.Summaries | GraphContextSources.Relationships,
-                cancellationToken).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
             var contextScore = HasUsableContext(contextResult) ? 0.6f : 0f;
+            steps.Add("context-build");
 
             var summaryCandidates = await BuildSummaryCandidatesAsync(
                 query,
                 resolvedEntities,
                 communityIds,
                 contextResult.Value,
-                cancellationToken).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
+            steps.Add("summary-candidates");
 
             if (summaryCandidates.Any())
             {
@@ -282,15 +304,25 @@ public sealed class GraphRagService : IGraphRagService
                     summaryCandidates,
                     _citationPath,
                     topK,
-                    cancellationToken).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
 
-                return Result<IReadOnlyList<SearchResult>>.Success(rankedSummaries);
+                var summaryTrace = BuildTrace(
+                    rankedSummaries.FirstOrDefault()?.RetrievalStrategy ?? "summary",
+                    llmCalls,
+                    budget,
+                    steps,
+                    stopwatch.ElapsedMilliseconds);
+
+                return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(rankedSummaries, summaryTrace));
             }
 
-            var lazyEntities = await EnsureQueryTimeEnrichmentAsync(query, topK, cancellationToken).ConfigureAwait(false);
+            llmCalls++;
+            var lazyEntities = await EnsureQueryTimeEnrichmentAsync(query, topK, budget, ct).ConfigureAwait(false);
             if (lazyEntities.Count > 0)
             {
-                var refreshedEntities = await _graphReasoning.SelectEntitiesAsync(query, cancellationToken).ConfigureAwait(false);
+                steps.Add("lazy-enrichment");
+                llmCalls++;
+                var refreshedEntities = await _graphReasoning.SelectEntitiesAsync(query, ct).ConfigureAwait(false);
                 resolvedEntities = refreshedEntities.IsSuccess && refreshedEntities.Value is not null
                     ? refreshedEntities.Value.ToList()
                     : new List<GraphNode>();
@@ -306,14 +338,14 @@ public sealed class GraphRagService : IGraphRagService
                 contextResult = await _contextBuilder.BuildContextAsync(
                     query,
                     GraphContextSources.Entities | GraphContextSources.Communities | GraphContextSources.Summaries | GraphContextSources.Relationships,
-                    cancellationToken).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
 
                 summaryCandidates = await BuildSummaryCandidatesAsync(
                     query,
                     resolvedEntities,
                     communityIds,
                     contextResult.Value,
-                    cancellationToken).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
 
                 if (summaryCandidates.Any())
                 {
@@ -321,29 +353,45 @@ public sealed class GraphRagService : IGraphRagService
                         summaryCandidates,
                         _citationPath,
                         topK,
-                        cancellationToken).ConfigureAwait(false);
+                        ct).ConfigureAwait(false);
 
-                    return Result<IReadOnlyList<SearchResult>>.Success(rankedLazySummaries);
+                    var lazyTrace = BuildTrace(
+                        "lazy-enrichment",
+                        llmCalls,
+                        budget,
+                        steps,
+                        stopwatch.ElapsedMilliseconds);
+
+                    return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(rankedLazySummaries, lazyTrace));
                 }
             }
 
             // Step 1: Use Graph Reasoning Service for graph-aware retrieval
-            var reasoningResult = await _graphReasoning.RetrieveGraphAwareAsync(query, topK, cancellationToken).ConfigureAwait(false);
+            llmCalls++;
+            var reasoningResult = await _graphReasoning.RetrieveGraphAwareAsync(query, topK, ct).ConfigureAwait(false);
             if (reasoningResult.IsSuccess && reasoningResult.Value is not null && reasoningResult.Value.Any())
             {
+                steps.Add("graph-aware");
                 var graphAwareCandidates = reasoningResult.Value
                     .Select(r => new RetrievalCandidate(r, "graph-aware", graphScore: 0.85f, contextScore: contextScore));
                 var ranked = await GraphRagResultRanker.RankAndCiteAsync(
                     graphAwareCandidates,
                     _citationPath,
                     topK * 2,
-                    cancellationToken).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
 
-                return Result<IReadOnlyList<SearchResult>>.Success(ranked);
+                var graphAwareTrace = BuildTrace(
+                    "graph-aware",
+                    llmCalls,
+                    budget,
+                    steps,
+                    stopwatch.ElapsedMilliseconds);
+
+                return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(ranked, graphAwareTrace));
             }
 
             // Step 2: Fall back to semantic-only retrieval if graph reasoning fails
-            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK), cancellationToken).ConfigureAwait(false);
+            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK), ct).ConfigureAwait(false);
             if (baseResults.IsFailure || baseResults.Value is null)
             {
                 return Result<IReadOnlyList<SearchResult>>.Failure(baseResults.Error ?? RetrievalFailedMessage);
@@ -354,9 +402,10 @@ public sealed class GraphRagService : IGraphRagService
             var candidates = baseResultList
                 .Select(r => new RetrievalCandidate(r, "semantic", contextScore: contextScore))
                 .ToList();
+            steps.Add("semantic-retrieval");
 
             // Step 3: Entity-based multi-hop expansion
-            var graphNodes = await _graphProvider.GetNodesAsync(cancellationToken).ConfigureAwait(false);
+            var graphNodes = await _graphProvider.GetNodesAsync(ct).ConfigureAwait(false);
             if (graphNodes.IsSuccess && graphNodes.Value is not null && graphNodes.Value.Any())
             {
                 var entityNodes = graphNodes.Value.Where(IsSemanticEntityNode).ToList();
@@ -378,7 +427,7 @@ public sealed class GraphRagService : IGraphRagService
                         var (current, hops) = visitQueue.Dequeue();
                         if (hops >= maxExpanded) continue;
 
-                        var neighbors = await _graphProvider.GetNeighborsAsync(current.Id, cancellationToken).ConfigureAwait(false);
+                        var neighbors = await _graphProvider.GetNeighborsAsync(current.Id, ct).ConfigureAwait(false);
                         if (neighbors.IsSuccess && neighbors.Value is not null)
                         {
                             foreach (var neighbor in neighbors.Value)
@@ -400,7 +449,7 @@ public sealed class GraphRagService : IGraphRagService
                         if (node is null) continue;
 
                         var nodeResults = await _ragsService.RetrieveAsync(
-                            new RetrievalRequest(node.Label, Math.Min(3, topK)), cancellationToken).ConfigureAwait(false);
+                            new RetrievalRequest(node.Label, Math.Min(3, topK)), ct).ConfigureAwait(false);
 
                         if (nodeResults.IsSuccess && nodeResults.Value is not null)
                         {
@@ -422,14 +471,23 @@ public sealed class GraphRagService : IGraphRagService
                     }
                 }
             }
+            steps.Add("graph-expansion");
 
             var finalResults = await GraphRagResultRanker.RankAndCiteAsync(
                 candidates,
                 _citationPath,
                 topK * 2,
-                cancellationToken).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
+            steps.Add("ranking");
 
-        return Result<IReadOnlyList<SearchResult>>.Success(finalResults);
+            var finalTrace = BuildTrace(
+                finalResults.FirstOrDefault()?.RetrievalStrategy ?? "semantic",
+                llmCalls,
+                budget,
+                steps,
+                stopwatch.ElapsedMilliseconds);
+
+            return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(finalResults, finalTrace));
         }
         catch (Exception ex)
         {
@@ -440,6 +498,7 @@ public sealed class GraphRagService : IGraphRagService
     private async Task<IReadOnlyList<GraphNode>> EnsureQueryTimeEnrichmentAsync(
         string query,
         int topK,
+        IGraphTraversalBudget budget,
         CancellationToken cancellationToken)
     {
         var retrieval = await _ragsService.RetrieveAsync(
@@ -467,7 +526,7 @@ public sealed class GraphRagService : IGraphRagService
 
             await EnsureLazyChunkSeedAsync(chunk, cancellationToken).ConfigureAwait(false);
 
-            var extraction = await _entityExtraction.DiscoverAsync(chunk.Content, cancellationToken).ConfigureAwait(false);
+            var extraction = await _entityExtraction.DiscoverAsync(chunk.Content, budget, cancellationToken).ConfigureAwait(false);
             if (extraction.IsFailure || extraction.Value is null || extraction.Value.Count == 0)
             {
                 await MarkChunkLazyEnrichedAsync(chunk, "NoEntities", query, cancellationToken).ConfigureAwait(false);
@@ -476,6 +535,7 @@ public sealed class GraphRagService : IGraphRagService
 
             var entities = extraction.Value
                 .Where(e => !string.IsNullOrWhiteSpace(e.Name))
+                .Where(e => !NoiseEntityFilter.IsNoise(e))
                 .Take(MaxLazyEntitiesPerChunk)
                 .Select(WithStableEntityId)
                 .ToList();
@@ -711,6 +771,35 @@ public sealed class GraphRagService : IGraphRagService
         return contextResult.IsSuccess
             && !string.IsNullOrWhiteSpace(contextResult.Value)
             && !contextResult.Value.Contains("No graph context available.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static RetrievalTrace BuildTrace(
+        string strategy,
+        int llmCalls,
+        IGraphTraversalBudget budget,
+        IReadOnlyList<string> steps,
+        long elapsedMs)
+    {
+        return new RetrievalTrace
+        {
+            Strategy = strategy,
+            LlmCalls = llmCalls,
+            TokensConsumed = budget.TokensConsumed,
+            NodesVisited = budget.NodesVisited,
+            RelationshipsTraversed = budget.RelationshipsTraversed,
+            ElapsedMs = elapsedMs,
+            Steps = steps,
+        };
+    }
+
+    private static IReadOnlyList<SearchResult> WithTrace(IReadOnlyList<SearchResult> results, RetrievalTrace trace)
+    {
+        foreach (var result in results)
+        {
+            result.Trace = trace;
+        }
+
+        return results;
     }
 
     private static bool IsTruthy(GraphNode node, string propertyName)

@@ -1,44 +1,48 @@
-# Sprint 59 - Canonical Gate Softening, Multi-Theme, and Shared Theme Scope
+# Sprint 60 - GraphRAG and LazyGraphRAG Quick Wins
 
 **Status:** Active
 
-Full authority: `docs/sprints/Sprint-59 - Canonical Gate Softening, Multi-Theme, and Shared Theme Scope.md` (created 2026-08-07). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-60 - GraphRAG and LazyGraphRAG Quick Wins.md` (created 2026-08-07). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 58 (Session Knowledge Theme Filtering) is **complete, committed, and pushed**: commit `4fdfaf0` is on `origin/master` (HEAD `4fdfaf0`). Remaining Sprint 58 verification: Docker smoke test (upload -> ingest -> themes endpoint -> theme-scoped vs all-themes Copilot session) - can run in parallel with Sprint 59 work.
+Sprint 59 (Canonical Gate Softening, Multi-Theme, and Shared Theme Scope) is **complete, committed, and pushed**: commit `c151ea2` is on `origin/master` (HEAD `c151ea2`).
 
 ## Objective
 
-Three coordinated improvements to the canonical-template / theme / filtering model, delivered in one pass because they share the `file_metadata` schema:
+Four small, high-value fixes to the GraphRAG / LazyGraphRAG retrieval paths, delivered in one pass because they all touch the same services:
 
-1. **Soften the canonical gate** — a document with no matching template is ingested anyway (RAGS + knowledge index + graph seed) instead of being refused; template-dependent features (document briefs, per-section retrieval, theme) stay gated on `Canonical` status.
-2. **Multi-theme per document** — templates declare a set of themes (`Theme: Analysis, As-Built`); `file_metadata.theme` becomes a set; theme filtering matches any selected theme; the picker shows each theme with its document count.
-3. **Persist derived themes (backfill)** — a re-evaluation operation derives and persists `template_name` + `theme` + `template_status` for null rows; the read-time fallback is demoted to a safety net.
-4. **Shared theme scope across surfaces (Phase 1)** — a shared scope state (localStorage) that Search Center honors as an optional theme filter on semantic search, with a visible "scoped to themes" indicator. Copilot keeps its session-scoped filter; Wiki stays curated.
+1. **Per-request `GraphTraversalBudget`** — replace the shared-singleton budget with one constructed per `RetrieveAsync` call; make `LazyGraphRagService._indexedSources` thread-safe.
+2. **Real token accounting + hard deadline** — wire SemanticKernel usage into `RecordTokens` (currently dead code) and enforce `CancellationTokenSource.CancelAfter(MaxExecutionTime)`.
+3. **Stop noise-entity persistence** — do not persist `keyword` / `statistical-candidate` terms as graph nodes; keep them retrieval-only.
+4. **Per-query retrieval trace** — expose LLM calls, tokens, nodes/edges traversed, pruning ratio, and which fallback strategy produced the answer.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Soften the canonical gate**: `file_metadata.template_status` (`Canonical`/`Uncategorized`); ingestion ingests uncategorized documents instead of hard-stopping; briefs gated on `Canonical`; `GET /api/knowledge/uncategorized` + `POST /api/knowledge/reevaluate` (admin list + promotion trigger).
-2. **Multi-theme**: templates declare a theme set; `file_metadata.theme` becomes `text[]`; `TryGetThemes`; match-any filtering; per-theme counts.
-3. **Backfill**: re-evaluate persists `template_name`/`theme`/`template_status` for null rows; read-time fallback demoted to safety net.
-4. **Shared scope**: `SearchScopeStateService` (localStorage); Search Center theme filter on semantic search with visible indicator; `GET /api/rags/retrieve?themes=` resolves and restricts.
-5. **Tests**: RAGS (multi-theme, match-any, uncategorized ingestion), Repository (template_status, uncategorized list, re-evaluate, retrieve?themes=), Web CoreCompile; existing suites green.
-6. **Docs**: Architecture, AdministratorGuide, OperationsGuide, Development-Guidelines, user guide (Search Center / Knowledge Themes), AGENTS, File 02/03, handoff.
+1. **Per-request budget**: remove the `GraphTraversalBudget` singleton; construct per `RetrieveAsync`; make `_indexedSources` thread-safe.
+2. **Token accounting + deadline**: wire SemanticKernel usage into `RecordTokens`; `CancelAfter(MaxExecutionTime)` on the LLM call chain.
+3. **Noise entities**: stop persisting `keyword` / `statistical-candidate` graph nodes; keep them retrieval-only.
+4. **Retrieval trace**: expose LLM calls, tokens, traversed nodes/edges, pruning ratio, fired strategy on the retrieval result without breaking existing contracts.
+5. **Tests**: RAGS (budget isolation, token accounting, noise not persisted, trace populated); existing suites green; Web C#/Razor compiles.
+6. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, handoff; backlog statuses updated.
 
 ## Acceptance Criteria
 
-- A document with no matching template is ingested with `template_status = Uncategorized`; no brief; admin list shows it; re-evaluate promotes it and generates the brief once a template matches.
-- Templates may declare multiple themes; a document in multiple themes is matched by any and counted in each; picker shows per-theme counts.
-- Pre-Sprint-58 rows get `template_name`/`theme`/`template_status` persisted by re-evaluate; read-time fallback remains a safety net.
-- Search Center semantic search honors the shared theme scope with a visible indicator; Copilot keeps its session-scoped filter; graph modes and Wiki unaffected.
-- Repository / RAGS / Foundation suites green; Web C#/Razor compiles.
+- Concurrent GraphRAG retrievals no longer corrupt each other's traversal budget; `_indexedSources` is safe under concurrency.
+- Token budget is enforced from real SemanticKernel usage; a slow LLM call is cancelled at `MaxExecutionTime`.
+- No new `keyword` / `statistical-candidate` nodes are persisted to the graph; retrieval behavior unchanged.
+- Retrieval results carry a trace (LLM calls, tokens, traversed nodes/edges, pruning ratio, fired strategy) surfaced without breaking existing contracts.
+- RAGS / Repository / Foundation suites green; Web C#/Razor compiles.
 
 ## Out of Scope
 
-- Theme-aware GraphRAG/LazyGraphRAG retrieval and community summaries (backlog item 5, parked); theme scope over Wiki / Browse / graph surfaces beyond Search Center semantic search; rerankers; multi-tenant/ACL scoping; new session stores.
+- Persisting the LazyGraphRAG corpus index to PostgreSQL (backlog item 2); batch GraphRAG ingest (backlog item 3); theme-aware graph retrieval (Canonical backlog item 5); new queue providers, session stores, or database changes.
 
 ---
 
 ## Progress (2026-08-07)
+
+### Sprint 59 (completed) — Canonical Gate Softening, Multi-Theme, and Shared Theme Scope
+
+Committed and pushed as `c151ea2`. Full details below for reference.
 
 ### Implementation complete — all four deliverables implemented, tested, documented
 
@@ -79,3 +83,30 @@ Smoke-test feedback: the Graph Explorer "jumps around" while the layout runs and
 - **Render once, don't re-layout**: `window.initGraph` now accepts a `dotNetRef` + `preservePositions` flag. On scope changes (context selection, chunk toggle) the page re-renders the graph but keeps existing node positions (`randomize: false`) instead of re-running the randomized `cose` layout, so the view no longer jumps around. The JS hooks `layoutstop` to invoke `OnGraphLayoutSettled` on the page, which clears the loading overlay.
 
 Contract: `initGraph(containerId, nodes, edges, dotNetRef, preservePositions)`; the page owns a `DotNetObjectReference<GraphExplorer>` (disposed in `Dispose`) and exposes `[JSInvokable] OnGraphLayoutSettled()`. Web project builds clean (0 warnings/errors).
+
+### Sprint 60 implementation status (2026-08-07) — all four deliverables implemented
+
+**1. Per-request `GraphTraversalBudget`**
+- `IGraphTraversalBudget` gained `CreatePerRequest()` + read-only counters (`LlmCalls`, `TokensConsumed`, `NodesVisited`, `RelationshipsTraversed`); `GraphTraversalBudget` implements via `Volatile`/`Interlocked`.
+- `LazyGraphRagService` keeps the injected budget as a **template** (`_budgetTemplate`, optional ctor param moved to the end) and calls `CreatePerRequest()` per `RetrieveAsync`; `_indexedSources` guarded by `lock (_indexedSourcesLock)`.
+- `GraphRagService.RetrieveAsync` constructs `new GraphTraversalBudget()` inline per request; the `AddSingleton<IGraphTraversalBudget>` in `Repository.API/Program.cs` was removed.
+
+**2. Real token accounting + hard deadline**
+- `TokenUsageHelper.GetTotalTokens(ChatMessageContent?)` reads `Metadata` with provider-agnostic key sets (input/output/total, camel/Pascal/snake_case) + nested `"Usage"` + reflection over provider usage objects (no provider SDK refs).
+- Wired into `EntityExtractionService.DiscoverAsync` and `LazyRelationshipDiscoveryService.DiscoverAtQueryTimeAsync` (`budget?.RecordTokens(...)`).
+- **`RecordTokens` semantics corrected during testing**: it previously capped tokens, so the token budget never fired `IsExceeded()` (dead code). It now records actual consumption even past the budget and returns `updated <= MaxTokenBudget`, so `IsExceeded()` halts traversal (test asserts 120 recorded against a 100 budget).
+- Both `RetrieveAsync` paths: `CreateLinkedTokenSource(cancellationToken)` + `CancelAfter(MaxExecutionTime)`; all LLM/traversal calls flow `ct`.
+
+**3. Stop noise-entity persistence**
+- `NoiseEntityFilter.IsNoise` (`keyword` + `statistical-candidate`); applied in `LazyEntityDiscoveryService.PersistAsync`, `LazyGraphRagService.PersistDiscoveryAsync` (also drops relationships with noise endpoints), `GraphRagService.IngestAsync`, `GraphRagService.EnsureQueryTimeEnrichmentAsync`. Noise entities stay retrieval-only.
+
+**4. Per-query retrieval trace**
+- New `RetrievalTrace` model + settable `SearchResult.Trace` (additive). LazyGraphRAG reports real budget counters + pruning ratio + steps; GraphRAG reports approximate `llmCalls` + budget tokens + steps (per-call token accounting for summary/reasoning services is a documented follow-up).
+- Web Search Center renders the trace block per result card (strategy, LLM calls, tokens, nodes, relationships, pruning retained %, elapsed ms, step chain).
+
+**Verification**
+- RAGS.UnitTests **265 passed** (was 251): new GraphTraversalBudgetTests (6), LazyGraphRagServiceTests (+3: per-request budget isolation, 5 concurrent retrievals, trace), LazyEntityDiscoveryServiceTests (+3 noise), GraphRagServiceTests (+2: noise not persisted, trace). All mocks updated for the new `IGraphTraversalBudget? budget` params.
+- `dotnet build Aletheia.slnx` succeeds (pre-existing AngleSharp NU1902 warning only). RAGS 265 / Repository 121 / Repository.IntegrationTests 8 / Foundation 55 green. Web compiles clean.
+- Aletheia.Web.UnitTests still has the same **6 pre-existing failures** (CopilotStateService session-key `v1` vs `v2`, RepositoryApiClientUploadTests x4, Wiki mode-buttons) — verified identical on a clean HEAD worktree; unrelated to Sprint 60.
+
+**Remaining:** commit when the user requests; optional Docker smoke test.

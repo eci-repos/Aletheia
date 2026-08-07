@@ -16,15 +16,15 @@ public sealed class LazyEntityDiscoveryService : ILazyEntityDiscoveryService
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
     }
 
-    public async Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAtQueryTimeAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAtQueryTimeAsync(string query, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
     {
-        var result = await _extractionService.DiscoverAsync(query, cancellationToken).ConfigureAwait(false);
+        var result = await _extractionService.DiscoverAsync(query, budget, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
     public async Task<Result<IReadOnlyList<ExtractedEntity>>> CreateIncrementalAsync(string text, CancellationToken cancellationToken = default)
     {
-        var result = await _extractionService.DiscoverAsync(text, cancellationToken).ConfigureAwait(false);
+        var result = await _extractionService.DiscoverAsync(text, null, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
@@ -32,6 +32,13 @@ public sealed class LazyEntityDiscoveryService : ILazyEntityDiscoveryService
     {
         foreach (var entity in entities)
         {
+            // Noise entities (keyword / statistical-candidate) are retrieval-only signals,
+            // never persisted as graph nodes.
+            if (NoiseEntityFilter.IsNoise(entity))
+            {
+                continue;
+            }
+
             var existing = await _provider.GetNodeAsync(entity.Id, cancellationToken).ConfigureAwait(false);
             var properties = new Dictionary<string, object>
             {

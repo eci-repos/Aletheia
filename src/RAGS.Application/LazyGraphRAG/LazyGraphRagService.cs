@@ -2,6 +2,7 @@ using Aletheia.Foundation.Shared;
 using Aletheia.KnowledgeGraph.Abstractions.Models;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.RAGS.Application.GraphIntelligence;
 using Aletheia.RAGS.Application.Pipelines;
 using Aletheia.RAGS.Application.Ranking;
 using System.Text.RegularExpressions;
@@ -22,7 +23,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
     private readonly ILazyEntityDiscoveryService? _lazyDiscovery;
     private readonly ILazyRelationshipDiscoveryService? _lazyRelationshipDiscovery;
     private readonly IGraphReasoningService _graphReasoning;
-    private readonly IGraphTraversalBudget _budget;
+    private readonly IGraphTraversalBudget budgetTemplate;
     private readonly ISubgraphPruningService _pruning;
     private readonly IGraphSummaryService _graphSummary;
     private readonly IHierarchicalSummaryService _hierarchicalSummary;
@@ -33,13 +34,13 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
     private readonly IGraphProvider _graphProvider;
 
     private readonly HashSet<Guid> _indexedSources = new();
+    private readonly object _indexedSourcesLock = new();
 
     public LazyGraphRagService(
         IRagsService ragsService,
         ChunkingPipeline chunkingPipeline,
         ICorpusDiscoveryIndex corpusIndex,
         IGraphReasoningService graphReasoning,
-        IGraphTraversalBudget budget,
         ISubgraphPruningService pruning,
         IGraphSummaryService graphSummary,
         IHierarchicalSummaryService hierarchicalSummary,
@@ -49,13 +50,14 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         IGlobalGraphSearchService globalSearch,
         IGraphProvider graphProvider,
         ILazyEntityDiscoveryService? lazyDiscovery = null,
-        ILazyRelationshipDiscoveryService? lazyRelationshipDiscovery = null)
+        ILazyRelationshipDiscoveryService? lazyRelationshipDiscovery = null,
+        IGraphTraversalBudget? budget = null)
     {
         _ragsService = ragsService ?? throw new ArgumentNullException(nameof(ragsService));
         _chunkingPipeline = chunkingPipeline ?? throw new ArgumentNullException(nameof(chunkingPipeline));
         _corpusIndex = corpusIndex ?? throw new ArgumentNullException(nameof(corpusIndex));
         _graphReasoning = graphReasoning ?? throw new ArgumentNullException(nameof(graphReasoning));
-        _budget = budget ?? throw new ArgumentNullException(nameof(budget));
+        budgetTemplate = budget ?? new GraphTraversalBudget();
         _pruning = pruning ?? throw new ArgumentNullException(nameof(pruning));
         _graphSummary = graphSummary ?? throw new ArgumentNullException(nameof(graphSummary));
         _hierarchicalSummary = hierarchicalSummary ?? throw new ArgumentNullException(nameof(hierarchicalSummary));
@@ -78,14 +80,19 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
             return ingestResult;
         }
 
-        if (!_indexedSources.Contains(request.SourceId))
+        lock (_indexedSourcesLock)
         {
-            _indexedSources.Add(request.SourceId);
+            if (_indexedSources.Contains(request.SourceId))
+            {
+                return Result.Success();
+            }
 
-            // Phase 3: no entity, relationship, or graph construction at index time.
-            // LazyGraphRAG stores only corpus text statistics used for query-time candidates.
-            await _corpusIndex.IndexAsync(request.Content, request.SourceId, cancellationToken).ConfigureAwait(false);
+            _indexedSources.Add(request.SourceId);
         }
+
+        // Phase 3: no entity, relationship, or graph construction at index time.
+        // LazyGraphRAG stores only corpus text statistics used for query-time candidates.
+        await _corpusIndex.IndexAsync(request.Content, request.SourceId, cancellationToken).ConfigureAwait(false);
 
         return Result.Success();
     }
@@ -103,56 +110,71 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
             throw new ArgumentException("Query is required.", nameof(query));
         }
 
-        _budget.Reset();
+        // Each request gets its own budget so concurrent retrievals cannot corrupt each other.
+        var budget = budgetTemplate.CreatePerRequest();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(budget.MaxExecutionTime);
+        var ct = timeoutCts.Token;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var steps = new List<string>();
 
         try
         {
             // Step 0: Corpus search for seed documents
             var seedSourceIds = _corpusIndex.SearchCorpus(query, topK: 10);
+            steps.Add("corpus-search");
 
             // Step 1: Query-time candidate discovery from corpus statistics only.
-            var queryEntities = DiscoverEntitiesAtQueryTime(query, seedSourceIds);
-            if (_budget.IsExceeded())
+            var queryEntities = DiscoverEntitiesAtQueryTime(query, seedSourceIds, budget);
+            steps.Add("entity-discovery");
+            if (budget.IsExceeded())
                 return Result<IReadOnlyList<SearchResult>>.Failure("Traversal budget exceeded during entity discovery.");
 
             // Step 2: Query-time edge guidance within the configured LLM budget.
-            var queryRelationships = await DiscoverRelationshipsAtQueryTimeAsync(query, queryEntities, cancellationToken).ConfigureAwait(false);
-            if (_budget.IsExceeded())
+            var queryRelationships = await DiscoverRelationshipsAtQueryTimeAsync(query, queryEntities, budget, ct).ConfigureAwait(false);
+            steps.Add("relationship-discovery");
+            if (budget.IsExceeded())
                 return Result<IReadOnlyList<SearchResult>>.Failure("Traversal budget exceeded during relationship discovery.");
 
             // Step 3: Build temporary query graph from statistical candidates.
             var tempGraph = BuildTemporaryGraph(queryEntities, queryRelationships, seedSourceIds);
+            steps.Add("graph-build");
 
             // Step 4: Budgeted best-first traversal with optional LLM edge guidance.
-            var traversal = await TraverseBestFirstAsync(query, tempGraph, queryRelationships, cancellationToken).ConfigureAwait(false);
-            if (_budget.IsExceeded())
+            var traversal = await TraverseBestFirstAsync(query, tempGraph, queryRelationships, budget, ct).ConfigureAwait(false);
+            steps.Add("traversal");
+            if (budget.IsExceeded())
                 return Result<IReadOnlyList<SearchResult>>.Failure("Traversal budget exceeded during graph traversal.");
 
             // Step 5: Subgraph Pruning
-            var prunedNodes = await _pruning.PruneNodesAsync(traversal.Nodes, query, relevanceThreshold: 0.25f, cancellationToken).ConfigureAwait(false);
+            var prunedNodes = await _pruning.PruneNodesAsync(traversal.Nodes, query, relevanceThreshold: 0.25f, ct).ConfigureAwait(false);
             var prunedNodeList = prunedNodes.IsSuccess && prunedNodes.Value is not null
                 ? prunedNodes.Value.ToList()
                 : traversal.Nodes.ToList();
 
-            var prunedEdges = await _pruning.PruneRelationshipsAsync(traversal.Edges, prunedNodeList, cancellationToken).ConfigureAwait(false);
+            var prunedEdges = await _pruning.PruneRelationshipsAsync(traversal.Edges, prunedNodeList, ct).ConfigureAwait(false);
             var prunedEdgeList = prunedEdges.IsSuccess && prunedEdges.Value is not null
                 ? prunedEdges.Value.ToList()
                 : traversal.Edges.ToList();
+            steps.Add("pruning");
 
             // Step 6: Community Resolution & Summary Retrieval
-            await ResolveCommunitiesAndSummariesAsync(prunedNodeList, cancellationToken).ConfigureAwait(false);
-            if (_budget.IsExceeded())
+            await ResolveCommunitiesAndSummariesAsync(prunedNodeList, budget, ct).ConfigureAwait(false);
+            steps.Add("community-resolution");
+            if (budget.IsExceeded())
                 return Result<IReadOnlyList<SearchResult>>.Failure("Traversal budget exceeded during community resolution.");
 
             // Step 7: Context Builder
             var contextResult = await _contextBuilder.BuildContextAsync(
                 query,
                 GraphContextSources.Entities | GraphContextSources.Communities | GraphContextSources.Summaries | GraphContextSources.Relationships,
-                cancellationToken).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
             var contextScore = HasUsableContext(contextResult) ? 0.55f : 0f;
+            steps.Add("context-build");
 
             // Step 8: Semantic Retrieval & Expansion
-            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK), cancellationToken).ConfigureAwait(false);
+            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK), ct).ConfigureAwait(false);
             if (baseResults.IsFailure || baseResults.Value is null)
             {
                 return Result<IReadOnlyList<SearchResult>>.Failure(baseResults.Error ?? RetrievalFailedMessage);
@@ -165,6 +187,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
                     graphScore: prunedNodeList.Any() ? 0.25f : 0f,
                     contextScore: contextScore))
                 .ToList();
+            steps.Add("semantic-retrieval");
 
             // Expand using seed source IDs from corpus search
             foreach (var sourceId in seedSourceIds.Take(maxExpanded))
@@ -173,7 +196,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
                 if (!terms.Any()) continue;
 
                 var expanded = await _ragsService.RetrieveAsync(
-                    new RetrievalRequest(string.Join(" ", terms.Take(5)), Math.Min(2, topK)), cancellationToken).ConfigureAwait(false);
+                    new RetrievalRequest(string.Join(" ", terms.Take(5)), Math.Min(2, topK)), ct).ConfigureAwait(false);
 
                 if (expanded.IsSuccess && expanded.Value is not null)
                 {
@@ -192,7 +215,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
             foreach (var node in prunedNodeList.Take(maxExpanded))
             {
                 var entityResults = await _ragsService.RetrieveAsync(
-                    new RetrievalRequest(node.Label, Math.Min(2, topK)), cancellationToken).ConfigureAwait(false);
+                    new RetrievalRequest(node.Label, Math.Min(2, topK)), ct).ConfigureAwait(false);
 
                 if (entityResults.IsSuccess && entityResults.Value is not null)
                 {
@@ -206,17 +229,32 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
                     }
                 }
             }
+            steps.Add("expansion");
 
             var finalResults = await GraphRagResultRanker.RankAndCiteAsync(
                 candidates,
                 _citationPath,
                 topK * 2,
-                cancellationToken).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
+            steps.Add("ranking");
 
-            // Step 10: Persistent Enrichment
-            await PersistDiscoveryAsync(queryEntities, queryRelationships, cancellationToken).ConfigureAwait(false);
+            // Step 10: Persistent Enrichment (noise entities are never persisted)
+            await PersistDiscoveryAsync(queryEntities, queryRelationships, ct).ConfigureAwait(false);
+            steps.Add("persist");
 
-            return Result<IReadOnlyList<SearchResult>>.Success(finalResults);
+            var trace = new RetrievalTrace
+            {
+                Strategy = finalResults.FirstOrDefault()?.RetrievalStrategy ?? "lazy-graph",
+                LlmCalls = budget.LlmCalls,
+                TokensConsumed = budget.TokensConsumed,
+                NodesVisited = budget.NodesVisited,
+                RelationshipsTraversed = budget.RelationshipsTraversed,
+                PruningRatio = traversal.Nodes.Count > 0 ? prunedNodeList.Count / (double)traversal.Nodes.Count : null,
+                ElapsedMs = stopwatch.ElapsedMilliseconds,
+                Steps = steps,
+            };
+
+            return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(finalResults, trace));
         }
         catch (Exception ex)
         {
@@ -238,7 +276,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
 
     // ============ QUERY-TIME DISCOVERY ============
 
-    private List<ExtractedEntity> DiscoverEntitiesAtQueryTime(string query, IReadOnlyList<Guid> seedSourceIds)
+    private List<ExtractedEntity> DiscoverEntitiesAtQueryTime(string query, IReadOnlyList<Guid> seedSourceIds, IGraphTraversalBudget budget)
     {
         var queryTerms = ExtractTerms(query).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var scored = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -268,7 +306,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         return scored
             .OrderByDescending(kv => kv.Value)
             .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Min(20, _budget.MaxNodes))
+            .Take(Math.Min(20, budget.MaxNodes))
             .Select(kv => new ExtractedEntity
             {
                 Id = $"lazy:{kv.Key}",
@@ -287,14 +325,15 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
     private async Task<List<ExtractedRelationship>> DiscoverRelationshipsAtQueryTimeAsync(
         string query,
         List<ExtractedEntity> entities,
+        IGraphTraversalBudget budget,
         CancellationToken ct)
     {
-        if (_lazyRelationshipDiscovery is null || entities.Count < 2 || !_budget.RecordLLMCall())
+        if (_lazyRelationshipDiscovery is null || entities.Count < 2 || !budget.RecordLLMCall())
         {
             return new List<ExtractedRelationship>();
         }
 
-        var result = await _lazyRelationshipDiscovery.DiscoverAtQueryTimeAsync(query, entities, ct).ConfigureAwait(false);
+        var result = await _lazyRelationshipDiscovery.DiscoverAtQueryTimeAsync(query, entities, budget, ct).ConfigureAwait(false);
         if (result.IsSuccess && result.Value is not null)
         {
             return result.Value.ToList();
@@ -383,6 +422,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         string query,
         TemporaryGraph seedGraph,
         IReadOnlyList<ExtractedRelationship> guidedRelationships,
+        IGraphTraversalBudget budget,
         CancellationToken ct)
     {
         var reasoningResult = await _graphReasoning.SelectEntitiesAsync(query, ct).ConfigureAwait(false);
@@ -390,7 +430,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
             ? reasoningResult.Value.ToList()
             : new List<GraphNode>();
 
-        if (!_budget.RecordNodeVisit())
+        if (!budget.RecordNodeVisit())
             return seedGraph;
 
         var merged = new Dictionary<string, GraphNode>(StringComparer.OrdinalIgnoreCase);
@@ -410,22 +450,22 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var node in merged.Values
             .OrderByDescending(n => ComputeNodeRelevance(n, query))
-            .Take(Math.Min(8, _budget.MaxNodes)))
+            .Take(Math.Min(8, budget.MaxNodes)))
         {
             frontier.Enqueue((node, 0), -ComputeNodeRelevance(node, query));
             visited.Add(node.Id);
         }
 
-        while (frontier.Count > 0 && !_budget.IsExceeded())
+        while (frontier.Count > 0 && !budget.IsExceeded())
         {
             var (current, depth) = frontier.Dequeue();
-            if (depth >= _budget.MaxDepth) continue;
-            if (!_budget.RecordNodeVisit())
+            if (depth >= budget.MaxDepth) continue;
+            if (!budget.RecordNodeVisit())
                 break;
 
             foreach (var edge in GetCandidateEdges(current.Id, edgeLookup).OrderByDescending(e => ComputeEdgeRelevance(e, query)).Take(6))
             {
-                if (!_budget.RecordRelationshipTraversed())
+                if (!budget.RecordRelationshipTraversed())
                 {
                     break;
                 }
@@ -444,7 +484,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
                 frontier.Enqueue((targetNode, depth + 1), -ComputeTraversalPriority(targetNode, edge, query, depth + 1));
             }
 
-            if (ShouldUseGuidedNeighborSelection(guidedRelationships) && !_budget.RecordLLMCall())
+            if (ShouldUseGuidedNeighborSelection(guidedRelationships) && !budget.RecordLLMCall())
             {
                 continue;
             }
@@ -456,7 +496,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
                     .OrderByDescending(n => ComputeNodeRelevance(n, query))
                     .Take(6))
                 {
-                    if (!visited.Contains(neighbor.Id) && merged.Count < _budget.MaxNodes)
+                    if (!visited.Contains(neighbor.Id) && merged.Count < budget.MaxNodes)
                     {
                         visited.Add(neighbor.Id);
                         merged[neighbor.Id] = neighbor;
@@ -482,12 +522,12 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
 
     // ============ COMMUNITY & SUMMARY RESOLUTION ============
 
-    private async Task ResolveCommunitiesAndSummariesAsync(List<GraphNode> nodes, CancellationToken ct)
+    private async Task ResolveCommunitiesAndSummariesAsync(List<GraphNode> nodes, IGraphTraversalBudget budget, CancellationToken ct)
     {
         var communityIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var node in nodes.Take(5))
         {
-            if (!_budget.RecordLLMCall()) break;
+            if (!budget.RecordLLMCall()) break;
 
             var communitiesResult = await _communityDetection.GetCommunitiesForNodeAsync(node.Id, ct).ConfigureAwait(false);
             if (communitiesResult.IsSuccess && communitiesResult.Value is not null)
@@ -501,14 +541,14 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
 
         foreach (var node in nodes.Take(3))
         {
-            if (!_budget.RecordLLMCall()) break;
+            if (!budget.RecordLLMCall()) break;
             await _graphSummary.SummarizeEntityAsync(node.Id, ct).ConfigureAwait(false);
             await _hierarchicalSummary.SummarizeEntityAsync(node.Id, ct).ConfigureAwait(false);
         }
 
         foreach (var communityId in communityIds.Take(3))
         {
-            if (!_budget.RecordLLMCall()) break;
+            if (!budget.RecordLLMCall()) break;
             await _graphSummary.SummarizeCommunityAsync(communityId, ct).ConfigureAwait(false);
             await _hierarchicalSummary.SummarizeCommunityAsync(communityId, ct).ConfigureAwait(false);
         }
@@ -521,14 +561,27 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         List<ExtractedRelationship> relationships,
         CancellationToken ct)
     {
-        if (_lazyDiscovery is not null && entities.Any())
+        // Noise entities (keyword / statistical-candidate) are retrieval-only signals and
+        // must never be persisted as graph nodes. Relationships between noise entities are
+        // dropped too, so no dangling edges are written.
+        var persistableEntities = entities.Where(e => !NoiseEntityFilter.IsNoise(e)).ToList();
+        var persistableIds = persistableEntities.Select(e => e.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (_lazyDiscovery is not null && persistableEntities.Any())
         {
-            await _lazyDiscovery.PersistAsync(entities, ct).ConfigureAwait(false);
+            await _lazyDiscovery.PersistAsync(persistableEntities, ct).ConfigureAwait(false);
         }
 
         if (_lazyRelationshipDiscovery is not null && relationships.Any())
         {
-            await _lazyRelationshipDiscovery.PersistAsync(relationships, ct).ConfigureAwait(false);
+            var persistableRelationships = relationships
+                .Where(r => persistableIds.Contains(r.SourceId) && persistableIds.Contains(r.TargetId))
+                .ToList();
+
+            if (persistableRelationships.Any())
+            {
+                await _lazyRelationshipDiscovery.PersistAsync(persistableRelationships, ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -672,6 +725,16 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         return contextResult.IsSuccess
             && !string.IsNullOrWhiteSpace(contextResult.Value)
             && !contextResult.Value.Contains("No graph context available.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<SearchResult> WithTrace(IReadOnlyList<SearchResult> results, RetrievalTrace trace)
+    {
+        foreach (var result in results)
+        {
+            result.Trace = trace;
+        }
+
+        return results;
     }
 
     private sealed record TemporaryGraph(IReadOnlyList<GraphNode> Nodes, IReadOnlyList<GraphEdge> Edges);

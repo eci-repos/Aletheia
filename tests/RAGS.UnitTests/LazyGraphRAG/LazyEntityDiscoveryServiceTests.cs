@@ -67,9 +67,64 @@ public sealed class LazyEntityDiscoveryServiceTests
         Assert.Equal("lazy-query-time", updated.Properties["discoveryMode"]);
     }
 
+    [Fact]
+    public async Task PersistAsync_skips_keyword_entities()
+    {
+        var provider = new RecordingGraphProvider();
+        var service = new LazyEntityDiscoveryService(new StubEntityExtractionService(), provider);
+
+        var result = await service.PersistAsync(new[]
+        {
+            new ExtractedEntity { Id = "kw:alpha", Name = "alpha", Type = "keyword", Confidence = 0.5 },
+            new ExtractedEntity { Id = "entity-bravo", Name = "Bravo", Type = "project", Confidence = 0.9 }
+        });
+
+        Assert.True(result.IsSuccess);
+        var node = Assert.Single(provider.Nodes.Values);
+        Assert.Equal("entity-bravo", node.Id);
+        Assert.DoesNotContain(provider.CreatedNodes, n => n.Id == "kw:alpha");
+    }
+
+    [Fact]
+    public async Task PersistAsync_skips_statistical_candidate_entities()
+    {
+        var provider = new RecordingGraphProvider();
+        var service = new LazyEntityDiscoveryService(new StubEntityExtractionService(), provider);
+
+        var result = await service.PersistAsync(new[]
+        {
+            new ExtractedEntity { Id = "lazy:alpha", Name = "alpha", Type = "statistical-candidate", Confidence = 0.35 }
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(provider.CreatedNodes);
+        Assert.Empty(provider.UpdatedNodes);
+    }
+
+    [Fact]
+    public async Task PersistAsync_does_not_update_noise_entities_that_already_exist()
+    {
+        var provider = new RecordingGraphProvider();
+        provider.Nodes["lazy:alpha"] = new GraphNode(
+            "lazy:alpha",
+            "alpha",
+            "statistical-candidate",
+            new Dictionary<string, object> { ["score"] = 0.4 });
+        var service = new LazyEntityDiscoveryService(new StubEntityExtractionService(), provider);
+
+        var result = await service.PersistAsync(new[]
+        {
+            new ExtractedEntity { Id = "lazy:alpha", Name = "alpha", Type = "statistical-candidate", Confidence = 0.35 }
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(provider.UpdatedNodes);
+        Assert.Equal(0.4, provider.Nodes["lazy:alpha"].Properties["score"]);
+    }
+
     private sealed class StubEntityExtractionService : IEntityExtractionService
     {
-        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
             => Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(Array.Empty<ExtractedEntity>()));
 
         public Task<Result<IReadOnlyList<ExtractedEntity>>> ClassifyAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default)

@@ -186,13 +186,9 @@ builder.Services.AddSingleton<ILazyGraphRagService, Aletheia.RAGS.Application.La
 builder.Services.AddSingleton<ICorpusDiscoveryIndex, Aletheia.RAGS.Application.LazyGraphRAG.CorpusDiscoveryIndex>();
 builder.Services.AddSingleton<ILazyEntityDiscoveryService, Aletheia.RAGS.Application.LazyGraphRAG.LazyEntityDiscoveryService>();
 builder.Services.AddSingleton<ILazyRelationshipDiscoveryService, Aletheia.RAGS.Application.LazyGraphRAG.LazyRelationshipDiscoveryService>();
-builder.Services.AddSingleton<IGraphTraversalBudget>(sp => new Aletheia.RAGS.Application.LazyGraphRAG.GraphTraversalBudget(
-    maxLLMCalls: 5,
-    maxDepth: 3,
-    maxNodes: 50,
-    maxRelationships: 100,
-    maxTokenBudget: 4000,
-    maxExecutionTime: TimeSpan.FromSeconds(30)));
+// NOTE: IGraphTraversalBudget is intentionally NOT registered as a singleton. Since Sprint 60,
+// each retrieval request constructs its own budget (LazyGraphRagService/GraphRagService create a
+// fresh GraphTraversalBudget per RetrieveAsync call) so concurrent requests cannot corrupt each other.
 builder.Services.AddSingleton<ISubgraphPruningService, Aletheia.RAGS.Application.LazyGraphRAG.SubgraphPruningService>();
 
 // Legacy Knowledge Graph bridge

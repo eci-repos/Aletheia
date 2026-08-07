@@ -97,5 +97,5 @@ Four small, high-value fixes to the GraphRAG / LazyGraphRAG retrieval paths, del
 - `docs/Architecture.md`, `docs/OperationsGuide.md`, `docs/Development-Guidelines.md`, AGENTS.md, `docs/File 02-Current-Sprint.md`, `docs/File 03-openhands.md`, and this sprint file updated. Backlog items 1, 4, 5, 6 marked promoted/implemented.
 
 ## Remaining
-- Commit and push when the user requests (all tests green, solution builds).
-- Optional Docker smoke test (can run in parallel).
+- **Committed and pushed** as `c6c3e48` (2026-08-07); working tree clean.
+- **Next action (planned 2026-08-08): Docker smoke test.** Rebuild the containers (the Web WASM bundle changed — `SearchCenter.razor` trace block), hard-refresh the browser, then in Search Center run GraphRAG and LazyGraphRAG searches and confirm each result card shows the retrieval trace (strategy, LLM calls, tokens, nodes/relationships, pruning retention %, elapsed ms, step chain). Also sanity-check concurrent retrievals behave (per-request budgets).

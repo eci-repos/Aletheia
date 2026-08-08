@@ -1,6 +1,6 @@
 # Backlog: GraphRAG / LazyGraphRAG Enhancements
 
-**Status:** Items 1, 4, 5, 6 promoted to Sprint 60 and **implemented** (2026-08-07, pending commit); items 2 and 3 still parked.
+**Status:** Items 1, 4, 5, 6 promoted to Sprint 60 and **implemented** (committed `c6c3e48`, pushed 2026-08-08); items 2 and 3 still parked.
 **Created:** 2026-08-06
 **Source:** Review of `GraphRagService.cs`, `LazyGraphRagService.cs`, `GraphTraversalBudget.cs`, `CorpusDiscoveryIndex.cs`, `SubgraphPruningService.cs`, `GraphRagResultRanker.cs`, `Neo4jGraphProvider.cs`, and the GraphIntelligence services.
 

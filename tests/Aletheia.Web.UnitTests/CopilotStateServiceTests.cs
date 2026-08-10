@@ -116,7 +116,7 @@ public class CopilotStateServiceTests
         Assert.Equal("auto", service.State.OutputFormat);
         Assert.False(service.State.ActiveJobId.HasValue);
         Assert.False(service.State.ExecutionPanelCollapsed);
-        Assert.Equal("aletheia.copilot.session.v1", jsRuntime.RemovedKey);
+        Assert.Equal("aletheia.copilot.session.v2", jsRuntime.RemovedKey);
     }
 
     [Fact]

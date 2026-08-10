@@ -115,7 +115,9 @@ public class RepositoryApiClientUploadTests
     private static HttpClient CreateClient(HttpStatusCode statusCode, string body)
     {
         var handler = new FakeHttpMessageHandler(statusCode, body);
-        return new HttpClient(handler);
+        // Production wires BaseAddress on the "RepositoryApi" client (Program.cs ConfigureRepositoryApi);
+        // the client uses relative request URIs, so the fake must mirror that or HttpMessageInvoker throws.
+        return new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
     }
 
     private sealed class FakeHttpMessageHandler : HttpMessageHandler

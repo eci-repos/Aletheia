@@ -50,7 +50,7 @@ public class CopilotIndexBindingTests
     {
         var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Wiki.razor"));
 
-        Assert.Contains(">WRAGS</button>", source);
+        Assert.Contains(">Wiki</button>", source);
         Assert.Contains(">Semantic</button>", source);
         Assert.Contains(">GraphRAG</button>", source);
         Assert.Contains(">LazyGraphRAG</button>", source);

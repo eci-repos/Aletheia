@@ -107,6 +107,16 @@ Contract: `initGraph(containerId, nodes, edges, dotNetRef, preservePositions)`; 
 **Verification**
 - RAGS.UnitTests **265 passed** (was 251): new GraphTraversalBudgetTests (6), LazyGraphRagServiceTests (+3: per-request budget isolation, 5 concurrent retrievals, trace), LazyEntityDiscoveryServiceTests (+3 noise), GraphRagServiceTests (+2: noise not persisted, trace). All mocks updated for the new `IGraphTraversalBudget? budget` params.
 - `dotnet build Aletheia.slnx` succeeds (pre-existing AngleSharp NU1902 warning only). RAGS 265 / Repository 121 / Repository.IntegrationTests 8 / Foundation 55 green. Web compiles clean.
-- Aletheia.Web.UnitTests still has the same **6 pre-existing failures** (CopilotStateService session-key `v1` vs `v2`, RepositoryApiClientUploadTests x4, Wiki mode-buttons) — verified identical on a clean HEAD worktree; unrelated to Sprint 60.
+- Aletheia.Web.UnitTests had the same **6 pre-existing failures** (CopilotStateService session-key `v1` vs `v2`, RepositoryApiClientUploadTests x4, Wiki mode-buttons) — verified identical on a clean HEAD worktree; unrelated to Sprint 60. **Fixed 2026-08-10** (see below).
 
 **Remaining:** commit when the user requests; optional Docker smoke test.
+
+### Post-implementation web-test fix (2026-08-10)
+
+The 6 pre-existing `Aletheia.Web.UnitTests` failures are fixed — all were **stale tests, no code regressions** (verified against the production wiring and git history):
+
+- `RepositoryApiClientUploadTests` ×4 — the test harness built `new HttpClient(handler)` with no `BaseAddress`, but `UploadAsync` posts a relative `/api/files/upload`; production always sets `BaseAddress` via `ConfigureRepositoryApi` (`Program.cs:27`). The fake now sets `BaseAddress = new Uri("http://localhost")` in `CreateClient`.
+- `CopilotStateServiceTests.ClearAsync` — asserted storage key `v1`; the key was **intentionally** bumped to `v2` in `dfc9d1b` (Sprint 58 session theme filtering, serialized session shape changed). Test now asserts `v2`.
+- `CopilotIndexBindingTests.Wiki_shows_all_rags_mode_buttons` — asserted a `>WRAGS</button>` button; the wiki's internal `wrags` mode was renamed to the user-facing `>Wiki</button>` label in Sprint 55. Test now asserts `>Wiki</button>`.
+
+**Verification:** Aletheia.Web.UnitTests **39 passed** (was 33/6); full solution build 0 errors; RAGS 265 / Repository 121 / Foundation 55 green. `Repository.IntegrationTests` (8) not run — PostgreSQL container not up (needs live PG + Neo4j). Committed with the Sprint-16 sprint-file filename normalization (space → dash).

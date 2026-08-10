@@ -1,0 +1,142 @@
+@page "/settings"
+@using Aletheia.Foundation.Security
+@inject RepositoryApiClient ApiClient
+@inject AuthService Auth
+
+<PageTitle>Settings - Aletheia</PageTitle>
+
+<h3>Settings</h3>
+
+<AuthorizeView Context="authContext">
+    <NotAuthorized>
+        <div class="alert alert-warning">Please <a href="login">log in</a> to manage your preferences.</div>
+    </NotAuthorized>
+    <Authorized>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-dark text-white">My Preferences</div>
+                    <div class="card-body">
+                        <p class="text-muted">These preferences apply to your account.</p>
+
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="requireApproval"
+                                   checked="@_requireApproval" @onchange="SaveRequireApprovalAsync" />
+                            <label class="form-check-label" for="requireApproval">
+                                Require approval before Copilot runs a plan
+                            </label>
+                            <div class="small text-muted">
+                                When off, plans auto-approve and run immediately after planning.
+                            </div>
+                        </div>
+
+                        @if (_saved is not null)
+                        {
+                            <div class="alert alert-@(_saved == true ? "success" : "danger") mt-3 mb-0">@_savedMessage</div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <AuthorizeView Roles="Administrator" Context="adminContext">
+                    <Authorized>
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white">Global Settings (Administrator)</div>
+                            <div class="card-body">
+                                <p class="text-muted">Global settings are managed by administrators and apply to all users.</p>
+
+                                <div class="form-check form-switch">
+                                    <input type="checkbox" class="form-check-input" id="forceApproval"
+                                           checked="@_forceApproval" @onchange="SaveForceApprovalAsync" />
+                                    <label class="form-check-label" for="forceApproval">
+                                        Force approval for all users
+                                    </label>
+                                    <div class="small text-muted">
+                                        Forces the Copilot approval prompt even for users who opted out via "Don't ask again".
+                                    </div>
+                                </div>
+
+                                @if (_globalSaved is not null)
+                                {
+                                    <div class="alert alert-@(_globalSaved == true ? "success" : "danger") mt-3 mb-0">@_globalSavedMessage</div>
+                                }
+                            </div>
+                        </div>
+                    </Authorized>
+                    <NotAuthorized>
+                        <div class="card">
+                            <div class="card-header bg-light">Global Settings</div>
+                            <div class="card-body text-muted">
+                                Global settings are visible to administrators only.
+                            </div>
+                        </div>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    private bool _requireApproval = true;
+    private bool _forceApproval;
+    private bool? _saved;
+    private bool? _globalSaved;
+    private string _savedMessage = string.Empty;
+    private string _globalSavedMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var mine = await ApiClient.GetMySettingsAsync();
+            if (mine is not null &&
+                mine.TryGetValue(Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings.RequireApproval, out var pref))
+            {
+                _requireApproval = !string.Equals(pref, "false", StringComparison.OrdinalIgnoreCase);
+            }
+
+            var state = await Auth.GetAuthenticationStateAsync();
+            if (state.User.IsInRole(RoleDefinitions.Administrator))
+            {
+                var app = await ApiClient.GetAppSettingsAsync();
+                if (app is not null &&
+                    app.TryGetValue(Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings.ForceApproval, out var force))
+                {
+                    _forceApproval = string.Equals(force, "true", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Keep defaults; the API enforces access.
+        }
+    }
+
+    private async Task SaveRequireApprovalAsync()
+    {
+        _saved = null;
+        var ok = await ApiClient.UpdateMySettingsAsync(new Dictionary<string, string>
+        {
+            [Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings.RequireApproval] = _requireApproval.ToString()
+        });
+        _saved = ok;
+        _savedMessage = ok
+            ? "Preference saved."
+            : "Failed to save preference.";
+    }
+
+    private async Task SaveForceApprovalAsync()
+    {
+        _globalSaved = null;
+        var ok = await ApiClient.UpdateAppSettingsAsync(new Dictionary<string, string>
+        {
+            [Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings.ForceApproval] = _forceApproval.ToString()
+        });
+        _globalSaved = ok;
+        _globalSavedMessage = ok
+            ? "Global setting saved."
+            : "Failed to save global setting.";
+    }
+}

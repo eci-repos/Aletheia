@@ -175,6 +175,38 @@ public class CopilotIndexBindingTests
         Assert.Contains("CREATE TABLE IF NOT EXISTS user_settings", init);
     }
 
+    [Fact]
+    public void Settings_page_renders_admin_gated_global_and_own_preferences()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Settings/Index.razor"));
+        var nav = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/NavMenu.razor"));
+
+        Assert.Contains("@page \"/settings\"", page);
+        Assert.Contains("My Preferences", page);
+        Assert.Contains("Global Settings", page);
+        Assert.Contains("AuthorizeView Roles=\"Administrator\"", page);
+        Assert.Contains("ChatApprovalSettings.RequireApproval", page);
+        Assert.Contains("ChatApprovalSettings.ForceApproval", page);
+        Assert.Contains("AuthorizeView Roles=\"Administrator\"", nav);
+        Assert.Contains("href=\"settings\"", nav);
+    }
+
+    [Fact]
+    public void Settings_page_loads_my_and_app_settings_on_init()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Settings/Index.razor"));
+        var client = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Services/RepositoryApiClient.cs"));
+
+        Assert.Contains("ApiClient.GetMySettingsAsync()", page);
+        Assert.Contains("ApiClient.GetAppSettingsAsync()", page);
+        Assert.Contains("ApiClient.UpdateMySettingsAsync", page);
+        Assert.Contains("ApiClient.UpdateAppSettingsAsync", page);
+        Assert.Contains("public async Task<IReadOnlyDictionary<string, string>?> GetMySettingsAsync", client);
+        Assert.Contains("public async Task<IReadOnlyDictionary<string, string>?> GetAppSettingsAsync", client);
+        Assert.Contains("public async Task<bool> UpdateMySettingsAsync", client);
+        Assert.Contains("public async Task<bool> UpdateAppSettingsAsync", client);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

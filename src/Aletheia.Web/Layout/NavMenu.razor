@@ -88,6 +88,16 @@
                     <span class="nav-text">Governance</span>
                 </NavLink>
             </div>
+            <AuthorizeView Roles="Administrator">
+                <Authorized>
+                    <div class="nav-item">
+                        <NavLink class="nav-link" href="settings" title="Settings">
+                            <span class="nav-icon icon-settings" aria-hidden="true"></span>
+                            <span class="nav-text">Settings</span>
+                        </NavLink>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
         </nav>
     </div>
 </div>

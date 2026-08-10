@@ -89,3 +89,15 @@ Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, 
 **Verification:** `dotnet build Aletheia.slnx` succeeds (0 errors; only pre-existing warnings). RAGS.UnitTests **270** (was 265, +5 approval-policy tests), Repository.UnitTests **129** (was 121, +8 SettingsService tests), Aletheia.Web.UnitTests **44** (was 39, +5 binding/API tests), Foundation.UnitTests 55 — all green.
 
 **Next:** item 5 (admin `/settings` page, Administrator-gated, Governance pattern + admin NavMenu entry; users see their own editable preferences).
+
+### Sprint 61 item 5 — admin Settings page (2026-08-10)
+
+**Implemented.** A `/settings` page gives users first-class control over their approval preference and admins a surface for the global override:
+
+- `Pages/Settings/Index.razor` (`@page "/settings"`) shows **My Preferences** (the `copilot.requireApproval` toggle, default true) to any authenticated user and a **Global Settings (Administrator)** card (`copilot.requireApproval.force` toggle) that renders only via `AuthorizeView Roles="Administrator"`. Toggles load on init from `GET /api/settings/me` and `GET /api/settings` and save via `PUT` on change, with success/error feedback. The page is unauthenticated-aware (login prompt) and reuses the `ChatApprovalSettings` key constants from RAGS.Abstractions.
+- `Layout/NavMenu.razor` gains an admin-only **Settings** entry (`AuthorizeView Roles="Administrator"` wrapping the NavLink, `href="settings"`); `.icon-settings` added to `NavMenu.razor.css`.
+- Gating matches the Governance pattern: the API enforces Administrator on `/api/settings`; the Web UI hides the admin card and nav entry for non-admins while still letting every user edit their own preference.
+
+**Verification:** `dotnet build Aletheia.slnx` succeeds (0 errors; only pre-existing warnings). Aletheia.Web.UnitTests **46** (was 44, +2 Settings page/nav binding tests) green; RAGS 270 / Repository 129 / Foundation 55 unchanged green.
+
+**Next:** Sprint 61 items 1-5 are all implemented. Parallel: Sprint 60 optional Docker smoke test remains as a verification task.

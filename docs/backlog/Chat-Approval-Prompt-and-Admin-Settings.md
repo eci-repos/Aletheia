@@ -1,6 +1,6 @@
 # Backlog: Chat Approval Prompt Visibility and Admin-Managed Settings
 
-**Status:** Items 1-5 promoted to Sprint 61 (2026-08-10); item 1 (modal approval prompt) **implemented**.
+**Status:** Items 1-5 promoted to Sprint 61 (2026-08-10); items 1-4 **implemented**; item 5 (admin Settings page) **implemented**.
 **Created:** 2026-08-08
 **Source:** UX review of the Copilot chat approval flow (`src/Aletheia.Web/Pages/Copilot/Index.razor`, `src/Aletheia.Web/Layout/ActivityPanel.razor`/`ChatsPanel.razor` + CSS, `ChatPlanningService.RequiresApproval`, `ChatPlanningOptions`) — reported issue: with the Activity/Chats side panel open, submitting a chat prompt hides the plan-approval prompt behind the fixed `z-index: 20` overlay, so the user sees nothing happen.
 
@@ -21,7 +21,7 @@ The plan approval prompt (`PlanPreview` with the **Run** button, rendered in the
 | 2 | **Server-side settings foundation** — new `app_settings` (global, admin-managed) and `user_settings` (per-user) tables + idempotent migration + `init.sql`; singleton `SettingsService` with typed accessors and caching; API `GET/PUT /api/settings` (admin) and `GET/PUT /api/settings/me` (authenticated). | There is currently no settings infrastructure — only localStorage state services; "manage settings as an admin task" requires a server-side home. | ~1–1.5 days | **Promoted -> Sprint 61** (2026-08-10) |
 | 3 | **Chat approval preference (first setting)** — `copilot.requireApproval`, per-user, **default true**; a "Don't ask again" checkbox on the approval modal (item 1) writes the preference; when off, plans auto-approve and execute immediately after planning (progress + cancel still visible in the Execution column). | Approval currently requires a Run click for every plan; users want a first-class opt-out that is editable, not buried. | ~0.5–1 day | **Promoted -> Sprint 61** (2026-08-10) |
 | 4 | **Admin override for approval** — an admin-managed global/role setting that forces the approval prompt even for users who opted out (per decision #2), so admins can gate expensive corpus-wide operations for designated roles regardless of user preference. | The approval gate exists to stop expensive/unexpected runs; a user opt-out must not bypass an admin policy. | ~0.5 day | **Promoted -> Sprint 61** (2026-08-10) |
-| 5 | **Admin Settings page** — `/settings` page gated to the Administrator role (same pattern as Governance), listing global settings with edit controls, plus an admin-only NavMenu entry; users see their own editable preferences. | Gives admins a first-class surface to manage settings once the foundation (item 2) exists. | ~0.5–1 day | **Promoted -> Sprint 61** (2026-08-10) |
+| 5 | **Admin Settings page** — `/settings` page gated to the Administrator role (same pattern as Governance), listing global settings with edit controls, plus an admin-only NavMenu entry; users see their own editable preferences. | Gives admins a first-class surface to manage settings once the foundation (item 2) exists. | ~0.5–1 day | **Promoted -> Sprint 61, implemented** (2026-08-10) |
 
 ## Suggested Sequencing
 

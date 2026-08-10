@@ -173,6 +173,21 @@
             }
         </div>
     </div>
+
+    @if (IsPlanPreviewVisible && _pendingPlan?.Status == ChatPlanStatus.Proposed)
+    {
+        <div class="copilot-approval-backdrop">
+            <div class="copilot-approval-modal" role="dialog" aria-modal="true" aria-label="Execution plan approval">
+                <PlanPreview
+                    Plan="_pendingPlan"
+                    IsBusy="_isBusy"
+                    StatusMessage="@_planStatusMessage"
+                    OnApprove="ApprovePlan"
+                    OnRevise="RevisePlan"
+                    OnCancel="CancelPlan" />
+            </div>
+        </div>
+    }
 </div>
 
 @code {
@@ -366,6 +381,9 @@
 
         var userMessage = _userInput.Trim();
         ResetExecutionPanel();
+        // Sprint 61: always surface the Execution column on submit so the approval prompt (and
+        // later progress) is visible even if the user had collapsed it.
+        _executionPanelCollapsed = false;
         _chatActivityId = ActivityLog.Begin("Copilot", "Chat request", $"Prompt sent for planning: {TrimForActivity(userMessage)}");
         _isChatting = true;
         _chatError = string.Empty;

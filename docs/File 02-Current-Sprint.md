@@ -1,44 +1,62 @@
-# Sprint 60 - GraphRAG and LazyGraphRAG Quick Wins
+# Sprint 61 - Chat Approval Prompt and Admin Settings
 
 **Status:** Active
 
-Full authority: `docs/sprints/Sprint-60 - GraphRAG and LazyGraphRAG Quick Wins.md` (created 2026-08-07). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-61 - Chat Approval Prompt and Admin Settings.md` (created 2026-08-10). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 59 (Canonical Gate Softening, Multi-Theme, and Shared Theme Scope) is **complete, committed, and pushed**: commit `c151ea2` is on `origin/master` (HEAD `c151ea2`).
+Sprint 60 (GraphRAG and LazyGraphRAG Quick Wins) is **complete, committed, and pushed**: commit `c6c3e48` is on `origin/master`; its optional Docker smoke test remains as a parallel verification task.
 
 ## Objective
 
-Four small, high-value fixes to the GraphRAG / LazyGraphRAG retrieval paths, delivered in one pass because they all touch the same services:
+Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, then give users and admins first-class control over when approval is required:
 
-1. **Per-request `GraphTraversalBudget`** — replace the shared-singleton budget with one constructed per `RetrieveAsync` call; make `LazyGraphRagService._indexedSources` thread-safe.
-2. **Real token accounting + hard deadline** — wire SemanticKernel usage into `RecordTokens` (currently dead code) and enforce `CancellationTokenSource.CancelAfter(MaxExecutionTime)`.
-3. **Stop noise-entity persistence** — do not persist `keyword` / `statistical-candidate` terms as graph nodes; keep them retrieval-only.
-4. **Per-query retrieval trace** — expose LLM calls, tokens, nodes/edges traversed, pruning ratio, and which fallback strategy produced the answer.
+1. **Modal approval prompt (visibility fix)** — render the plan preview in a centered modal overlay above the Activity/Chats panels so a submitted prompt always surfaces its approval request; auto-expand a collapsed Execution column on submit.
+2. **Server-side settings foundation** — `app_settings` / `user_settings` tables + migration + `init.sql`; singleton `SettingsService`; `GET/PUT /api/settings` (admin) and `GET/PUT /api/settings/me` (authenticated).
+3. **Chat approval preference** — `copilot.requireApproval`, per-user, **default true**; "Don't ask again" checkbox on the modal writes the preference; when off, plans auto-approve and execute immediately.
+4. **Admin override for approval** — admin-managed global/role setting that forces approval even for opted-out users.
+5. **Admin Settings page** — `/settings` gated to Administrator, listing global settings with edit controls; users see their own editable preferences.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Per-request budget**: remove the `GraphTraversalBudget` singleton; construct per `RetrieveAsync`; make `_indexedSources` thread-safe.
-2. **Token accounting + deadline**: wire SemanticKernel usage into `RecordTokens`; `CancelAfter(MaxExecutionTime)` on the LLM call chain.
-3. **Noise entities**: stop persisting `keyword` / `statistical-candidate` graph nodes; keep them retrieval-only.
-4. **Retrieval trace**: expose LLM calls, tokens, traversed nodes/edges, pruning ratio, fired strategy on the retrieval result without breaking existing contracts.
-5. **Tests**: RAGS (budget isolation, token accounting, noise not persisted, trace populated); existing suites green; Web C#/Razor compiles.
-6. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, handoff; backlog statuses updated.
+1. **Modal approval prompt**: render `PlanPreview` in a centered modal overlay (z-index above the Activity/Chats panels); auto-expand a collapsed Execution column on submit; keep the in-context plan preview in the column.
+2. **Settings foundation**: `app_settings`/`user_settings` tables + idempotent migration + `init.sql`; singleton `SettingsService` with typed accessors + caching; `GET/PUT /api/settings` (admin) and `GET/PUT /api/settings/me` (authenticated).
+3. **Approval preference**: `copilot.requireApproval` per-user, default true; "Don't ask again" checkbox on the modal; auto-approve + execute when off.
+4. **Admin override**: admin-managed global/role setting forcing approval for opted-out users.
+5. **Admin Settings page**: `/settings` Administrator-gated (Governance pattern) + admin NavMenu entry; users see their own preferences.
+6. **Tests**: Web (modal markup/binding, settings service, preference), API (settings endpoints); existing suites green.
+7. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, handoff; backlog statuses updated.
 
 ## Acceptance Criteria
 
-- Concurrent GraphRAG retrievals no longer corrupt each other's traversal budget; `_indexedSources` is safe under concurrency.
-- Token budget is enforced from real SemanticKernel usage; a slow LLM call is cancelled at `MaxExecutionTime`.
-- No new `keyword` / `statistical-candidate` nodes are persisted to the graph; retrieval behavior unchanged.
-- Retrieval results carry a trace (LLM calls, tokens, traversed nodes/edges, pruning ratio, fired strategy) surfaced without breaking existing contracts.
-- RAGS / Repository / Foundation suites green; Web C#/Razor compiles.
+- With the Activity or Chats panel open, submitting a chat prompt shows the approval prompt in a modal above the panels; the user can Run/Revise/Cancel.
+- A collapsed Execution column auto-expands on submit; progress remains visible after approval.
+- Settings foundation: `app_settings`/`user_settings` tables exist (migration + `init.sql` in sync); `SettingsService` caches; admin and per-user endpoints work.
+- `copilot.requireApproval` defaults true; the modal's "Don't ask again" persists the preference; opting out auto-approves and executes.
+- Admin override forces approval for opted-out users.
+- `/settings` is Administrator-gated; users see their own preferences.
+- RAGS / Repository / Foundation / Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Persisting the LazyGraphRAG corpus index to PostgreSQL (backlog item 2); batch GraphRAG ingest (backlog item 3); theme-aware graph retrieval (Canonical backlog item 5); new queue providers, session stores, or database changes.
+- Persisting the LazyGraphRAG corpus index to PostgreSQL (GraphRAG backlog item 2); batch GraphRAG ingest (GraphRAG backlog item 3); theme-aware graph retrieval (Canonical backlog item 5).
 
 ---
 
-## Progress (2026-08-07)
+## Progress
+
+### Sprint 61 item 1 — modal approval prompt (2026-08-10)
+
+**Implemented.** The plan-approval prompt is no longer hidden behind the Activity/Chats panels or a collapsed Execution column:
+
+- `Index.razor` renders `PlanPreview` inside a centered modal overlay (`.copilot-approval-backdrop` / `.copilot-approval-modal`, `z-index: 1050` — above the panels' `20`/`21`) whenever a plan is awaiting approval/run (`IsPlanPreviewVisible && _pendingPlan?.Status == ChatPlanStatus.Proposed`). The modal reuses the existing `PlanPreview` component (Run/Revise/Cancel), so there is no duplicated markup; the in-context plan preview stays in the Execution column.
+- `SendChat()` now auto-expands a collapsed Execution column on submit, so the approval prompt and later progress are always visible.
+- CSS added to `Index.razor.css` (fixed backdrop, centered card, `max-height` + scroll).
+
+**Verification:** `dotnet build src/Aletheia.Web/Aletheia.Web.csproj` 0 warnings/0 errors; Aletheia.Web.UnitTests 39/39 green (binding tests still pass). Full solution build + unit suites below.
+
+---
+
+## Sprint 59/60 progress log (2026-08-07)
 
 ### Sprint 59 (completed) — Canonical Gate Softening, Multi-Theme, and Shared Theme Scope
 

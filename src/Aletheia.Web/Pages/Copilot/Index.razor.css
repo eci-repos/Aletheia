@@ -234,3 +234,24 @@
 .copilot-theme-option {
     margin-bottom: 0;
 }
+
+/* Sprint 61: modal approval prompt — sits above the Activity (z-index 20) / Chats (21) panels. */
+.copilot-approval-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.copilot-approval-modal {
+    width: min(560px, 100%);
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
+}

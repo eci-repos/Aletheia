@@ -1109,6 +1109,42 @@ public sealed class RepositoryApiClient
         var compact = value.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
         return compact.Length <= maxLength ? compact : $"{compact[..maxLength]}...";
     }
+
+    // Settings (Sprint 61) — per-user settings for the authenticated caller.
+    public async Task<IReadOnlyDictionary<string, string>?> GetMySettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync("/api/settings/me", cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<IReadOnlyDictionary<string, string>>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateMySettingsAsync(IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PutAsJsonAsync("/api/settings/me", settings, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
+    // Settings (Sprint 61) — global, admin-managed settings.
+    public async Task<IReadOnlyDictionary<string, string>?> GetAppSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync("/api/settings", cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<IReadOnlyDictionary<string, string>>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateAppSettingsAsync(IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PutAsJsonAsync("/api/settings", settings, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
 }
 
 public sealed record RagsStatusClientSnapshot(

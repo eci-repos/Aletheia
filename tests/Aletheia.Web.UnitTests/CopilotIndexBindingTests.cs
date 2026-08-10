@@ -118,6 +118,63 @@ public class CopilotIndexBindingTests
         Assert.True(configurationIndex > environmentIndex);
     }
 
+    [Fact]
+    public void Copilot_approval_modal_has_dont_ask_again_checkbox()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Copilot/Index.razor"));
+
+        Assert.Contains("copilot-dont-ask-again", page);
+        Assert.Contains("Don't ask again", page);
+        Assert.Contains("@bind=\"_dontAskAgain\"", page);
+        Assert.Contains("private bool _dontAskAgain = false;", page);
+    }
+
+    [Fact]
+    public void Copilot_auto_approves_when_plan_does_not_require_approval()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Copilot/Index.razor"));
+
+        Assert.Contains("if (!_pendingPlan.RequiresApproval)", page);
+        Assert.Contains("await ApprovePlan();", page);
+    }
+
+    [Fact]
+    public void Copilot_dont_ask_again_writes_approval_preference()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Copilot/Index.razor"));
+        var client = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Services/RepositoryApiClient.cs"));
+
+        Assert.Contains("UpdateMySettingsAsync", page);
+        Assert.Contains("ChatApprovalSettings.RequireApproval", page);
+        Assert.Contains("public async Task<bool> UpdateMySettingsAsync", client);
+        Assert.Contains("public async Task<IReadOnlyDictionary<string, string>?> GetMySettingsAsync", client);
+    }
+
+    [Fact]
+    public void Settings_api_exposes_admin_and_me_endpoints()
+    {
+        var controller = File.ReadAllText(FindRepoFile("src/Repository.API/Controllers/SettingsController.cs"));
+
+        Assert.Contains("[Route(\"api/[controller]\")]", controller);
+        Assert.Contains("[Authorize(Roles = RoleDefinitions.Administrator)]", controller);
+        Assert.Contains("[HttpGet(\"me\")]", controller);
+        Assert.Contains("[HttpPut(\"me\")]", controller);
+        Assert.Contains("GetAppSettings", controller);
+        Assert.Contains("UpdateMySettings", controller);
+    }
+
+    [Fact]
+    public void Settings_foundation_has_tables_in_migration_and_init()
+    {
+        var migration = File.ReadAllText(FindRepoFile("src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-10-app-user-settings.sql"));
+        var init = File.ReadAllText(FindRepoFile("scripts/init.sql"));
+
+        Assert.Contains("CREATE TABLE IF NOT EXISTS app_settings", migration);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS user_settings", migration);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS app_settings", init);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS user_settings", init);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

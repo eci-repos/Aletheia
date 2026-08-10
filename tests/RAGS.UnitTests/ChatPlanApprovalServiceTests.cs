@@ -1,7 +1,9 @@
 using Aletheia.Foundation.Shared;
+using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.RAGS.Application.Planning;
+using Aletheia.Repository.Abstractions.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -23,6 +25,68 @@ public class ChatPlanApprovalServiceTests
         Assert.True(plan.RequiresApproval);
         Assert.True(plan.EstimatedLlmCalls > 0);
         Assert.True(plan.EstimatedRetrievalCount > 0);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_user_opt_out_auto_approves()
+    {
+        var settings = new FakeSettingsService();
+        settings.SetUserBool(ChatApprovalSettings.RequireApproval, false, "user-1");
+        var service = CreateService(settings);
+
+        var result = await service.CreatePlanAsync("summarize all RFPs in the repository", userId: "user-1");
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value!.RequiresApproval);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_user_with_default_preference_requires_approval()
+    {
+        var service = CreateService(new FakeSettingsService());
+
+        var result = await service.CreatePlanAsync("summarize all RFPs in the repository", userId: "user-1");
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value!.RequiresApproval);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_admin_override_forces_approval_for_opted_out_user()
+    {
+        var settings = new FakeSettingsService();
+        settings.SetUserBool(ChatApprovalSettings.RequireApproval, false, "user-1");
+        settings.SetAppBool(ChatApprovalSettings.ForceApproval, true);
+        var service = CreateService(settings);
+
+        var result = await service.CreatePlanAsync("summarize all RFPs in the repository", userId: "user-1");
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value!.RequiresApproval);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_without_settings_service_keeps_base_heuristic()
+    {
+        var service = CreateService();
+
+        var result = await service.CreatePlanAsync("summarize all RFPs in the repository", userId: "user-1");
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value!.RequiresApproval);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_non_expensive_plan_never_requires_approval_even_with_override()
+    {
+        var settings = new FakeSettingsService();
+        settings.SetAppBool(ChatApprovalSettings.ForceApproval, true);
+        var service = CreateService(settings);
+
+        var result = await service.CreatePlanAsync("what is the upload date of the CMP document?", userId: "user-1");
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value!.RequiresApproval);
     }
 
     [Fact]
@@ -250,11 +314,84 @@ public class ChatPlanApprovalServiceTests
         Assert.Contains(methods, m => m.Name == "GetPlan" && m.Route == "plans/{planId:guid}");
     }
 
-    private static ChatPlanApprovalService CreateService()
+    private static ChatPlanApprovalService CreateService(ISettingsService? settings = null)
     {
         var planning = new ChatPlanningService();
         var repository = new InMemoryChatPlanRepository();
-        return new ChatPlanApprovalService(planning, repository);
+        return new ChatPlanApprovalService(planning, repository, settings);
+    }
+
+    private sealed class FakeSettingsService : ISettingsService
+    {
+        private readonly Dictionary<string, string> _app = new();
+        private readonly Dictionary<string, Dictionary<string, string>> _users = new();
+
+        public void SetAppBool(string key, bool value) => _app[key] = value.ToString();
+        public void SetUserBool(string key, bool value, string userId)
+        {
+            if (!_users.TryGetValue(userId, out var user))
+            {
+                user = new Dictionary<string, string>();
+                _users[userId] = user;
+            }
+
+            user[key] = value.ToString();
+        }
+
+        public Task<Result<IReadOnlyDictionary<string, string>>> GetAppSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Result<IReadOnlyDictionary<string, string>>.Success(new Dictionary<string, string>(_app)));
+
+        public Task<Result<bool>> SetAppSettingAsync(string key, string value, string? updatedBy = null, CancellationToken cancellationToken = default)
+        {
+            _app[key] = value;
+            return Task.FromResult(Result<bool>.Success(true));
+        }
+
+        public Task<Result<IReadOnlyDictionary<string, string>>> GetUserSettingsAsync(string userId, CancellationToken cancellationToken = default)
+        {
+            var values = _users.TryGetValue(userId, out var user) ? user : new Dictionary<string, string>();
+            return Task.FromResult(Result<IReadOnlyDictionary<string, string>>.Success(new Dictionary<string, string>(values)));
+        }
+
+        public Task<Result<bool>> SetUserSettingAsync(string userId, string key, string value, CancellationToken cancellationToken = default)
+        {
+            if (!_users.TryGetValue(userId, out var user))
+            {
+                user = new Dictionary<string, string>();
+                _users[userId] = user;
+            }
+
+            user[key] = value;
+            return Task.FromResult(Result<bool>.Success(true));
+        }
+
+        public Task<Result<bool>> GetBoolAsync(string key, bool defaultValue, string? userId = null, CancellationToken cancellationToken = default)
+        {
+            var raw = userId is null
+                ? _app.TryGetValue(key, out var v) ? v : null
+                : _users.TryGetValue(userId, out var user) && user.TryGetValue(key, out var uv) ? uv : null;
+            return Task.FromResult(Result<bool>.Success(raw is null ? defaultValue : bool.TryParse(raw, out var parsed) && parsed));
+        }
+
+        public Task<Result<bool>> SetBoolAsync(string key, bool value, string? userId = null, CancellationToken cancellationToken = default)
+        {
+            if (userId is null)
+            {
+                _app[key] = value.ToString();
+            }
+            else
+            {
+                if (!_users.TryGetValue(userId, out var user))
+                {
+                    user = new Dictionary<string, string>();
+                    _users[userId] = user;
+                }
+
+                user[key] = value.ToString();
+            }
+
+            return Task.FromResult(Result<bool>.Success(true));
+        }
     }
 
     private static ChatPlanRecord Map(ChatExecutionPlan plan)

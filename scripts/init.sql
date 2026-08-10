@@ -113,3 +113,21 @@ CREATE TABLE IF NOT EXISTS ontology_relationships (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(source_entity_id, target_entity_id, relationship_type)
 );
+
+-- Sprint 61: server-side settings — app_settings (global, admin-managed) + user_settings (per-user).
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);

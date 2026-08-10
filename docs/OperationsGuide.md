@@ -202,4 +202,12 @@ Example queries that should return results for an ingested RFP Analysis document
   ```
   Re-evaluation persists `template_name`/`theme`/`template_status` (also serving as the backfill for pre-Sprint-58 rows) and generates the document brief for rows that become `Canonical`. In the Web UI, the Search Center admin section has **List uncategorized** / **Re-evaluate all** buttons.
 - Verify the persisted mapping: `SELECT file_name, template_name, theme, template_status FROM file_metadata ORDER BY uploaded_at DESC;`
+
+### Server-Side Settings and Chat Approval (Sprint 61)
+
+- **Settings store**: `app_settings` (global, admin-managed) and `user_settings` (per-user) tables. Fresh installs get them from `scripts/init.sql`; existing deployments apply the idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-10-app-user-settings.sql` (safe to re-run). The `SettingsService` is a singleton with in-memory caching — a write through `PUT /api/settings` or `PUT /api/settings/me` updates the cache immediately, so no restart is needed after a change.
+- **API**: `GET/PUT /api/settings` (Administrator only) and `GET/PUT /api/settings/me` (authenticated). Both PUT endpoints take a `{ "key": "value" }` JSON object and return the updated snapshot.
+- **Chat approval preference**: `copilot.requireApproval` (per-user, default `true`). The Copilot approval modal's **"Don't ask again"** checkbox writes `false`; when off, plans auto-approve and execute immediately. To re-enable approval for a user, set the key back to `true` via `PUT /api/settings/me` (the admin Settings page is Sprint 61 item 5).
+- **Admin override**: `copilot.requireApproval.force` (global, default `false`). When `true`, approval is forced even for users who opted out — use it to gate expensive corpus-wide operations for designated roles regardless of user preference. It never makes a non-expensive plan require approval.
+- **Troubleshooting**: if a user reports "Copilot runs without asking me", check `SELECT user_id, key, value FROM user_settings WHERE key = 'copilot.requireApproval';` and the global `SELECT key, value FROM app_settings WHERE key = 'copilot.requireApproval.force';`.
 - Themes with zero documents are still listed; selecting them simply matches nothing.

@@ -185,6 +185,10 @@
                     OnApprove="ApprovePlan"
                     OnRevise="RevisePlan"
                     OnCancel="CancelPlan" />
+                <label class="form-check copilot-dont-ask-again">
+                    <input type="checkbox" class="form-check-input" @bind="_dontAskAgain" />
+                    <span class="form-check-label">Don't ask again — auto-run plans like this</span>
+                </label>
             </div>
         </div>
     }
@@ -204,6 +208,7 @@
     private Action<ChatSession>? _sessionOpenedHandler;
     private bool _isBusy = false;
     private bool _isCancelling = false;
+    private bool _dontAskAgain = false;
     private string _planStatusMessage = string.Empty;
     private CancellationTokenSource _pollingCts = new();
     private bool _stateRestored;
@@ -344,6 +349,7 @@
         _isChatting = false;
         _isBusy = false;
         _isCancelling = false;
+        _dontAskAgain = false;
         _chatError = string.Empty;
         _pendingPlan = null;
         _progress = null;
@@ -421,6 +427,14 @@
                 "Copilot",
                 "Execution plan",
                 $"Plan ready. Mode: {_pendingPlan.Mode}; tool: {(_pendingPlan.RequiresToolCall ? _pendingPlan.ToolName : "repository lookup will be enforced if configured")}.");
+
+            // Sprint 61 item 3: when the user has opted out of approval (and no admin override
+            // forces it), the plan comes back with RequiresApproval = false — auto-approve and
+            // execute immediately. Progress + cancel stay visible in the Execution column.
+            if (!_pendingPlan.RequiresApproval)
+            {
+                await ApprovePlan();
+            }
         }
         catch (Exception ex)
         {
@@ -452,6 +466,17 @@
 
         try
         {
+            // Sprint 61 item 3: "Don't ask again" persists the per-user preference so future
+            // plans auto-approve and execute immediately (the current plan still runs now).
+            if (_dontAskAgain)
+            {
+                await ApiClient.UpdateMySettingsAsync(new Dictionary<string, string>
+                {
+                    [Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings.RequireApproval] = "false"
+                });
+                _dontAskAgain = false;
+            }
+
             var approved = await ApiClient.ApproveChatPlanAsync(_pendingPlan.PlanId);
             if (approved is null)
             {
@@ -713,6 +738,7 @@
         _telemetry = null;
         _activeJobId = null;
         _isCancelling = false;
+        _dontAskAgain = false;
         _planStatusMessage = string.Empty;
         _chatActivityId = null;
         _loggedProgressMessages.Clear();
@@ -732,6 +758,7 @@
         _isChatting = false;
         _isBusy = false;
         _isCancelling = false;
+        _dontAskAgain = false;
         _chatError = string.Empty;
         _pendingPlan = null;
         _progress = null;

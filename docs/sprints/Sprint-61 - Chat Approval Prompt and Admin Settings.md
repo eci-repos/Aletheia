@@ -76,3 +76,16 @@ Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, 
 **Verification:** `dotnet build src/Aletheia.Web/Aletheia.Web.csproj` 0 warnings/0 errors; Aletheia.Web.UnitTests 39/39 green (binding tests still pass). Full solution build + unit suites green.
 
 **Next:** items 2 + 3 + 4 (settings foundation + approval preference + admin override) in one pass, then item 5 (admin Settings page).
+
+### Sprint 61 items 2 + 3 + 4 — settings foundation + approval preference + admin override (2026-08-10)
+
+**Implemented.** Server-side settings now exist, and the Copilot approval gate is user-controllable with an admin override:
+
+- **Item 2 (settings foundation):** `app_settings` (global, admin-managed) + `user_settings` (per-user) tables in `scripts/init.sql` and idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-10-app-user-settings.sql`. Layered `ISettingsRepository` (Abstractions) → `PostgreSqlSettingsRepository` (Infrastructure.PostgreSQL, Dapper `ON CONFLICT` upsert) → `ISettingsService` (Abstractions) → `SettingsService` (Application, **singleton** with in-memory caching — app settings cached globally, user settings per user; writes update the cache). API `GET/PUT /api/settings` (Administrator) and `GET/PUT /api/settings/me` (authenticated); the caller's user id is the JWT `NameIdentifier` claim. Typed accessors `GetBoolAsync/SetBoolAsync(key, defaultValue, userId?)` (null `userId` = app/global scope).
+- **Item 3 (approval preference):** `copilot.requireApproval` per-user, **default true**. The approval modal's **"Don't ask again"** checkbox (`Index.razor`, `.copilot-dont-ask-again`) writes the preference via `PUT /api/settings/me`; when off, plans come back with `RequiresApproval = false` and the Web client auto-approves + executes immediately (`SendChat` → `ApprovePlan`), with progress + cancel still visible in the Execution column.
+- **Item 4 (admin override):** `copilot.requireApproval.force` global setting (default false) forces approval even for opted-out users; it never makes a non-expensive plan require approval. Setting keys live in `Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings` (shared with the Web client).
+- **Wiring:** `ChatPlanApprovalService.CreatePlanAsync` now takes the caller's `userId` (passed from `CopilotController`) and computes `RequiresApproval = base && (userPrefersApproval || adminOverride)`; `ISettingsService` is an optional ctor param (null → base heuristic, backward compatible).
+
+**Verification:** `dotnet build Aletheia.slnx` succeeds (0 errors; only pre-existing warnings). RAGS.UnitTests **270** (was 265, +5 approval-policy tests), Repository.UnitTests **129** (was 121, +8 SettingsService tests), Aletheia.Web.UnitTests **44** (was 39, +5 binding/API tests), Foundation.UnitTests 55 — all green.
+
+**Next:** item 5 (admin `/settings` page, Administrator-gated, Governance pattern + admin NavMenu entry; users see their own editable preferences).

@@ -26,6 +26,7 @@ using Aletheia.Repository.Infrastructure.PostgreSQL.Connections;
 using Aletheia.Repository.Infrastructure.PostgreSQL.Metadata;
 using Aletheia.Repository.Infrastructure.PostgreSQL.Search;
 using Aletheia.Repository.Infrastructure.PostgreSQL.Security;
+using Aletheia.Repository.Infrastructure.PostgreSQL.Settings;
 using Aletheia.Repository.Infrastructure.PostgreSQL.Versioning;
 using Aletheia.Security.Authentication;
 using Aletheia.Security.Services;
@@ -57,6 +58,10 @@ builder.Services.AddSingleton<IMetadataRepository, PostgreSqlMetadataRepository>
 builder.Services.AddSingleton<Aletheia.Repository.Application.IDuplicateDetectionService, Aletheia.Repository.Application.DuplicateDetectionService>();
 builder.Services.AddSingleton<IVersioningService, PostgreSqlVersioningService>();
 builder.Services.AddSingleton<ISearchProvider, PostgreSqlSearchProvider>();
+
+// Settings (Sprint 61): singleton service with caching over the PostgreSQL settings store.
+builder.Services.AddSingleton<ISettingsRepository, PostgreSqlSettingsRepository>();
+builder.Services.AddSingleton<ISettingsService, Aletheia.Repository.Application.Settings.SettingsService>();
 
 // MinIO
 builder.Services.AddSingleton<IMinioClient>(_ =>

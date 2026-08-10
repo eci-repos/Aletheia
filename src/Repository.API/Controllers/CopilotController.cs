@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
@@ -92,7 +93,7 @@ public class CopilotController : ControllerBase
         }
 
         var result = await _planApprovalService
-            .CreatePlanAsync(payload.Prompt, payload.SessionId, payload.HistoryMessages, payload.ThemeFilter, cancellationToken)
+            .CreatePlanAsync(payload.Prompt, payload.SessionId, payload.HistoryMessages, payload.ThemeFilter, CurrentUserId, cancellationToken)
             .ConfigureAwait(false);
 
         return result.IsSuccess
@@ -274,6 +275,8 @@ public class CopilotController : ControllerBase
 
         return Ok(progress.Value.Telemetry);
     }
+
+    private string? CurrentUserId => User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
     public class ChatPayload
     {

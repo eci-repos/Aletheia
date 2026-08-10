@@ -45,3 +45,11 @@
 - **Hard deadline**: every `RetrieveAsync` should flow a linked `CancellationTokenSource.CancelAfter(MaxExecutionTime)` token through all LLM/traversal calls.
 - **Noise entities**: never persist `keyword` / `statistical-candidate` entities to the graph — filter with `NoiseEntityFilter.IsNoise` before persistence.
 - **Retrieval trace**: populate `SearchResult.Trace` (`RetrievalTrace`) with the fired strategy, LLM calls, tokens, traversed nodes/relationships, pruning ratio, elapsed ms, and step labels. The Web Search Center renders it on each GraphRAG / LazyGraphRAG result card; keep the addition non-breaking.
+
+## Server-Side Settings (Sprint 61)
+
+- **Layers**: `ISettingsRepository` (Abstractions) → `PostgreSqlSettingsRepository` (Infrastructure.PostgreSQL, Dapper `ON CONFLICT` upsert) → `ISettingsService` (Abstractions) → `SettingsService` (Application). The service is a **singleton** with in-memory caching; writes go through to the repository and update the cache, so the cache never goes stale within a process.
+- **Schema**: `app_settings` (global, admin-managed) and `user_settings` (per-user, `(user_id, key)` PK). Keep `scripts/init.sql` and the idempotent migration `src/Repository.Infrastructure.PostgreSQL/Migrations/2026-08-10-app-user-settings.sql` in sync.
+- **API**: `GET/PUT /api/settings` (Administrator) and `GET/PUT /api/settings/me` (authenticated). The caller's user id is the JWT `NameIdentifier` claim.
+- **Typed accessors**: `GetBoolAsync/SetBoolAsync(key, defaultValue, userId?)` — null `userId` = app/global scope. Missing/invalid values fall back to the default.
+- **Chat approval policy**: setting keys live in `Aletheia.RAGS.Abstractions.Configuration.ChatApprovalSettings` (shared with the Web client — never hard-code the strings in two places). `ChatPlanApprovalService.CreatePlanAsync` takes the caller's `userId` and applies: `base && (userPrefersApproval || adminOverride)`. The Web modal's "Don't ask again" writes `copilot.requireApproval = false`; the client auto-approves + executes when a plan comes back with `RequiresApproval = false`.

@@ -189,6 +189,9 @@ builder.Services.AddSingleton<ILazyGraphRagService, Aletheia.RAGS.Application.La
 
 // LazyGraphRAG discovery services (Sprint-15)
 builder.Services.AddSingleton<ICorpusDiscoveryIndex, Aletheia.RAGS.Application.LazyGraphRAG.CorpusDiscoveryIndex>();
+// Sprint 63: persisted LazyGraphRAG corpus index — write-through/load-on-start so the corpus
+// survives restart and multi-instance (in-memory index remains the hot path).
+builder.Services.AddSingleton<ICorpusIndexRepository, Aletheia.RAGS.Infrastructure.PostgreSQL.CorpusIndex.PostgreSqlCorpusIndexRepository>();
 builder.Services.AddSingleton<ILazyEntityDiscoveryService, Aletheia.RAGS.Application.LazyGraphRAG.LazyEntityDiscoveryService>();
 builder.Services.AddSingleton<ILazyRelationshipDiscoveryService, Aletheia.RAGS.Application.LazyGraphRAG.LazyRelationshipDiscoveryService>();
 // NOTE: IGraphTraversalBudget is intentionally NOT registered as a singleton. Since Sprint 60,

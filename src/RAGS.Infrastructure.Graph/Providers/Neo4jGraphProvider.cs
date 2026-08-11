@@ -176,6 +176,105 @@ public sealed class Neo4jGraphProvider : IGraphProvider, IAsyncDisposable
         }
     }
 
+    public async Task<Result> CreateNodesAsync(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken = default)
+    {
+        if (nodes is null) throw new ArgumentNullException(nameof(nodes));
+        if (nodes.Count == 0) return Result.Success();
+
+        try
+        {
+            await using var session = _driver.AsyncSession();
+            // Labels are per-type, so group by the label set and issue one UNWIND per group.
+            foreach (var group in nodes.GroupBy(n => BuildNodeLabels(n.Type)))
+            {
+                var rows = group.Select(node => new
+                {
+                    id = node.Id,
+                    props = BuildNodeProperties(node)
+                }).ToList();
+
+                var query = $@"
+                    UNWIND $rows AS row
+                    MERGE (n:GraphNode {{id: row.id}})
+                    SET n += row.props
+                    SET n{group.Key}";
+                await session.RunAsync(query, new { rows }).ConfigureAwait(false);
+            }
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"Failed to create nodes in batch: {ex.Message}");
+        }
+    }
+
+    public async Task<Result> CreateRelationshipsAsync(IReadOnlyList<GraphEdge> edges, CancellationToken cancellationToken = default)
+    {
+        if (edges is null) throw new ArgumentNullException(nameof(edges));
+        if (edges.Count == 0) return Result.Success();
+
+        try
+        {
+            await using var session = _driver.AsyncSession();
+            // Relationship type is dynamic, so group by type and issue one UNWIND per group.
+            foreach (var group in edges.GroupBy(e => NormalizeToken(e.RelationshipType, "related_to")))
+            {
+                var rows = group.Select(edge => new
+                {
+                    id = edge.Id,
+                    sourceId = edge.SourceId,
+                    targetId = edge.TargetId,
+                    props = BuildRelationshipProperties(edge)
+                }).ToList();
+
+                var relationshipType = EscapeToken(group.Key);
+                var query = $@"
+                    UNWIND $rows AS row
+                    MATCH (a {{id: row.sourceId}})
+                    MATCH (b {{id: row.targetId}})
+                    MERGE (a)-[r:`{relationshipType}` {{id: row.id}}]->(b)
+                    SET r += row.props";
+                await session.RunAsync(query, new { rows }).ConfigureAwait(false);
+            }
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"Failed to create relationships in batch: {ex.Message}");
+        }
+    }
+
+    public async Task<Result> UpdateNodesAsync(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken = default)
+    {
+        if (nodes is null) throw new ArgumentNullException(nameof(nodes));
+        if (nodes.Count == 0) return Result.Success();
+
+        try
+        {
+            await using var session = _driver.AsyncSession();
+            foreach (var group in nodes.GroupBy(n => BuildNodeLabels(n.Type)))
+            {
+                var rows = group.Select(node => new
+                {
+                    id = node.Id,
+                    props = BuildNodeProperties(node)
+                }).ToList();
+
+                var query = $@"
+                    UNWIND $rows AS row
+                    MERGE (n:GraphNode {{id: row.id}})
+                    SET n = row.props
+                    SET n{group.Key}";
+                await session.RunAsync(query, new { rows }).ConfigureAwait(false);
+            }
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"Failed to update nodes in batch: {ex.Message}");
+        }
+    }
+
     public async Task<Result<IReadOnlyList<GraphNode>>> GetNodesAsync(CancellationToken cancellationToken = default)
     {
         const string query = @"

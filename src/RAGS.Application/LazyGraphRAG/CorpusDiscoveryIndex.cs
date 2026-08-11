@@ -1,5 +1,6 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
+using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 
 namespace Aletheia.RAGS.Application.LazyGraphRAG;
@@ -7,6 +8,8 @@ namespace Aletheia.RAGS.Application.LazyGraphRAG;
 /// <summary>
 /// Lightweight corpus index for LazyGraphRAG.
 /// Computes TF-IDF, BM25, and text statistics without LLM calls.
+/// The in-memory index is the hot path; when an <see cref="ICorpusIndexRepository"/> is supplied it
+/// is loaded at startup and persisted write-through so the corpus survives restart and multi-instance.
 /// </summary>
 public sealed class CorpusDiscoveryIndex : ICorpusDiscoveryIndex
 {
@@ -14,7 +17,23 @@ public sealed class CorpusDiscoveryIndex : ICorpusDiscoveryIndex
     private readonly Dictionary<string, int> _documentFrequency = new(StringComparer.OrdinalIgnoreCase);
     private int _totalDocuments;
 
-    public Task<Result> IndexAsync(string content, Guid sourceId, CancellationToken cancellationToken = default)
+    private readonly ICorpusIndexRepository? _repository;
+    private readonly ILogger<CorpusDiscoveryIndex>? _logger;
+
+    public CorpusDiscoveryIndex(
+        ICorpusIndexRepository? repository = null,
+        ILogger<CorpusDiscoveryIndex>? logger = null)
+    {
+        _repository = repository;
+        _logger = logger;
+
+        if (_repository is not null)
+        {
+            LoadPersistedCorpus();
+        }
+    }
+
+    public async Task<Result> IndexAsync(string content, Guid sourceId, CancellationToken cancellationToken = default)
     {
         var terms = Tokenize(content);
         var termFrequency = ComputeTermFrequency(terms);
@@ -40,7 +59,33 @@ public sealed class CorpusDiscoveryIndex : ICorpusDiscoveryIndex
         // Recompute IDF and BM25 for all documents if corpus grew significantly
         RecomputeCorpusStats();
 
-        return Task.FromResult(Result.Success());
+        // Write-through persistence is best-effort: the in-memory index stays authoritative, so a
+        // transient DB failure must never fail ingestion or degrade the hot path.
+        if (_repository is not null)
+        {
+            try
+            {
+                var persistResult = await _repository
+                    .UpsertDocumentAsync(sourceId, termFrequency, terms.Count, cancellationToken)
+                    .ConfigureAwait(false);
+                if (persistResult.IsFailure)
+                {
+                    _logger?.LogWarning(
+                        "Failed to persist LazyGraphRAG corpus index for source {SourceId}: {Error}",
+                        sourceId,
+                        persistResult.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(
+                    ex,
+                    "Failed to persist LazyGraphRAG corpus index for source {SourceId}; in-memory index remains authoritative.",
+                    sourceId);
+            }
+        }
+
+        return Result.Success();
     }
 
     public IReadOnlyList<string> GetTerms(Guid sourceId)
@@ -114,6 +159,49 @@ public sealed class CorpusDiscoveryIndex : ICorpusDiscoveryIndex
             .Take(topK)
             .Select(s => s.Key)
             .ToList();
+    }
+
+    private void LoadPersistedCorpus()
+    {
+        try
+        {
+            var loadResult = _repository!.LoadAsync().GetAwaiter().GetResult();
+            if (loadResult.IsFailure || loadResult.Value is null)
+            {
+                _logger?.LogWarning(
+                    "Failed to load persisted LazyGraphRAG corpus index: {Error}",
+                    loadResult.Error);
+                return;
+            }
+
+            foreach (var document in loadResult.Value.Documents)
+            {
+                var termFrequency = new Dictionary<string, int>(document.TermFrequency, StringComparer.OrdinalIgnoreCase);
+                _indices[document.SourceId] = new DocumentIndex
+                {
+                    SourceId = document.SourceId,
+                    Terms = termFrequency
+                        .SelectMany(kv => Enumerable.Repeat(kv.Key, kv.Value))
+                        .ToList(),
+                    TermFrequency = termFrequency,
+                    DocumentLength = document.DocumentLength,
+                };
+
+                foreach (var term in termFrequency.Keys)
+                {
+                    _documentFrequency[term] = _documentFrequency.GetValueOrDefault(term, 0) + 1;
+                }
+            }
+
+            _totalDocuments = _indices.Count;
+            RecomputeCorpusStats();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(
+                ex,
+                "Failed to load persisted LazyGraphRAG corpus index; starting with an empty in-memory index.");
+        }
     }
 
     private static List<string> Tokenize(string text)

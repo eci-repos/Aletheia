@@ -269,6 +269,88 @@ public sealed class GraphRagServiceTests
         Assert.Contains("cancelled", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task IngestAsync_uses_batched_graph_writes()
+    {
+        // Sprint 63: the full ingest path must issue batched (UNWIND) node/relationship writes
+        // instead of serial N+1 round-trips.
+        var ragsService = new MockRagsService();
+        var graphProvider = new BatchRecordingGraphProvider();
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            entityExtraction: new ChunkEntityExtractionService(),
+            relationshipExtraction: new ChunkRelationshipExtractionService());
+        var sourceId = Guid.NewGuid();
+        var content = $"{new string('a', 1100)} Alpha works with Beta. {new string('b', 1100)} Alpha works with Beta.";
+
+        var result = await service.IngestAsync(new IngestionRequest(sourceId, content, "source.txt"));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(graphProvider.BatchNodeCalls > 0, "expected batched node writes");
+        Assert.True(graphProvider.BatchEdgeCalls > 0, "expected batched relationship writes");
+        Assert.Contains(graphProvider.NodesCreated, n => n.Type == "Chunk");
+        Assert.Contains(graphProvider.EdgesCreated, e => e.RelationshipType == "works_with");
+    }
+
+    [Fact]
+    public async Task IngestAsync_bounded_concurrency_does_not_exceed_limit()
+    {
+        // Sprint 63: per-chunk LLM extraction runs with bounded concurrency (MaxLlmConcurrency = 4).
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var extraction = new ConcurrencyTrackingEntityExtractionService();
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            entityExtraction: extraction,
+            relationshipExtraction: new MockRelationshipExtractionService());
+        var content = string.Join(" ", Enumerable.Range(0, 6).Select(i => new string((char)('a' + i), 1100)));
+
+        var result = await service.IngestAsync(new IngestionRequest(Guid.NewGuid(), content, "source.txt"));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(extraction.CallCount >= 6, "expected one extraction per chunk");
+        Assert.True(extraction.MaxConcurrent <= 4, $"expected concurrency bounded at 4, saw {extraction.MaxConcurrent}");
+        Assert.True(extraction.MaxConcurrent >= 2, "expected some parallelism across chunks");
+    }
+
+    [Fact]
+    public async Task IngestAsync_runs_community_detection_for_new_source()
+    {
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var communityDetection = new CountingCommunityDetectionService(graphProvider);
+        var service = CreateService(ragsService, graphProvider, communityDetection: communityDetection);
+
+        var result = await service.IngestAsync(new IngestionRequest(Guid.NewGuid(), "test content"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, communityDetection.DiscoverCalls);
+    }
+
+    [Fact]
+    public async Task IngestAsync_skips_community_detection_for_existing_source()
+    {
+        // Sprint 63: community re-clustering is gated — a re-ingest of an existing source does not
+        // re-run the O(graph) scan.
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var sourceId = Guid.NewGuid();
+        await graphProvider.CreateNodeAsync(new GraphNode(
+            sourceId.ToString(),
+            "Existing Source",
+            "Source",
+            new Dictionary<string, object> { ["sourceId"] = sourceId.ToString() }));
+        var communityDetection = new CountingCommunityDetectionService(graphProvider);
+        var service = CreateService(ragsService, graphProvider, communityDetection: communityDetection);
+
+        var result = await service.IngestAsync(new IngestionRequest(sourceId, "test content", "source.txt"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, communityDetection.DiscoverCalls);
+    }
+
     private static GraphRagService CreateService(
         IRagsService ragsService,
         IGraphProvider graphProvider,
@@ -277,7 +359,8 @@ public sealed class GraphRagServiceTests
         IGraphSummaryService? graphSummary = null,
         ILazyEnrichmentKnowledgeSink? knowledgeSink = null,
         IGraphReasoningService? graphReasoning = null,
-        Func<IGraphTraversalBudget>? budgetFactory = null)
+        Func<IGraphTraversalBudget>? budgetFactory = null,
+        ICommunityDetectionService? communityDetection = null)
     {
         return new GraphRagService(
             ragsService,
@@ -287,7 +370,7 @@ public sealed class GraphRagServiceTests
             graphReasoning ?? new MockGraphReasoningService(ragsService, graphProvider),
             graphSummary ?? new MockGraphSummaryService(),
             new MockHierarchicalSummaryService(),
-            new MockCommunityDetectionService(graphProvider),
+            communityDetection ?? new MockCommunityDetectionService(graphProvider),
             new MockGraphContextBuilder(),
             new MockCitationPathService(),
             new MockGlobalGraphSearchService(),
@@ -867,6 +950,157 @@ public sealed class GraphRagServiceTests
             Entities.AddRange(entities);
             Relationships.AddRange(relationships);
             return Task.FromResult(Result.Success());
+        }
+    }
+
+    /// <summary>
+    /// Records whether the Sprint 63 batch write methods were used (instead of the default
+    /// per-item fallback) while still populating the same node/edge lists as <see cref="MockGraphProvider"/>.
+    /// </summary>
+    private sealed class BatchRecordingGraphProvider : IGraphProvider
+    {
+        private readonly MockGraphProvider _inner = new();
+
+        public int BatchNodeCalls { get; private set; }
+
+        public int BatchEdgeCalls { get; private set; }
+
+        public List<GraphNode> NodesCreated => _inner.NodesCreated;
+
+        public List<GraphEdge> EdgesCreated => _inner.EdgesCreated;
+
+        public Task<Result> CreateNodesAsync(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken = default)
+        {
+            BatchNodeCalls++;
+            foreach (var node in nodes)
+            {
+                _inner.NodesCreated.Add(node);
+            }
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result> CreateRelationshipsAsync(IReadOnlyList<GraphEdge> edges, CancellationToken cancellationToken = default)
+        {
+            BatchEdgeCalls++;
+            foreach (var edge in edges)
+            {
+                _inner.EdgesCreated.Add(edge);
+            }
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result> UpdateNodesAsync(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken = default)
+        {
+            foreach (var node in nodes)
+            {
+                _inner.UpdateNodeAsync(node, cancellationToken);
+            }
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<GraphNode?>> GetNodeAsync(string id, CancellationToken cancellationToken = default) => _inner.GetNodeAsync(id, cancellationToken);
+
+        public Task<Result> CreateNodeAsync(GraphNode node, CancellationToken cancellationToken = default) => _inner.CreateNodeAsync(node, cancellationToken);
+
+        public Task<Result> UpdateNodeAsync(GraphNode node, CancellationToken cancellationToken = default) => _inner.UpdateNodeAsync(node, cancellationToken);
+
+        public Task<Result> DeleteNodeAsync(string id, CancellationToken cancellationToken = default) => _inner.DeleteNodeAsync(id, cancellationToken);
+
+        public Task<Result<GraphEdge?>> GetRelationshipAsync(string id, CancellationToken cancellationToken = default) => _inner.GetRelationshipAsync(id, cancellationToken);
+
+        public Task<Result> CreateRelationshipAsync(GraphEdge edge, CancellationToken cancellationToken = default) => _inner.CreateRelationshipAsync(edge, cancellationToken);
+
+        public Task<Result> DeleteRelationshipAsync(string id, CancellationToken cancellationToken = default) => _inner.DeleteRelationshipAsync(id, cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphNode>>> GetNodesAsync(CancellationToken cancellationToken = default) => _inner.GetNodesAsync(cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphEdge>>> GetEdgesAsync(CancellationToken cancellationToken = default) => _inner.GetEdgesAsync(cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphNode>>> GetNeighborsAsync(string nodeId, CancellationToken cancellationToken = default) => _inner.GetNeighborsAsync(nodeId, cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphNode>>> SearchNodesAsync(string label, CancellationToken cancellationToken = default) => _inner.SearchNodesAsync(label, cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphEdge>>> SearchRelationshipsAsync(string type, CancellationToken cancellationToken = default) => _inner.SearchRelationshipsAsync(type, cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphPath>>> FindPathsAsync(string startNodeId, string endNodeId, CancellationToken cancellationToken = default) => _inner.FindPathsAsync(startNodeId, endNodeId, cancellationToken);
+
+        public Task<Result<IReadOnlyList<GraphNode>>> GetSubgraphAsync(string nodeId, int depth, CancellationToken cancellationToken = default) => _inner.GetSubgraphAsync(nodeId, depth, cancellationToken);
+
+        public Task<Result<bool>> GraphExistsAsync(CancellationToken cancellationToken = default) => _inner.GraphExistsAsync(cancellationToken);
+
+        public Task<Result> ClearAsync(CancellationToken cancellationToken = default) => _inner.ClearAsync(cancellationToken);
+    }
+
+    private sealed class ConcurrencyTrackingEntityExtractionService : IEntityExtractionService
+    {
+        private int _inFlight;
+
+        public int MaxConcurrent { get; private set; }
+
+        public int CallCount { get; private set; }
+
+        public async Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
+        {
+            var current = Interlocked.Increment(ref _inFlight);
+            MaxConcurrent = Math.Max(MaxConcurrent, current);
+            CallCount++;
+            try
+            {
+                await Task.Delay(30, cancellationToken).ConfigureAwait(false);
+                return Result<IReadOnlyList<ExtractedEntity>>.Success(Array.Empty<ExtractedEntity>());
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> ClassifyAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(entities));
+        }
+
+        public Task<Result<IReadOnlyList<ExtractedEntity>>> ScoreConfidenceAsync(IReadOnlyList<ExtractedEntity> entities, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<ExtractedEntity>>.Success(entities));
+        }
+    }
+
+    private sealed class CountingCommunityDetectionService : ICommunityDetectionService
+    {
+        private readonly IGraphProvider _provider;
+
+        public CountingCommunityDetectionService(IGraphProvider provider)
+        {
+            _provider = provider;
+        }
+
+        public int DiscoverCalls { get; private set; }
+
+        public Task<Result<IReadOnlyList<GraphCommunity>>> DiscoverAsync(CancellationToken cancellationToken = default)
+        {
+            DiscoverCalls++;
+            return Task.FromResult(Result<IReadOnlyList<GraphCommunity>>.Success(new List<GraphCommunity>()));
+        }
+
+        public Task<Result<IReadOnlyList<GraphCommunity>>> DetectClustersAsync(CancellationToken cancellationToken = default)
+        {
+            return DiscoverAsync(cancellationToken);
+        }
+
+        public Task<Result> AssignAsync(string nodeId, string communityId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<GraphCommunity?>> GetCommunityAsync(string communityId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<GraphCommunity?>.Success(null));
+        }
+
+        public Task<Result<IReadOnlyList<GraphCommunity>>> GetCommunitiesForNodeAsync(string nodeId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<GraphCommunity>>.Success(Array.Empty<GraphCommunity>()));
         }
     }
 }

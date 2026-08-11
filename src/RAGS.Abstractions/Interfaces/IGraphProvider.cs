@@ -42,4 +42,71 @@ public interface IGraphProvider
     {
         return Task.FromResult(Result.Failure("DeleteSourceAsync is not supported by this provider."));
     }
+
+    /// <summary>
+    /// Batch node creation (Sprint 63). Providers that support it should send the nodes as a single
+    /// UNWIND statement; the default implementation falls back to per-node calls so existing
+    /// providers and test fakes keep working unchanged.
+    /// </summary>
+    Task<Result> CreateNodesAsync(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken = default)
+    {
+        return CreateNodesAsyncCore(nodes, cancellationToken);
+    }
+
+    /// <summary>
+    /// Batch relationship creation (Sprint 63). Providers that support it should send the edges as
+    /// UNWIND statements; the default implementation falls back to per-edge calls.
+    /// </summary>
+    Task<Result> CreateRelationshipsAsync(IReadOnlyList<GraphEdge> edges, CancellationToken cancellationToken = default)
+    {
+        return CreateRelationshipsAsyncCore(edges, cancellationToken);
+    }
+
+    /// <summary>
+    /// Batch node update (Sprint 63). Providers that support it should send the nodes as a single
+    /// UNWIND statement; the default implementation falls back to per-node calls.
+    /// </summary>
+    Task<Result> UpdateNodesAsync(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken = default)
+    {
+        return UpdateNodesAsyncCore(nodes, cancellationToken);
+    }
+
+    private async Task<Result> CreateNodesAsyncCore(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken)
+    {
+        foreach (var node in nodes)
+        {
+            var result = await CreateNodeAsync(node, cancellationToken).ConfigureAwait(false);
+            if (result.IsFailure)
+            {
+                return result;
+            }
+        }
+        return Result.Success();
+    }
+
+    private async Task<Result> CreateRelationshipsAsyncCore(IReadOnlyList<GraphEdge> edges, CancellationToken cancellationToken)
+    {
+        foreach (var edge in edges)
+        {
+            var result = await CreateRelationshipAsync(edge, cancellationToken).ConfigureAwait(false);
+            if (result.IsFailure)
+            {
+                return result;
+            }
+        }
+        return Result.Success();
+    }
+
+    private async Task<Result> UpdateNodesAsyncCore(IReadOnlyList<GraphNode> nodes, CancellationToken cancellationToken)
+    {
+        foreach (var node in nodes)
+        {
+            var result = await UpdateNodeAsync(node, cancellationToken).ConfigureAwait(false);
+            if (result.IsFailure)
+            {
+                return result;
+            }
+        }
+        return Result.Success();
+    }
 }

@@ -18,6 +18,7 @@ public sealed class GraphRagService : IGraphRagService
     private const string SemanticTimeoutFallbackStrategy = "semantic-timeout-fallback";
     private const int MaxGraphChunks = 250;
     private const int MaxEntitiesPerChunk = 30;
+    private const int MaxLlmConcurrency = 4;
     private const int MaxLazyChunksPerQuery = 3;
     private const int MaxLazyEntitiesPerChunk = 8;
     private const int MaxLazyEntitySummariesPerQuery = 4;
@@ -94,15 +95,63 @@ public sealed class GraphRagService : IGraphRagService
                 ["content"] = request.Content,
             });
 
+        // Sprint 63: gate community re-clustering — only re-run the O(graph) scan when this source is
+        // new to the graph (first ingest). Re-ingests of an existing source skip it; retrieval-time
+        // discovery still re-clusters on cache miss.
+        var sourceExists = await SourceNodeExistsAsync(request.SourceId.ToString(), cancellationToken).ConfigureAwait(false);
+
         await _graphProvider.CreateNodeAsync(sourceNode, cancellationToken).ConfigureAwait(false);
 
         await PersistDocumentSummaryAsync(sourceNode, cancellationToken).ConfigureAwait(false);
 
         var chunks = _chunkingPipeline.Chunk(request.SourceId, request.Content).Take(MaxGraphChunks).ToList();
+
+        // Phase 1: bounded-concurrency LLM extraction across chunks (entity + relationship discovery).
+        // Chunks are independent, so they run in parallel up to MaxLlmConcurrency; within a chunk the
+        // relationship pass depends on its entities, so those stay sequential.
+        using var extractionSemaphore = new SemaphoreSlim(MaxLlmConcurrency);
+        var extractionTasks = chunks.Select(async chunk =>
+        {
+            await extractionSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var extractionResult = await _entityExtraction.DiscoverAsync(chunk.Content, null, cancellationToken).ConfigureAwait(false);
+                if (extractionResult.IsFailure || extractionResult.Value is null || !extractionResult.Value.Any())
+                {
+                    return new ChunkExtraction(chunk, Array.Empty<ExtractedEntity>(), null);
+                }
+
+                var entities = extractionResult.Value
+                    .Where(e => !string.IsNullOrWhiteSpace(e.Name))
+                    .Where(e => !NoiseEntityFilter.IsNoise(e))
+                    .Take(MaxEntitiesPerChunk)
+                    .Select(e => WithStableEntityId(e))
+                    .ToList();
+
+                var relationshipResult = await _relationshipExtraction
+                    .DiscoverAsync(chunk.Content, entities, cancellationToken)
+                    .ConfigureAwait(false);
+                return new ChunkExtraction(chunk, entities, relationshipResult.IsSuccess ? relationshipResult.Value : null);
+            }
+            finally
+            {
+                extractionSemaphore.Release();
+            }
+        }).ToList();
+
+        var extractions = await Task.WhenAll(extractionTasks).ConfigureAwait(false);
+
+        // Phase 2: build all nodes/edges and write them in batched UNWIND statements instead of N+1
+        // round-trips.
+        var allNodes = new List<GraphNode>();
+        var allEdges = new List<GraphEdge>();
+        var entityNodes = new List<GraphNode>();
         var createdEntityIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var chunk in chunks)
+        foreach (var extraction in extractions)
         {
+            var chunk = extraction.Chunk;
+
             var chunkNode = new GraphNode(
                 chunk.Id.ToString(),
                 $"{request.SourceName ?? request.SourceId.ToString()} chunk {chunk.Index}",
@@ -114,36 +163,19 @@ public sealed class GraphRagService : IGraphRagService
                     ["chunkIndex"] = chunk.Index,
                     ["content"] = chunk.Content
                 });
+            allNodes.Add(chunkNode);
+            allEdges.Add(new GraphEdge(
+                $"{request.SourceId}-has_chunk-{chunk.Id}",
+                request.SourceId.ToString(),
+                chunk.Id.ToString(),
+                "has_chunk",
+                new Dictionary<string, object>
+                {
+                    ["sourceId"] = request.SourceId.ToString(),
+                    ["chunkIndex"] = chunk.Index
+                }));
 
-            await _graphProvider.CreateNodeAsync(chunkNode, cancellationToken).ConfigureAwait(false);
-            await _graphProvider.CreateRelationshipAsync(
-                new GraphEdge(
-                    $"{request.SourceId}-has_chunk-{chunk.Id}",
-                    request.SourceId.ToString(),
-                    chunk.Id.ToString(),
-                    "has_chunk",
-                    new Dictionary<string, object>
-                    {
-                        ["sourceId"] = request.SourceId.ToString(),
-                        ["chunkIndex"] = chunk.Index
-                    }),
-                cancellationToken).ConfigureAwait(false);
-
-            var extractionResult = await _entityExtraction.DiscoverAsync(chunk.Content, null, cancellationToken).ConfigureAwait(false);
-            if (extractionResult.IsFailure || extractionResult.Value is null || !extractionResult.Value.Any())
-            {
-                continue;
-            }
-
-            var entities = extractionResult.Value
-                .Where(e => !string.IsNullOrWhiteSpace(e.Name))
-                .Where(e => !NoiseEntityFilter.IsNoise(e))
-                .Take(MaxEntitiesPerChunk)
-                .Select(e => WithStableEntityId(e))
-                .ToList();
-
-            // Create entity nodes in the graph
-            foreach (var entity in entities)
+            foreach (var entity in extraction.Entities)
             {
                 var entityNode = new GraphNode(
                     entity.Id,
@@ -158,11 +190,11 @@ public sealed class GraphRagService : IGraphRagService
                         ["chunkId"] = chunk.Id.ToString(),
                         ["chunkIndex"] = chunk.Index
                     });
-
-                await _graphProvider.CreateNodeAsync(entityNode, cancellationToken).ConfigureAwait(false);
+                allNodes.Add(entityNode);
+                entityNodes.Add(entityNode);
 
                 // Connect entity to source document
-                var sourceEdge = new GraphEdge(
+                allEdges.Add(new GraphEdge(
                     $"{entity.Id}-source-{request.SourceId}",
                     entity.Id,
                     request.SourceId.ToString(),
@@ -172,10 +204,8 @@ public sealed class GraphRagService : IGraphRagService
                         ["sourceId"] = request.SourceId.ToString(),
                         ["sourceName"] = request.SourceName ?? string.Empty,
                         ["summary"] = $"{entity.Name} was found in {request.SourceName ?? request.SourceId.ToString()}."
-                    });
-                await _graphProvider.CreateRelationshipAsync(sourceEdge, cancellationToken).ConfigureAwait(false);
-
-                var chunkEdge = new GraphEdge(
+                    }));
+                allEdges.Add(new GraphEdge(
                     $"{entity.Id}-mentioned_in-{chunk.Id}",
                     entity.Id,
                     chunk.Id.ToString(),
@@ -185,25 +215,18 @@ public sealed class GraphRagService : IGraphRagService
                         ["sourceId"] = request.SourceId.ToString(),
                         ["chunkIndex"] = chunk.Index,
                         ["summary"] = $"{entity.Name} is mentioned in chunk {chunk.Index}."
-                    });
-                await _graphProvider.CreateRelationshipAsync(chunkEdge, cancellationToken).ConfigureAwait(false);
-
-                if (createdEntityIds.Add(entity.Id))
-                {
-                    await PersistEntitySummaryAsync(entityNode, cancellationToken).ConfigureAwait(false);
-                }
+                    }));
             }
 
             // Step 4: Extract relationships between entities at chunk granularity
-            var relationshipResult = await _relationshipExtraction.DiscoverAsync(chunk.Content, entities, cancellationToken).ConfigureAwait(false);
-            if (relationshipResult.IsSuccess && relationshipResult.Value is not null && relationshipResult.Value.Any())
+            if (extraction.Relationships is not null)
             {
-                foreach (var rel in relationshipResult.Value)
+                foreach (var rel in extraction.Relationships)
                 {
-                    var sourceEntity = entities.FirstOrDefault(e => e.Id.Equals(rel.SourceId, StringComparison.OrdinalIgnoreCase));
-                    var targetEntity = entities.FirstOrDefault(e => e.Id.Equals(rel.TargetId, StringComparison.OrdinalIgnoreCase));
+                    var sourceEntity = extraction.Entities.FirstOrDefault(e => e.Id.Equals(rel.SourceId, StringComparison.OrdinalIgnoreCase));
+                    var targetEntity = extraction.Entities.FirstOrDefault(e => e.Id.Equals(rel.TargetId, StringComparison.OrdinalIgnoreCase));
                     var relationshipSummary = BuildRelationshipSummary(rel, sourceEntity, targetEntity, chunk.Index);
-                    var edge = new GraphEdge(
+                    allEdges.Add(new GraphEdge(
                         StableRelationshipId(rel.SourceId, rel.TargetId, rel.Type, chunk.Id.ToString()),
                         rel.SourceId,
                         rel.TargetId,
@@ -217,14 +240,37 @@ public sealed class GraphRagService : IGraphRagService
                             ["sourceName"] = request.SourceName ?? string.Empty,
                             ["chunkId"] = chunk.Id.ToString(),
                             ["chunkIndex"] = chunk.Index
-                        });
-
-                    await _graphProvider.CreateRelationshipAsync(edge, cancellationToken).ConfigureAwait(false);
+                        }));
                 }
             }
         }
 
-        await PersistCommunitySummariesAsync(cancellationToken).ConfigureAwait(false);
+        await _graphProvider.CreateNodesAsync(allNodes, cancellationToken).ConfigureAwait(false);
+        await _graphProvider.CreateRelationshipsAsync(allEdges, cancellationToken).ConfigureAwait(false);
+
+        // Phase 3: bounded-concurrency entity summaries (deduped across chunks).
+        var newEntityNodes = entityNodes.Where(e => createdEntityIds.Add(e.Id)).ToList();
+        using var summarySemaphore = new SemaphoreSlim(MaxLlmConcurrency);
+        var summaryTasks = newEntityNodes.Select(async entityNode =>
+        {
+            await summarySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await PersistEntitySummaryAsync(entityNode, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                summarySemaphore.Release();
+            }
+        }).ToList();
+        await Task.WhenAll(summaryTasks).ConfigureAwait(false);
+
+        // Phase 4: gated community detection + bounded-concurrency community summaries.
+        if (!sourceExists)
+        {
+            await PersistCommunitySummariesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         return Result.Success();
     }
 
@@ -902,30 +948,56 @@ public sealed class GraphRagService : IGraphRagService
             return;
         }
 
-        foreach (var community in communities.Value.Take(50))
+        // Sprint 63: bounded-concurrency community summaries, written in one batched UNWIND update.
+        var communityNodes = new List<GraphNode>();
+        using var communitySemaphore = new SemaphoreSlim(MaxLlmConcurrency);
+        var communityTasks = communities.Value.Take(50).Select(async community =>
         {
-            var summary = await _graphSummary.SummarizeCommunityAsync(community.Id, cancellationToken).ConfigureAwait(false);
-            if (summary.IsFailure || string.IsNullOrWhiteSpace(summary.Value))
+            await communitySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                continue;
-            }
-
-            var communityNode = new GraphNode(
-                community.Id,
-                community.Name,
-                "Community",
-                new Dictionary<string, object>
+                var summary = await _graphSummary.SummarizeCommunityAsync(community.Id, cancellationToken).ConfigureAwait(false);
+                if (summary.IsFailure || string.IsNullOrWhiteSpace(summary.Value))
                 {
-                    ["description"] = community.Description ?? string.Empty,
-                    ["summary"] = summary.Value,
-                    ["algorithm"] = community.Metadata.TryGetValue("algorithm", out var algorithm) ? algorithm : "leiden",
-                    ["level"] = community.Metadata.TryGetValue("level", out var level) ? level : 0,
-                    ["memberCount"] = community.MemberIds.Count
-                });
+                    return;
+                }
 
-            await _graphProvider.UpdateNodeAsync(communityNode, cancellationToken).ConfigureAwait(false);
-        }
+                lock (communityNodes)
+                {
+                    communityNodes.Add(new GraphNode(
+                        community.Id,
+                        community.Name,
+                        "Community",
+                        new Dictionary<string, object>
+                        {
+                            ["description"] = community.Description ?? string.Empty,
+                            ["summary"] = summary.Value,
+                            ["algorithm"] = community.Metadata.TryGetValue("algorithm", out var algorithm) ? algorithm : "leiden",
+                            ["level"] = community.Metadata.TryGetValue("level", out var level) ? level : 0,
+                            ["memberCount"] = community.MemberIds.Count
+                        }));
+                }
+            }
+            finally
+            {
+                communitySemaphore.Release();
+            }
+        }).ToList();
+        await Task.WhenAll(communityTasks).ConfigureAwait(false);
+
+        await _graphProvider.UpdateNodesAsync(communityNodes, cancellationToken).ConfigureAwait(false);
     }
+
+    private async Task<bool> SourceNodeExistsAsync(string sourceId, CancellationToken cancellationToken)
+    {
+        var result = await _graphProvider.GetNodeAsync(sourceId, cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess && result.Value is not null;
+    }
+
+    private sealed record ChunkExtraction(
+        Chunk Chunk,
+        IReadOnlyList<ExtractedEntity> Entities,
+        IReadOnlyList<ExtractedRelationship>? Relationships);
 
     private async Task UpdateNodeSummaryAsync(GraphNode node, string summary, CancellationToken cancellationToken)
     {

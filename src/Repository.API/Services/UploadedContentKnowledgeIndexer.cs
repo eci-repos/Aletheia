@@ -42,6 +42,7 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
     private const int MaxEntities = 30;
     private const int MaxTopics = 20;
     private const int MaxGraphChunks = 250;
+    private const int MaxLlmConcurrency = 4;
 
     private static readonly Regex WordPattern = new(@"\b[\p{L}\p{N}][\p{L}\p{N}\-]{2,}\b", RegexOptions.Compiled);
     private readonly PostgreSqlConnectionFactory _connectionFactory;
@@ -374,16 +375,52 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
                 ["content"] = content
             });
 
+        // Sprint 63: gate community re-clustering — only re-run the O(graph) scan when this source is
+        // new to the graph (first ingest). Re-ingests of an existing source skip it; retrieval-time
+        // discovery still re-clusters on cache miss.
+        var sourceExists = await SourceNodeExistsAsync(sourceId.ToString(), cancellationToken).ConfigureAwait(false);
+
         await _graphProvider.CreateNodeAsync(sourceNode, cancellationToken).ConfigureAwait(false);
         progress?.Report("Source summary", "Summarizing the source document node.", 72, force: true);
         await PersistNodeSummaryAsync(sourceNode, cancellationToken).ConfigureAwait(false);
 
-        var summarizedEntities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var chunks = _chunkingPipeline.Chunk(sourceId, content).Take(MaxGraphChunks).ToList();
         var chunkCount = Math.Max(chunks.Count, 1);
-        var processedChunks = 0;
-        foreach (var chunk in chunks)
+
+        // Phase 1: bounded-concurrency LLM extraction across chunks (entity + relationship discovery).
+        // Chunks are independent, so they run in parallel up to MaxLlmConcurrency; within a chunk the
+        // relationship pass depends on its entities, so those stay sequential.
+        using var extractionSemaphore = new SemaphoreSlim(MaxLlmConcurrency);
+        var extractionTasks = chunks.Select(async chunk =>
         {
+            await extractionSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var entities = await DiscoverChunkEntitiesAsync(chunk.Content, cancellationToken).ConfigureAwait(false);
+                var relationships = await _relationshipExtraction
+                    .DiscoverAsync(chunk.Content, entities, cancellationToken)
+                    .ConfigureAwait(false);
+                return new ChunkExtraction(chunk, entities, relationships.IsSuccess ? relationships.Value : null);
+            }
+            finally
+            {
+                extractionSemaphore.Release();
+            }
+        }).ToList();
+
+        var extractions = await Task.WhenAll(extractionTasks).ConfigureAwait(false);
+
+        // Phase 2: build all nodes/edges and write them in batched UNWIND statements instead of N+1
+        // round-trips. Progress is reported on the main thread as each chunk's write is staged.
+        var allNodes = new List<GraphNode>();
+        var allEdges = new List<GraphEdge>();
+        var entityNodes = new List<GraphNode>();
+        var summarizedEntities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var processedChunks = 0;
+
+        foreach (var extraction in extractions)
+        {
+            var chunk = extraction.Chunk;
             processedChunks++;
             var chunkPercent = 72 + (int)Math.Round(processedChunks * 18d / chunkCount);
             progress?.Report(
@@ -402,24 +439,20 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
                     ["chunkIndex"] = chunk.Index,
                     ["content"] = chunk.Content
                 });
+            allNodes.Add(chunkNode);
+            allEdges.Add(new GraphEdge(
+                $"{sourceId}-has_chunk-{chunk.Id}",
+                sourceId.ToString(),
+                chunk.Id.ToString(),
+                "has_chunk",
+                new Dictionary<string, object>
+                {
+                    ["sourceId"] = sourceId.ToString(),
+                    ["chunkIndex"] = chunk.Index,
+                    ["summary"] = $"{sourceName} contains chunk {chunk.Index}."
+                }));
 
-            await _graphProvider.CreateNodeAsync(chunkNode, cancellationToken).ConfigureAwait(false);
-            await _graphProvider.CreateRelationshipAsync(
-                new GraphEdge(
-                    $"{sourceId}-has_chunk-{chunk.Id}",
-                    sourceId.ToString(),
-                    chunk.Id.ToString(),
-                    "has_chunk",
-                    new Dictionary<string, object>
-                    {
-                        ["sourceId"] = sourceId.ToString(),
-                        ["chunkIndex"] = chunk.Index,
-                        ["summary"] = $"{sourceName} contains chunk {chunk.Index}."
-                    }),
-                cancellationToken).ConfigureAwait(false);
-
-            var chunkEntities = await DiscoverChunkEntitiesAsync(chunk.Content, cancellationToken).ConfigureAwait(false);
-            foreach (var entity in chunkEntities)
+            foreach (var entity in extraction.Entities)
             {
                 var entityNode = new GraphNode(
                     entity.Id,
@@ -434,56 +467,40 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
                         ["chunkId"] = chunk.Id.ToString(),
                         ["chunkIndex"] = chunk.Index
                     });
+                allNodes.Add(entityNode);
+                entityNodes.Add(entityNode);
 
-                await _graphProvider.CreateNodeAsync(entityNode, cancellationToken).ConfigureAwait(false);
-                await _graphProvider.CreateRelationshipAsync(
-                    new GraphEdge(
-                        $"{entity.Id}-source-{sourceId}",
-                        entity.Id,
-                        sourceId.ToString(),
-                        "found_in",
-                        new Dictionary<string, object>
-                        {
-                            ["sourceId"] = sourceId.ToString(),
-                            ["sourceName"] = sourceName,
-                            ["summary"] = $"{entity.Name} was found in {sourceName}."
-                        }),
-                    cancellationToken).ConfigureAwait(false);
-                await _graphProvider.CreateRelationshipAsync(
-                    new GraphEdge(
-                        $"{entity.Id}-mentioned_in-{chunk.Id}",
-                        entity.Id,
-                        chunk.Id.ToString(),
-                        "mentioned_in",
-                        new Dictionary<string, object>
-                        {
-                            ["sourceId"] = sourceId.ToString(),
-                            ["chunkIndex"] = chunk.Index,
-                            ["summary"] = $"{entity.Name} is mentioned in chunk {chunk.Index}."
-                        }),
-                    cancellationToken).ConfigureAwait(false);
+                allEdges.Add(new GraphEdge(
+                    $"{entity.Id}-source-{sourceId}",
+                    entity.Id,
+                    sourceId.ToString(),
+                    "found_in",
+                    new Dictionary<string, object>
+                    {
+                        ["sourceId"] = sourceId.ToString(),
+                        ["sourceName"] = sourceName,
+                        ["summary"] = $"{entity.Name} was found in {sourceName}."
+                    }));
+                allEdges.Add(new GraphEdge(
+                    $"{entity.Id}-mentioned_in-{chunk.Id}",
+                    entity.Id,
+                    chunk.Id.ToString(),
+                    "mentioned_in",
+                    new Dictionary<string, object>
+                    {
+                        ["sourceId"] = sourceId.ToString(),
+                        ["chunkIndex"] = chunk.Index,
+                        ["summary"] = $"{entity.Name} is mentioned in chunk {chunk.Index}."
+                    }));
+            }
 
-                if (summarizedEntities.Add(entity.Id))
+            if (extraction.Relationships is not null)
+            {
+                foreach (var relationship in extraction.Relationships)
                 {
-                    await PersistNodeSummaryAsync(entityNode, cancellationToken).ConfigureAwait(false);
-                }
-            }
-
-            var relationships = await _relationshipExtraction
-                .DiscoverAsync(chunk.Content, chunkEntities, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (relationships.IsFailure || relationships.Value is null)
-            {
-                continue;
-            }
-
-            foreach (var relationship in relationships.Value)
-            {
-                var sourceEntity = chunkEntities.FirstOrDefault(e => e.Id.Equals(relationship.SourceId, StringComparison.OrdinalIgnoreCase));
-                var targetEntity = chunkEntities.FirstOrDefault(e => e.Id.Equals(relationship.TargetId, StringComparison.OrdinalIgnoreCase));
-                await _graphProvider.CreateRelationshipAsync(
-                    new GraphEdge(
+                    var sourceEntity = extraction.Entities.FirstOrDefault(e => e.Id.Equals(relationship.SourceId, StringComparison.OrdinalIgnoreCase));
+                    var targetEntity = extraction.Entities.FirstOrDefault(e => e.Id.Equals(relationship.TargetId, StringComparison.OrdinalIgnoreCase));
+                    allEdges.Add(new GraphEdge(
                         StableRelationshipId(relationship.SourceId, relationship.TargetId, relationship.Type, chunk.Id.ToString()),
                         relationship.SourceId,
                         relationship.TargetId,
@@ -497,51 +514,92 @@ public sealed class UploadedContentKnowledgeIndexer : IUploadedContentKnowledgeI
                             ["sourceName"] = sourceName,
                             ["chunkId"] = chunk.Id.ToString(),
                             ["chunkIndex"] = chunk.Index
-                        }),
-                    cancellationToken).ConfigureAwait(false);
+                        }));
+                }
             }
         }
 
-        progress?.Report("Community detection", "Detecting graph communities.", 92, force: true);
-        var communities = await _communityDetection.DiscoverAsync(cancellationToken).ConfigureAwait(false);
-        if (communities.IsFailure || communities.Value is null)
-        {
-            return;
-        }
+        await _graphProvider.CreateNodesAsync(allNodes, cancellationToken).ConfigureAwait(false);
+        await _graphProvider.CreateRelationshipsAsync(allEdges, cancellationToken).ConfigureAwait(false);
 
-        var communityCount = Math.Max(communities.Value.Take(50).Count(), 1);
-        var processedCommunities = 0;
-        foreach (var community in communities.Value.Take(50))
+        // Phase 3: bounded-concurrency entity summaries (deduped across chunks).
+        var newEntityNodes = entityNodes.Where(e => summarizedEntities.Add(e.Id)).ToList();
+        using var summarySemaphore = new SemaphoreSlim(MaxLlmConcurrency);
+        var summaryTasks = newEntityNodes.Select(async entityNode =>
         {
-            processedCommunities++;
-            var communityPercent = 92 + (int)Math.Round(processedCommunities * 6d / communityCount);
-            progress?.Report(
-                "Community summaries",
-                $"Summarizing community {processedCommunities:N0} of {communityCount:N0}.",
-                communityPercent);
-
-            var summary = await _graphSummary.SummarizeCommunityAsync(community.Id, cancellationToken).ConfigureAwait(false);
-            if (summary.IsFailure || string.IsNullOrWhiteSpace(summary.Value))
+            await summarySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                continue;
+                await PersistNodeSummaryAsync(entityNode, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                summarySemaphore.Release();
+            }
+        }).ToList();
+        await Task.WhenAll(summaryTasks).ConfigureAwait(false);
+
+        // Phase 4: gated community detection + bounded-concurrency community summaries.
+        if (!sourceExists)
+        {
+            progress?.Report("Community detection", "Detecting graph communities.", 92, force: true);
+            var communities = await _communityDetection.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+            if (communities.IsFailure || communities.Value is null)
+            {
+                return;
             }
 
-            await _graphProvider.UpdateNodeAsync(
-                new GraphNode(
-                    community.Id,
-                    community.Name,
-                    "Community",
-                    new Dictionary<string, object>
+            var communityNodes = new List<GraphNode>();
+            using var communitySemaphore = new SemaphoreSlim(MaxLlmConcurrency);
+            var communityTasks = communities.Value.Take(50).Select(async community =>
+            {
+                await communitySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var summary = await _graphSummary.SummarizeCommunityAsync(community.Id, cancellationToken).ConfigureAwait(false);
+                    if (summary.IsFailure || string.IsNullOrWhiteSpace(summary.Value))
                     {
-                        ["description"] = community.Description ?? string.Empty,
-                        ["summary"] = summary.Value,
-                        ["algorithm"] = community.Metadata.TryGetValue("algorithm", out var algorithm) ? algorithm : "leiden",
-                        ["level"] = community.Metadata.TryGetValue("level", out var level) ? level : 0,
-                        ["memberCount"] = community.MemberIds.Count
-                    }),
-                cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+
+                    lock (communityNodes)
+                    {
+                        communityNodes.Add(new GraphNode(
+                            community.Id,
+                            community.Name,
+                            "Community",
+                            new Dictionary<string, object>
+                            {
+                                ["description"] = community.Description ?? string.Empty,
+                                ["summary"] = summary.Value,
+                                ["algorithm"] = community.Metadata.TryGetValue("algorithm", out var algorithm) ? algorithm : "leiden",
+                                ["level"] = community.Metadata.TryGetValue("level", out var level) ? level : 0,
+                                ["memberCount"] = community.MemberIds.Count
+                            }));
+                    }
+                }
+                finally
+                {
+                    communitySemaphore.Release();
+                }
+            }).ToList();
+            await Task.WhenAll(communityTasks).ConfigureAwait(false);
+
+            progress?.Report("Community summaries", $"Summarized {communityNodes.Count:N0} communities.", 98, force: true);
+            await _graphProvider.UpdateNodesAsync(communityNodes, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    private async Task<bool> SourceNodeExistsAsync(string sourceId, CancellationToken cancellationToken)
+    {
+        var result = await _graphProvider.GetNodeAsync(sourceId, cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess && result.Value is not null;
+    }
+
+    private sealed record ChunkExtraction(
+        Chunk Chunk,
+        IReadOnlyList<ExtractedEntity> Entities,
+        IReadOnlyList<ExtractedRelationship>? Relationships);
 
     private async Task<IReadOnlyList<ExtractedEntity>> DiscoverChunkEntitiesAsync(string content, CancellationToken cancellationToken)
     {

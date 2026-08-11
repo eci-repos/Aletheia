@@ -249,6 +249,31 @@ public sealed class GraphRagServiceTests
     }
 
     [Fact]
+    public async Task RetrieveAsync_deadline_fires_with_returned_failure_degrades_to_semantic_timeout_fallback()
+    {
+        // Sprint 62: PgVectorStore converts a cancelled vector search into a returned Failure (not a
+        // thrown OperationCanceledException), so a deadline cancellation can surface as a returned
+        // Failure from the semantic base retrieval. GraphRAG must degrade the same way as the thrown
+        // path — return the best-effort semantic fallback instead of hard-failing.
+        var ragsService = new CancellationConvertingRagsService();
+        var graphProvider = new MockGraphProvider();
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            budgetFactory: () => new GraphTraversalBudget(maxExecutionTime: TimeSpan.FromMilliseconds(100)));
+
+        var result = await service.RetrieveAsync("query", topK: 2);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotEmpty(result.Value!);
+        var first = result.Value!.First();
+        Assert.NotNull(first.Trace);
+        Assert.Equal("semantic-timeout-fallback", first.Trace!.Strategy);
+        Assert.Contains("deadline-exceeded", first.Trace.Steps);
+        Assert.Contains("semantic-fallback", first.Trace.Steps);
+    }
+
+    [Fact]
     public async Task RetrieveAsync_caller_cancellation_returns_failure_not_fallback()
     {
         // Sprint 62: caller cancellation is a hard signal — no best-effort fallback.
@@ -629,6 +654,38 @@ public sealed class GraphRagServiceTests
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             return Result<IReadOnlyList<GraphNode>>.Success(Array.Empty<GraphNode>());
+        }
+    }
+
+    /// <summary>
+    /// Mimics PgVectorStore's cancellation behavior: when the request token is cancelled (e.g. the
+    /// GraphRAG execution deadline fired), the vector search catches the
+    /// <see cref="OperationCanceledException"/> and returns a <see cref="Result{T}.Failure(string)"/>
+    /// instead of throwing — exercising the returned-Failure degrade path in
+    /// <see cref="GraphRagService.RetrieveAsync"/>.
+    /// </summary>
+    private sealed class CancellationConvertingRagsService : IRagsService
+    {
+        public Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public async Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(RetrievalRequest request, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return Result<IReadOnlyList<SearchResult>>.Failure("Vector search failed. The operation was canceled.");
+            }
+
+            var results = Enumerable.Range(0, Math.Min(request.TopK, 3))
+                .Select(i => new SearchResult(new Chunk(Guid.NewGuid(), Guid.NewGuid(), $"chunk {i}", i), 0.95f - (i * 0.01f)))
+                .ToList();
+            return Result<IReadOnlyList<SearchResult>>.Success(results);
         }
     }
 

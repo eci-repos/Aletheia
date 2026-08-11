@@ -459,6 +459,15 @@ public sealed class GraphRagService : IGraphRagService
             var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK, sourceIds: sourceIds), ct).ConfigureAwait(false);
             if (baseResults.IsFailure || baseResults.Value is null)
             {
+                // Sprint 62: PgVectorStore converts a cancelled vector search into a returned Failure
+                // (not a thrown OperationCanceledException), so a deadline cancellation can land here
+                // without ever reaching the catch block. Degrade the same way instead of hard-failing.
+                if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    return await RunSemanticTimeoutFallbackAsync(
+                        query, topK, sourceIds, budget, steps, llmCalls, stopwatch, cancellationToken).ConfigureAwait(false);
+                }
+
                 return Result<IReadOnlyList<SearchResult>>.Failure(baseResults.Error ?? RetrievalFailedMessage);
             }
 
@@ -564,37 +573,8 @@ public sealed class GraphRagService : IGraphRagService
             // best partial result with a visible timeout trace instead of failing the whole request.
             if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
-                steps.Add("deadline-exceeded");
-                llmCalls++;
-                try
-                {
-                    using var fallbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    fallbackCts.CancelAfter(FallbackExecutionTime);
-                    var fallback = await _ragsService.RetrieveAsync(
-                        new RetrievalRequest(query, topK, sourceIds: sourceIds), fallbackCts.Token).ConfigureAwait(false);
-
-                    if (fallback.IsSuccess && fallback.Value is not null && fallback.Value.Any())
-                    {
-                        steps.Add("semantic-fallback");
-                        var fallbackResults = fallback.Value.ToList();
-                        var fallbackTrace = BuildTrace(
-                            SemanticTimeoutFallbackStrategy,
-                            llmCalls,
-                            budget,
-                            steps,
-                            stopwatch.ElapsedMilliseconds);
-
-                        return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(fallbackResults, fallbackTrace));
-                    }
-
-                    return Result<IReadOnlyList<SearchResult>>.Failure(
-                        fallback.Error ?? $"{RetrievalFailedMessage} The retrieval deadline was exceeded and the semantic fallback produced no results.");
-                }
-                catch (Exception fallbackEx)
-                {
-                    return Result<IReadOnlyList<SearchResult>>.Failure(
-                        $"{RetrievalFailedMessage} The retrieval deadline was exceeded and the semantic fallback failed: {fallbackEx.Message}");
-                }
+                return await RunSemanticTimeoutFallbackAsync(
+                    query, topK, sourceIds, budget, steps, llmCalls, stopwatch, cancellationToken).ConfigureAwait(false);
             }
 
             // Caller cancellation and unexpected failures keep the hard-failure contract.
@@ -602,6 +582,54 @@ public sealed class GraphRagService : IGraphRagService
                 cancellationToken.IsCancellationRequested
                     ? $"{RetrievalFailedMessage} The operation was cancelled."
                     : $"{RetrievalFailedMessage} {ex.Message}");
+        }
+    }
+
+    // Sprint 62: the per-request deadline fired (caller did NOT cancel) — return the best-effort
+    // plain semantic retrieval under a short secondary deadline with a visible timeout trace
+    // instead of failing the whole request. Shared by the thrown-exception catch path and the
+    // returned-Failure path (PgVectorStore converts a cancelled vector search into a Failure result,
+    // so a deadline cancellation can surface as a returned Failure without throwing).
+    private async Task<Result<IReadOnlyList<SearchResult>>> RunSemanticTimeoutFallbackAsync(
+        string query,
+        int topK,
+        IReadOnlyList<Guid>? sourceIds,
+        IGraphTraversalBudget budget,
+        List<string> steps,
+        int llmCalls,
+        System.Diagnostics.Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        steps.Add("deadline-exceeded");
+        llmCalls++;
+        try
+        {
+            using var fallbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            fallbackCts.CancelAfter(FallbackExecutionTime);
+            var fallback = await _ragsService.RetrieveAsync(
+                new RetrievalRequest(query, topK, sourceIds: sourceIds), fallbackCts.Token).ConfigureAwait(false);
+
+            if (fallback.IsSuccess && fallback.Value is not null && fallback.Value.Any())
+            {
+                steps.Add("semantic-fallback");
+                var fallbackResults = fallback.Value.ToList();
+                var fallbackTrace = BuildTrace(
+                    SemanticTimeoutFallbackStrategy,
+                    llmCalls,
+                    budget,
+                    steps,
+                    stopwatch.ElapsedMilliseconds);
+
+                return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(fallbackResults, fallbackTrace));
+            }
+
+            return Result<IReadOnlyList<SearchResult>>.Failure(
+                fallback.Error ?? $"{RetrievalFailedMessage} The retrieval deadline was exceeded and the semantic fallback produced no results.");
+        }
+        catch (Exception fallbackEx)
+        {
+            return Result<IReadOnlyList<SearchResult>>.Failure(
+                $"{RetrievalFailedMessage} The retrieval deadline was exceeded and the semantic fallback failed: {fallbackEx.Message}");
         }
     }
 

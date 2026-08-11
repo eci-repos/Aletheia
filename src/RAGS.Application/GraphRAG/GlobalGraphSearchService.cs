@@ -16,6 +16,7 @@ public sealed class GlobalGraphSearchService : IGlobalGraphSearchService
     private readonly IGraphContextBuilder _contextBuilder;
     private readonly ICitationPathService _citationPath;
     private readonly Kernel? _kernel;
+    private readonly IGraphProvider? _graphProvider;
 
     public GlobalGraphSearchService(
         ICommunityDetectionService communityDetection,
@@ -23,7 +24,8 @@ public sealed class GlobalGraphSearchService : IGlobalGraphSearchService
         IHierarchicalSummaryService hierarchicalSummary,
         IGraphContextBuilder contextBuilder,
         ICitationPathService citationPath,
-        Kernel? kernel = null)
+        Kernel? kernel = null,
+        IGraphProvider? graphProvider = null)
     {
         _communityDetection = communityDetection ?? throw new ArgumentNullException(nameof(communityDetection));
         _graphSummary = graphSummary ?? throw new ArgumentNullException(nameof(graphSummary));
@@ -31,9 +33,13 @@ public sealed class GlobalGraphSearchService : IGlobalGraphSearchService
         _contextBuilder = contextBuilder ?? throw new ArgumentNullException(nameof(contextBuilder));
         _citationPath = citationPath ?? throw new ArgumentNullException(nameof(citationPath));
         _kernel = kernel;
+        _graphProvider = graphProvider;
     }
 
-    public async Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<Result<GlobalSearchResult>> SearchAsync(
+        string query,
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -48,6 +54,16 @@ public sealed class GlobalGraphSearchService : IGlobalGraphSearchService
         }
 
         var communities = SelectTopLevelCommunities(communitiesResult.Value);
+
+        // Sprint 64: theme scope — keep only communities whose members belong to the selected sources.
+        if (sourceIds is not null && sourceIds.Count > 0)
+        {
+            communities = await FilterCommunitiesToScopeAsync(communities, sourceIds, cancellationToken).ConfigureAwait(false);
+            if (!communities.Any())
+            {
+                return Result<GlobalSearchResult>.Failure("No communities in the selected themes.");
+            }
+        }
 
         // 2. Summary Retrieval (Map Phase)
         var communitySummaries = new List<(GraphCommunity Community, string Summary)>();
@@ -184,6 +200,38 @@ public sealed class GlobalGraphSearchService : IGlobalGraphSearchService
         {
             return prompt;
         }
+    }
+
+    private async Task<IReadOnlyList<GraphCommunity>> FilterCommunitiesToScopeAsync(
+        IReadOnlyList<GraphCommunity> communities,
+        IReadOnlyList<Guid> sourceIds,
+        CancellationToken cancellationToken)
+    {
+        if (_graphProvider is null)
+        {
+            return communities;
+        }
+
+        var nodesResult = await _graphProvider.GetNodesAsync(cancellationToken).ConfigureAwait(false);
+        if (nodesResult.IsFailure || nodesResult.Value is null)
+        {
+            return communities;
+        }
+
+        var nodeToSource = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodesResult.Value)
+        {
+            var sourceId = GraphThemeScope.TryGetSourceId(node);
+            if (sourceId is not null)
+            {
+                nodeToSource[node.Id] = sourceId.Value;
+            }
+        }
+
+        var allowed = GraphThemeScope.ToAllowSet(sourceIds);
+        return communities
+            .Where(c => GraphThemeScope.CommunityHasMemberInScope(c, nodeToSource, allowed))
+            .ToList();
     }
 
     private static IReadOnlyList<GraphCommunity> SelectTopLevelCommunities(IReadOnlyList<GraphCommunity> communities)

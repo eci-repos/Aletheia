@@ -10,5 +10,6 @@ public interface IGlobalGraphSearchService
     /// </summary>
     Task<Result<GlobalSearchResult>> SearchAsync(
         string query,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null);
 }

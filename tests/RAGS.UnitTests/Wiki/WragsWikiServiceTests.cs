@@ -305,7 +305,7 @@ public sealed class WragsWikiServiceTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             RetrieveCalls++;
             var sourceId = Guid.NewGuid();
@@ -322,7 +322,7 @@ public sealed class WragsWikiServiceTests
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(results));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<GlobalSearchResult>.Failure("Not used."));
         }
@@ -348,12 +348,12 @@ public sealed class WragsWikiServiceTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<GlobalSearchResult>.Failure("Not used."));
         }

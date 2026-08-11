@@ -87,6 +87,40 @@ public sealed class LazyGraphRagServiceTests
     }
 
     [Fact]
+    public async Task RetrieveAsync_theme_scope_flows_source_ids_to_semantic_retrieval()
+    {
+        // Sprint 64: the semantic fallback and expansion RetrievalRequests carry the theme scope,
+        // so a LazyGraphRAG query that degrades to semantic retrieval stays theme-scoped.
+        var ragsService = new RecordingRagsService();
+        var service = CreateService(ragsService);
+        var sourceA = Guid.NewGuid();
+
+        var result = await service.RetrieveAsync("query", topK: 2, sourceIds: new[] { sourceA });
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(ragsService.LastSourceIds);
+        Assert.Contains(sourceA, ragsService.LastSourceIds!);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_theme_scope_filters_corpus_seed_sources()
+    {
+        // Sprint 64: corpus candidates outside the selected sources are dropped before entity
+        // discovery, so out-of-scope sources are never queried for terms.
+        var ragsService = new MockRagsService();
+        var sourceA = Guid.NewGuid();
+        var sourceB = Guid.NewGuid();
+        var corpusIndex = new RecordingCorpusIndex(new[] { sourceA, sourceB });
+        var service = CreateService(ragsService, corpusIndex: corpusIndex);
+
+        var result = await service.RetrieveAsync("query", topK: 2, sourceIds: new[] { sourceA });
+
+        Assert.True(result.IsSuccess);
+        Assert.DoesNotContain(sourceB, corpusIndex.QueriedSources);
+        Assert.Contains(sourceA, corpusIndex.QueriedSources);
+    }
+
+    [Fact]
     public async Task RetrieveAsync_uses_query_time_relationship_guidance_under_budget()
     {
         var ragsService = new MockRagsService();
@@ -194,13 +228,14 @@ public sealed class LazyGraphRagServiceTests
         IRagsService ragsService,
         IGraphTraversalBudget? budget = null,
         ILazyEntityDiscoveryService? lazyDiscovery = null,
-        ILazyRelationshipDiscoveryService? lazyRelationshipDiscovery = null)
+        ILazyRelationshipDiscoveryService? lazyRelationshipDiscovery = null,
+        ICorpusDiscoveryIndex? corpusIndex = null)
     {
         var graphProvider = new MockGraphProvider();
         return new LazyGraphRagService(
             ragsService,
             new ChunkingPipeline(),
-            new CorpusDiscoveryIndex(),
+            corpusIndex ?? new CorpusDiscoveryIndex(),
             new MockGraphReasoningService(ragsService, graphProvider),
             new SubgraphPruningService(),
             new MockGraphSummaryService(),
@@ -294,6 +329,64 @@ public sealed class LazyGraphRagServiceTests
                 .ToList();
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(results));
         }
+    }
+
+    /// <summary>
+    /// Records the <see cref="RetrievalRequest.SourceIds"/> of the last semantic retrieval — used
+    /// to verify the Sprint 64 theme scope flows through to the semantic fallback/expansion.
+    /// </summary>
+    private sealed class RecordingRagsService : IRagsService
+    {
+        public IReadOnlyList<Guid>? LastSourceIds { get; private set; }
+
+        public Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(RetrievalRequest request, CancellationToken cancellationToken = default)
+        {
+            LastSourceIds = request.SourceIds;
+            var results = Enumerable.Range(0, Math.Min(request.TopK, 3))
+                .Select(i => new SearchResult(new Chunk(Guid.NewGuid(), Guid.NewGuid(), $"chunk {i}", i), 0.95f - (i * 0.01f)))
+                .ToList();
+            return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(results));
+        }
+    }
+
+    /// <summary>
+    /// Returns a fixed set of corpus sources and records which sources are queried for terms —
+    /// used to verify the Sprint 64 corpus-seed theme-scope filtering.
+    /// </summary>
+    private sealed class RecordingCorpusIndex : ICorpusDiscoveryIndex
+    {
+        private readonly IReadOnlyList<Guid> _sources;
+
+        public RecordingCorpusIndex(IReadOnlyList<Guid> sources)
+        {
+            _sources = sources;
+        }
+
+        public List<Guid> QueriedSources { get; } = new();
+
+        public Task<Result> IndexAsync(string content, Guid sourceId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public IReadOnlyList<string> GetTerms(Guid sourceId)
+        {
+            QueriedSources.Add(sourceId);
+            return new[] { "alpha", "beta" };
+        }
+
+        public float GetTfIdf(string term, Guid sourceId) => 0.5f;
+
+        public float GetBm25Score(string term, Guid sourceId) => 0.5f;
+
+        public CorpusStatistics GetStatistics(Guid sourceId) => new();
+
+        public IReadOnlyList<Guid> SearchCorpus(string query, int topK = 10) => _sources;
     }
 
     private sealed class FailingRagsService : IRagsService
@@ -434,7 +527,7 @@ public sealed class LazyGraphRagServiceTests
 
     private sealed class MockGlobalGraphSearchService : IGlobalGraphSearchService
     {
-        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             var result = new GlobalSearchResult(
                 $"Global answer for: {query}",

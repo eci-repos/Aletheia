@@ -11,12 +11,14 @@ public interface ILazyGraphRagService
         string query,
         int topK = 5,
         int maxExpanded = 10,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null);
 
     /// <summary>
     /// Executes a global (organization-wide) search using map-reduce over community summaries.
     /// </summary>
     Task<Result<GlobalSearchResult>> GlobalSearchAsync(
         string query,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null);
 }

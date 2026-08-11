@@ -66,10 +66,11 @@ public sealed class SemanticKernelPluginRegistrationTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
             => Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
             => Task.FromResult(Result<GlobalSearchResult>.Success(new GlobalSearchResult(string.Empty, Array.Empty<string>(), Array.Empty<SearchResult>())));
     }
 
@@ -82,16 +83,17 @@ public sealed class SemanticKernelPluginRegistrationTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
             => Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
             => Task.FromResult(Result<GlobalSearchResult>.Success(new GlobalSearchResult(string.Empty, Array.Empty<string>(), Array.Empty<SearchResult>())));
     }
 
     private sealed class EmptyGlobalGraphSearchService : IGlobalGraphSearchService
     {
-        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
             => Task.FromResult(Result<GlobalSearchResult>.Success(new GlobalSearchResult(string.Empty, Array.Empty<string>(), Array.Empty<SearchResult>())));
     }
 

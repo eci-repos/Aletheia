@@ -278,7 +278,8 @@ public sealed class GraphRagService : IGraphRagService
         string query,
         int topK = 5,
         int maxExpanded = 10,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -304,6 +305,13 @@ public sealed class GraphRagService : IGraphRagService
             var resolvedEntities = entityResolution.IsSuccess && entityResolution.Value is not null
                 ? entityResolution.Value.ToList()
                 : new List<GraphNode>();
+
+            // Sprint 64: theme scope — drop entities outside the selected sources before community
+            // resolution so summaries, communities, and citations stay within the scope.
+            if (sourceIds is not null && sourceIds.Count > 0)
+            {
+                resolvedEntities = GraphThemeScope.FilterNodes(resolvedEntities, sourceIds).ToList();
+            }
             steps.Add("entity-resolution");
 
             // === Execution Trace: Entity Resolution → Community Resolution ===
@@ -350,7 +358,8 @@ public sealed class GraphRagService : IGraphRagService
                 resolvedEntities,
                 communityIds,
                 contextResult.Value,
-                ct).ConfigureAwait(false);
+                ct,
+                sourceIds).ConfigureAwait(false);
             steps.Add("summary-candidates");
 
             if (summaryCandidates.Any())
@@ -372,7 +381,7 @@ public sealed class GraphRagService : IGraphRagService
             }
 
             llmCalls++;
-            var lazyEntities = await EnsureQueryTimeEnrichmentAsync(query, topK, budget, ct).ConfigureAwait(false);
+            var lazyEntities = await EnsureQueryTimeEnrichmentAsync(query, topK, budget, ct, sourceIds).ConfigureAwait(false);
             if (lazyEntities.Count > 0)
             {
                 steps.Add("lazy-enrichment");
@@ -400,7 +409,8 @@ public sealed class GraphRagService : IGraphRagService
                     resolvedEntities,
                     communityIds,
                     contextResult.Value,
-                    ct).ConfigureAwait(false);
+                    ct,
+                    sourceIds).ConfigureAwait(false);
 
                 if (summaryCandidates.Any())
                 {
@@ -446,7 +456,7 @@ public sealed class GraphRagService : IGraphRagService
             }
 
             // Step 2: Fall back to semantic-only retrieval if graph reasoning fails
-            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK), ct).ConfigureAwait(false);
+            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK, sourceIds: sourceIds), ct).ConfigureAwait(false);
             if (baseResults.IsFailure || baseResults.Value is null)
             {
                 return Result<IReadOnlyList<SearchResult>>.Failure(baseResults.Error ?? RetrievalFailedMessage);
@@ -463,7 +473,9 @@ public sealed class GraphRagService : IGraphRagService
             var graphNodes = await _graphProvider.GetNodesAsync(ct).ConfigureAwait(false);
             if (graphNodes.IsSuccess && graphNodes.Value is not null && graphNodes.Value.Any())
             {
-                var entityNodes = graphNodes.Value.Where(IsSemanticEntityNode).ToList();
+                // Sprint 64: theme scope — only traverse entities belonging to the selected sources.
+                var scopedGraphNodes = GraphThemeScope.FilterNodes(graphNodes.Value, sourceIds);
+                var entityNodes = scopedGraphNodes.Where(IsSemanticEntityNode).ToList();
                 var queryEntities = FindQueryEntities(query, entityNodes);
 
                 if (queryEntities.Any())
@@ -504,7 +516,7 @@ public sealed class GraphRagService : IGraphRagService
                         if (node is null) continue;
 
                         var nodeResults = await _ragsService.RetrieveAsync(
-                            new RetrievalRequest(node.Label, Math.Min(3, topK)), ct).ConfigureAwait(false);
+                            new RetrievalRequest(node.Label, Math.Min(3, topK), sourceIds: sourceIds), ct).ConfigureAwait(false);
 
                         if (nodeResults.IsSuccess && nodeResults.Value is not null)
                         {
@@ -559,7 +571,7 @@ public sealed class GraphRagService : IGraphRagService
                     using var fallbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     fallbackCts.CancelAfter(FallbackExecutionTime);
                     var fallback = await _ragsService.RetrieveAsync(
-                        new RetrievalRequest(query, topK), fallbackCts.Token).ConfigureAwait(false);
+                        new RetrievalRequest(query, topK, sourceIds: sourceIds), fallbackCts.Token).ConfigureAwait(false);
 
                     if (fallback.IsSuccess && fallback.Value is not null && fallback.Value.Any())
                     {
@@ -597,10 +609,11 @@ public sealed class GraphRagService : IGraphRagService
         string query,
         int topK,
         IGraphTraversalBudget budget,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         var retrieval = await _ragsService.RetrieveAsync(
-            new RetrievalRequest(query, Math.Clamp(topK, 1, MaxLazyChunksPerQuery)),
+            new RetrievalRequest(query, Math.Clamp(topK, 1, MaxLazyChunksPerQuery), sourceIds: sourceIds),
             cancellationToken).ConfigureAwait(false);
 
         if (retrieval.IsFailure || retrieval.Value is null || retrieval.Value.Count == 0)
@@ -830,14 +843,15 @@ public sealed class GraphRagService : IGraphRagService
 
     public async Task<Result<GlobalSearchResult>> GlobalSearchAsync(
         string query,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
             throw new ArgumentException("Query is required.", nameof(query));
         }
 
-        return await _globalSearch.SearchAsync(query, cancellationToken).ConfigureAwait(false);
+        return await _globalSearch.SearchAsync(query, cancellationToken, sourceIds).ConfigureAwait(false);
     }
 
     private static List<GraphNode> FindQueryEntities(string query, List<GraphNode> entityNodes)
@@ -1016,7 +1030,8 @@ public sealed class GraphRagService : IGraphRagService
         IReadOnlyList<GraphNode> resolvedEntities,
         IReadOnlySet<string> communityIds,
         string? structuredContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         var candidates = new List<RetrievalCandidate>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1054,7 +1069,7 @@ public sealed class GraphRagService : IGraphRagService
                 citations));
         }
 
-        var communities = await ResolveRelevantCommunitiesAsync(query, communityIds, cancellationToken).ConfigureAwait(false);
+        var communities = await ResolveRelevantCommunitiesAsync(query, communityIds, cancellationToken, sourceIds).ConfigureAwait(false);
         foreach (var community in communities.Take(6))
         {
             if (!seen.Add(community.Id))
@@ -1084,7 +1099,8 @@ public sealed class GraphRagService : IGraphRagService
     private async Task<IReadOnlyList<GraphCommunity>> ResolveRelevantCommunitiesAsync(
         string query,
         IReadOnlySet<string> communityIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         var communities = new List<GraphCommunity>();
         foreach (var communityId in communityIds)
@@ -1108,7 +1124,7 @@ public sealed class GraphRagService : IGraphRagService
         }
 
         var queryTerms = Tokenize(query);
-        return discovered.Value
+        var matched = discovered.Value
             .Where(c =>
                 c.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 (c.Description?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
@@ -1118,6 +1134,39 @@ public sealed class GraphRagService : IGraphRagService
             .ThenByDescending(c => c.MemberIds.Count)
             .Take(6)
             .ToList();
+
+        // Sprint 64: theme scope — keep only communities whose members belong to the selected sources.
+        if (sourceIds is not null && sourceIds.Count > 0)
+        {
+            var nodeToSource = await BuildNodeToSourceMapAsync(cancellationToken).ConfigureAwait(false);
+            var allowed = GraphThemeScope.ToAllowSet(sourceIds);
+            return matched
+                .Where(c => GraphThemeScope.CommunityHasMemberInScope(c, nodeToSource, allowed))
+                .ToList();
+        }
+
+        return matched;
+    }
+
+    private async Task<IReadOnlyDictionary<string, Guid>> BuildNodeToSourceMapAsync(CancellationToken cancellationToken)
+    {
+        var result = await _graphProvider.GetNodesAsync(cancellationToken).ConfigureAwait(false);
+        if (result.IsFailure || result.Value is null)
+        {
+            return new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var map = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in result.Value)
+        {
+            var sourceId = GraphThemeScope.TryGetSourceId(node);
+            if (sourceId is not null)
+            {
+                map[node.Id] = sourceId.Value;
+            }
+        }
+
+        return map;
     }
 
     private static RetrievalCandidate CreateSummaryCandidate(

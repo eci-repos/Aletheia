@@ -2397,12 +2397,13 @@ public class ChatExecutionEngineTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<GlobalSearchResult>.Success(new GlobalSearchResult("GraphRAG global answer.", Array.Empty<string>(), Array.Empty<SearchResult>())));
         }
@@ -2426,12 +2427,13 @@ public class ChatExecutionEngineTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Failure(_error));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<GlobalSearchResult>.Failure(_error));
         }
@@ -2448,12 +2450,13 @@ public class ChatExecutionEngineTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<GlobalSearchResult>.Success(new GlobalSearchResult("LazyGraphRAG global answer.", Array.Empty<string>(), Array.Empty<SearchResult>())));
         }
@@ -2699,12 +2702,12 @@ public class ChatExecutionEngineTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public async Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public async Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
             return Result<GlobalSearchResult>.Success(new GlobalSearchResult("GraphRAG global answer.", Array.Empty<string>(), Array.Empty<SearchResult>()));
@@ -2718,12 +2721,12 @@ public class ChatExecutionEngineTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<SearchResult>>> RetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public async Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public async Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
             return Result<GlobalSearchResult>.Success(new GlobalSearchResult("LazyGraphRAG global answer.", Array.Empty<string>(), Array.Empty<SearchResult>()));
@@ -2732,7 +2735,7 @@ public class ChatExecutionEngineTests
 
     private sealed class FakeGlobalGraphSearchService : IGlobalGraphSearchService
     {
-        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             return Task.FromResult(Result<GlobalSearchResult>.Success(new GlobalSearchResult("Global graph answer.", Array.Empty<string>(), Array.Empty<SearchResult>())));
         }
@@ -2752,13 +2755,14 @@ public class ChatExecutionEngineTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
         {
             WasCalled = true;
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             WasCalled = true;
             return Task.FromResult(Result<GlobalSearchResult>.Failure("GraphRAG should not be invoked in this chat path."));
@@ -2779,13 +2783,14 @@ public class ChatExecutionEngineTests
             string query,
             int topK = 5,
             int maxExpanded = 10,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyList<Guid>? sourceIds = null)
         {
             WasCalled = true;
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
         }
 
-        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> GlobalSearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             WasCalled = true;
             return Task.FromResult(Result<GlobalSearchResult>.Failure("LazyGraphRAG should not be invoked in this chat path."));

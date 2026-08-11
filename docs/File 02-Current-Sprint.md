@@ -1,50 +1,62 @@
-# Sprint 63 - Persisted LazyGraphRAG Corpus Index and Batch GraphRAG Ingest
+# Sprint 64 - Theme-Aware Graph Retrieval
 
 **Status:** Active (2026-08-11)
 
-Full authority: `docs/sprints/Sprint-63 - Persisted LazyGraphRAG Corpus Index and Batch GraphRAG Ingest.md` (created 2026-08-11). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-64 - Theme-Aware Graph Retrieval.md` (created 2026-08-11). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 62 (GraphRAG Soft Deadline and Reembed Parity) is **complete, committed, and pushed** (`26995d9` on `origin/master`). Its optional Docker smoke test (reembed speed + `semantic-timeout-fallback` trace under LLM saturation) is user-side and can run in parallel.
+Sprint 63 (Persisted LazyGraphRAG Corpus Index and Batch GraphRAG Ingest) is **complete, committed, and pushed** (`df7627d` on `origin/master`). Sprint 62 (GraphRAG Soft Deadline and Reembed Parity) is **complete** (`26995d9`); its optional Docker smoke test (reembed speed + `semantic-timeout-fallback` trace under LLM saturation) is user-side and can run in parallel.
 
 ## Objective
 
-Two infrastructure-hardening items for the GraphRAG / LazyGraphRAG retrieval paths — the last two parked items from the GraphRAG/LazyGraphRAG enhancement backlog:
-
-1. **Persist the LazyGraphRAG corpus index to PostgreSQL** — the in-memory `CorpusDiscoveryIndex` (singleton) is lost on restart and invisible to a second instance, so a fresh instance sees an empty corpus and LazyGraphRAG candidate selection degrades until the corpus is re-discovered. Persist term frequency / doc frequency / avg doc length so the corpus survives restart and multi-instance.
-2. **Batch GraphRAG ingest** — the full graph-intelligence ingest path (`UploadedContentKnowledgeIndexer.IndexAsync` / `GraphRagService.IngestAsync`) is serial N+1: per-chunk LLM extraction and per-chunk Neo4j writes, plus community re-clustering that is O(graph) on every upload. Batch the Neo4j writes (UNWIND), bound LLM concurrency, and gate community re-clustering so large-document ingest is fast and cheap.
+Extend theme enforcement to the GraphRAG / LazyGraphRAG retrieval paths and to global (community-summary) search. Today theme filtering works only on the semantic RAG path: `RetrievalRequest.SourceIds` → PgVectorStore set predicate. Graph modes are explicitly out of scope for theme filtering (Sprint 58 boundary), so a user scoping Search Center to a theme gets theme-filtered semantic results but unfiltered GraphRAG / LazyGraphRAG / global-graph results — an inconsistent view of the estate.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Corpus index persistence:** `ICorpusIndexRepository` → `PostgreSqlCorpusIndexRepository` (Dapper, `lazygraphrag_corpus_documents` + `lazygraphrag_corpus_terms` tables, migration + `init.sql` in sync); `CorpusDiscoveryIndex` loads the persisted corpus at startup and persists write-through (best-effort — the in-memory index stays authoritative); DI registration in `Program.cs`.
-2. **Batch GraphRAG ingest:** `IGraphProvider.CreateNodesAsync` / `CreateRelationshipsAsync` / `UpdateNodesAsync` (default interface impls fall back to per-item calls; `Neo4jGraphProvider` uses `UNWIND` grouped by label/type); both full-ingest paths refactored into 4 phases with bounded-concurrency LLM extraction (`MaxLlmConcurrency = 4`); community re-clustering gated on `!sourceExists` (first ingest of a source only).
-3. **Tests**: RAGS (corpus-index write-through + restart-survival + failure-tolerance, live-DB repository round-trip, batched-write equivalence, bounded concurrency, community gate). Existing suites green.
-4. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, sprint file; backlog items 2 + 3 statuses updated.
+1. **Theme scope on graph retrieval:** optional `IReadOnlyList<Guid>? sourceIds = null` (after `cancellationToken`) on `IGraphRagService.RetrieveAsync` / `GlobalSearchAsync`, `ILazyGraphRagService.RetrieveAsync` / `GlobalSearchAsync`, and `IGlobalGraphSearchService.SearchAsync`. New `GraphThemeScope` static helper (resolve a node's source id; filter nodes/communities to an allowlist). `GraphRagService` filters resolved entities + expansion nodes and scopes semantic fallback / expansion `RetrievalRequest`s; `LazyGraphRagService` filters corpus seed sources and scopes fallback / expansion requests; `GlobalGraphSearchService` filters communities via a node→source map (match-any semantics).
+2. **API + Web wiring:** `GraphRagController` / `LazyGraphRagController` accept `?themes=` (comma-separated) on `Retrieve` and `GlobalSearch`, resolve via optional `IKnowledgeThemeService? themeService = null` ctor param (RagsController pattern), pass `sourceIds` through. `RepositoryApiClient.GraphRagRetrieveAsync` / `LazyGraphRagRetrieveAsync` accept themes and append `&themes=`. `SearchCenter.razor` passes `_selectedThemes` to graph-mode retrieve calls.
+3. **Tests**: RAGS (theme-scoped GraphRAG retrieval filters entities/communities; theme-scoped LazyGraphRAG retrieval filters corpus seeds; `GlobalGraphSearchService` theme-scoped search filters communities; controllers pass themes through). Existing suites green.
+4. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, sprint file; backlog item 5 status updated.
 
 ## Acceptance Criteria
 
-- A LazyGraphRAG retrieval after a restart (or on a second instance) sees the persisted corpus — candidate selection does not start from an empty corpus.
-- The corpus index is persisted incrementally as it is discovered/updated, with no regression to the in-memory hot path.
-- A large-document full ingest issues batched (UNWIND) Neo4j writes and bounded-concurrency LLM calls instead of serial N+1; the resulting graph is equivalent to the serial path.
-- Community re-clustering is gated so it does not run O(graph) on every upload.
+- A Search Center theme scope filters GraphRAG / LazyGraphRAG retrieval results and global-graph (community summary) results to documents in the selected themes.
+- No theme scope → behavior identical to pre-Sprint-64 (graph modes unfiltered).
+- Semantic fallback and entity-expansion `RetrievalRequest`s inside graph retrieval carry the same `sourceIds` scope, so a graph query that degrades to semantic retrieval stays theme-scoped.
 - Repository / RAGS / Foundation / Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Theme-aware graph retrieval (Canonical backlog item 5); new queue providers / session stores; chat approval/settings surface.
-- Changing the lightweight reembed path (Sprint 62) or the soft-deadline behavior (Sprint 62).
+- New theme model changes (multi-theme, backfill — already done in Sprint 59).
+- Copilot session theme filter changes (already theme-scoped via `RetrievalRequest.SourceIds`).
+- Wiki / WRAGS theme scoping (Wiki stays curated).
+- Changing the per-request traversal budget, token accounting, or soft-deadline behavior (Sprint 60/62).
 
 ---
 
 ## Progress
 
+### Sprint 64 — theme-aware graph retrieval (2026-08-11)
+
+**Implemented, committed, and pushed.** See the sprint file "Implementation Status" for full detail:
+
+- **Item 1 (theme scope on graph retrieval):** `sourceIds` params on all three graph services; `GraphThemeScope` helper (`TryGetSourceId`, `IsInScope`, `FilterNodes`, `ToAllowSet`, `CommunityHasMemberInScope`); `GraphRagService` filters resolved entities + multi-hop expansion nodes and scopes semantic fallback / entity-expansion `RetrievalRequest`s; `LazyGraphRagService` filters corpus seed sources and scopes fallback / expansion requests; `GlobalGraphSearchService` builds a node→source map via `IGraphProvider.GetNodesAsync()` and filters communities with match-any semantics (returns `Failure("No communities in the selected themes.")` when scoped and empty).
+- **Item 2 (API + Web wiring):** `?themes=` on both graph controllers' `Retrieve` + `GlobalSearch`; `RepositoryApiClient` appends `&themes=`; `SearchCenter.razor` passes `_selectedThemes` to graph-mode retrieve calls (WRAGS note now reads "Theme scope does not apply to WRAGS search.").
+- **Item 3 (tests):** RAGS 289 (+8) — theme-scoped entity/community filtering, corpus-seed filtering, source-id flow to semantic fallback, controller themes pass-through. All fakes updated for the new signatures.
+
+**Verification:** RAGS 289 / Repository 130 / Foundation 55 / Web 46 green; `dotnet build Aletheia.slnx` succeeds (only pre-existing AngleSharp NU1902 warning).
+
+---
+
+## Sprint 63 progress log (2026-08-11) — completed
+
 ### Sprint 63 items 1 + 2 — corpus index persistence + batch ingest (2026-08-11)
 
-**Implemented.** See the sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`df7627d`).** See the Sprint 63 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (corpus index persistence):** `ICorpusIndexRepository` → `PostgreSqlCorpusIndexRepository` (Dapper, `lazygraphrag_corpus_documents` + `lazygraphrag_corpus_terms`, migration `2026-08-11-lazygraphrag-corpus-index.sql` + `init.sql` in sync); `CorpusDiscoveryIndex` loads the persisted corpus at startup and persists write-through (best-effort — a persistence failure never fails ingestion); `AddSingleton<ICorpusIndexRepository, PostgreSqlCorpusIndexRepository>()` in `Program.cs`.
 - **Item 2 (batch ingest):** `IGraphProvider` batch methods (`CreateNodesAsync`/`CreateRelationshipsAsync`/`UpdateNodesAsync`, default interface impls fall back to per-item calls so existing fakes keep compiling); `Neo4jGraphProvider` UNWIND implementations grouped by label/type; both full-ingest paths (`UploadedContentKnowledgeIndexer.PersistGraphIntelligenceAsync` + `GraphRagService.IngestAsync`) refactored into 4 phases with `SemaphoreSlim(MaxLlmConcurrency = 4)`; community re-clustering gated on `!sourceExists`.
 
-**Verification:** RAGS 281 (+9) / Repository 130 / Foundation 55 / Web 46 green; `dotnet build Aletheia.slnx` succeeds. Pending: commit + push + optional Docker smoke test (restart corpus survival + batched-write ingest).
+**Verification:** RAGS 281 (+9) / Repository 130 / Foundation 55 / Web 46 green; `dotnet build Aletheia.slnx` succeeds. Optional Docker smoke test (restart corpus survival + batched-write ingest) is user-side.
 
 ---
 

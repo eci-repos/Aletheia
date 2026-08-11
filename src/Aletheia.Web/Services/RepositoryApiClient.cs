@@ -255,9 +255,15 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<SearchResult>?> GraphRagRetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SearchResult>?> GraphRagRetrieveAsync(string query, int topK = 5, int maxExpanded = 10, IReadOnlyList<string>? themes = null, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"/api/graphrag/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}&maxExpanded={maxExpanded}", cancellationToken).ConfigureAwait(false);
+        var url = $"/api/graphrag/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}&maxExpanded={maxExpanded}";
+        if (themes is { Count: > 0 })
+        {
+            url += $"&themes={Uri.EscapeDataString(string.Join(",", themes))}";
+        }
+
+        var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(await BuildApiFailureAsync(
@@ -294,9 +300,15 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<BackgroundJobClientSnapshot>(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<SearchResult>?> LazyGraphRagRetrieveAsync(string query, int topK = 5, int maxExpanded = 10, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SearchResult>?> LazyGraphRagRetrieveAsync(string query, int topK = 5, int maxExpanded = 10, IReadOnlyList<string>? themes = null, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"/api/lazygraphrag/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}&maxExpanded={maxExpanded}", cancellationToken).ConfigureAwait(false);
+        var url = $"/api/lazygraphrag/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}&maxExpanded={maxExpanded}";
+        if (themes is { Count: > 0 })
+        {
+            url += $"&themes={Uri.EscapeDataString(string.Join(",", themes))}";
+        }
+
+        var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(await BuildApiFailureAsync(

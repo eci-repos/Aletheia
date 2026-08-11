@@ -53,7 +53,7 @@ public sealed class GraphRagControllerTests
             new(new Chunk(Guid.NewGuid(), Guid.NewGuid(), "chunk 1", 0), 0.95f),
         };
         mockService
-            .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyList<Guid>?>()))
             .ReturnsAsync(Result<IReadOnlyList<SearchResult>>.Success(searchResults));
 
         var controller = new GraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: true));
@@ -70,7 +70,7 @@ public sealed class GraphRagControllerTests
     {
         var mockService = new Mock<IGraphRagService>();
         mockService
-            .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyList<Guid>?>()))
             .ReturnsAsync(Result<IReadOnlyList<SearchResult>>.Failure("retrieve failed"));
 
         var controller = new GraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: true));
@@ -90,7 +90,7 @@ public sealed class GraphRagControllerTests
         var result = await controller.Retrieve("query");
 
         Assert.IsType<NotFoundObjectResult>(result);
-        mockService.Verify(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockService.Verify(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyList<Guid>?>()), Times.Never);
     }
 
     [Fact]
@@ -102,6 +102,48 @@ public sealed class GraphRagControllerTests
         var result = await controller.GlobalSearch("query");
 
         Assert.IsType<NotFoundObjectResult>(result);
-        mockService.Verify(s => s.GlobalSearchAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockService.Verify(s => s.GlobalSearchAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyList<Guid>?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Retrieve_resolves_themes_to_source_ids_and_passes_them_to_service()
+    {
+        // Sprint 64: the ?themes= query param is resolved to source ids and flows to the service.
+        var sourceA = Guid.NewGuid();
+        var mockThemeService = new Mock<IKnowledgeThemeService>();
+        mockThemeService
+            .Setup(s => s.ResolveSourceIdsAsync(new[] { "Theme A" }, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<IReadOnlyList<Guid>>.Success(new[] { sourceA }));
+        var mockService = new Mock<IGraphRagService>();
+        mockService
+            .Setup(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyList<Guid>?>()))
+            .ReturnsAsync(Result<IReadOnlyList<SearchResult>>.Success(new List<SearchResult>()));
+        var controller = new GraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: true), mockThemeService.Object);
+
+        var result = await controller.Retrieve("query", themes: "Theme A");
+
+        Assert.IsType<OkObjectResult>(result);
+        mockService.Verify(s => s.RetrieveAsync("query", 5, 10, It.IsAny<CancellationToken>(), It.Is<IReadOnlyList<Guid>?>(ids => ids != null && ids.Contains(sourceA))), Times.Once);
+    }
+
+    [Fact]
+    public async Task GlobalSearch_resolves_themes_to_source_ids_and_passes_them_to_service()
+    {
+        // Sprint 64: the ?themes= query param is resolved to source ids and flows to the service.
+        var sourceA = Guid.NewGuid();
+        var mockThemeService = new Mock<IKnowledgeThemeService>();
+        mockThemeService
+            .Setup(s => s.ResolveSourceIdsAsync(new[] { "Theme A" }, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<IReadOnlyList<Guid>>.Success(new[] { sourceA }));
+        var mockService = new Mock<IGraphRagService>();
+        mockService
+            .Setup(s => s.GlobalSearchAsync("query", It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyList<Guid>?>()))
+            .ReturnsAsync(Result<GlobalSearchResult>.Success(new GlobalSearchResult("answer", new List<string>(), new List<SearchResult>())));
+        var controller = new GraphRagController(mockService.Object, new FakeInternalSearchGate(showInternalSearch: true), mockThemeService.Object);
+
+        var result = await controller.GlobalSearch("query", themes: "Theme A");
+
+        Assert.IsType<OkObjectResult>(result);
+        mockService.Verify(s => s.GlobalSearchAsync("query", It.IsAny<CancellationToken>(), It.Is<IReadOnlyList<Guid>?>(ids => ids != null && ids.Contains(sourceA))), Times.Once);
     }
 }

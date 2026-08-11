@@ -103,7 +103,8 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         string query,
         int topK = 5,
         int maxExpanded = 10,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -123,6 +124,14 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
         {
             // Step 0: Corpus search for seed documents
             var seedSourceIds = _corpusIndex.SearchCorpus(query, topK: 10);
+
+            // Sprint 64: theme scope — restrict corpus candidates to the selected sources so
+            // entity discovery, traversal, and expansion stay within the scope.
+            if (sourceIds is not null && sourceIds.Count > 0)
+            {
+                var allowed = sourceIds.ToHashSet();
+                seedSourceIds = seedSourceIds.Where(allowed.Contains).ToList();
+            }
             steps.Add("corpus-search");
 
             // Step 1: Query-time candidate discovery from corpus statistics only.
@@ -174,7 +183,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
             steps.Add("context-build");
 
             // Step 8: Semantic Retrieval & Expansion
-            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK), ct).ConfigureAwait(false);
+            var baseResults = await _ragsService.RetrieveAsync(new RetrievalRequest(query, topK, sourceIds: sourceIds), ct).ConfigureAwait(false);
             if (baseResults.IsFailure || baseResults.Value is null)
             {
                 return Result<IReadOnlyList<SearchResult>>.Failure(baseResults.Error ?? RetrievalFailedMessage);
@@ -196,7 +205,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
                 if (!terms.Any()) continue;
 
                 var expanded = await _ragsService.RetrieveAsync(
-                    new RetrievalRequest(string.Join(" ", terms.Take(5)), Math.Min(2, topK)), ct).ConfigureAwait(false);
+                    new RetrievalRequest(string.Join(" ", terms.Take(5)), Math.Min(2, topK), sourceIds: sourceIds), ct).ConfigureAwait(false);
 
                 if (expanded.IsSuccess && expanded.Value is not null)
                 {
@@ -215,7 +224,7 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
             foreach (var node in prunedNodeList.Take(maxExpanded))
             {
                 var entityResults = await _ragsService.RetrieveAsync(
-                    new RetrievalRequest(node.Label, Math.Min(2, topK)), ct).ConfigureAwait(false);
+                    new RetrievalRequest(node.Label, Math.Min(2, topK), sourceIds: sourceIds), ct).ConfigureAwait(false);
 
                 if (entityResults.IsSuccess && entityResults.Value is not null)
                 {
@@ -264,14 +273,15 @@ public sealed class LazyGraphRagService : ILazyGraphRagService
 
     public async Task<Result<GlobalSearchResult>> GlobalSearchAsync(
         string query,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? sourceIds = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
             throw new ArgumentException("Query is required.", nameof(query));
         }
 
-        return await _globalSearch.SearchAsync(query, cancellationToken).ConfigureAwait(false);
+        return await _globalSearch.SearchAsync(query, cancellationToken, sourceIds).ConfigureAwait(false);
     }
 
     // ============ QUERY-TIME DISCOVERY ============

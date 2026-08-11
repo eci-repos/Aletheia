@@ -50,9 +50,9 @@
     {
         <p class="small mb-0 mt-1">
             <span class="badge bg-info text-dark">Scoped to @_selectedThemes.Count theme(s): @string.Join(", ", _selectedThemes)</span>
-            @if (_mode != "semantic")
+            @if (_mode == "wrags")
             {
-                <span class="text-muted"> Theme scope applies to Semantic search only.</span>
+                <span class="text-muted"> Theme scope does not apply to WRAGS search.</span>
             }
         </p>
     }
@@ -362,13 +362,15 @@
             else if (_mode == "graphrag")
             {
                 ActivityLog.Trace(activityId, "Search Center", "GraphRAG search", "Reading graph summaries and expanded graph context.");
-                var results = await ApiClient.GraphRagRetrieveAsync(_query, _topK, _expansionHops);
+                // Sprint 64: the shared theme scope filters graph retrieval too (themes -> source ids server-side).
+                var results = await ApiClient.GraphRagRetrieveAsync(_query, _topK, _expansionHops, _selectedThemes.ToList());
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
             else if (_mode == "lazygraphrag")
             {
                 ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG search", "Running budgeted query-time graph traversal.");
-                var results = await ApiClient.LazyGraphRagRetrieveAsync(_query, _topK, _expansionHops);
+                // Sprint 64: the shared theme scope filters graph retrieval too (themes -> source ids server-side).
+                var results = await ApiClient.LazyGraphRagRetrieveAsync(_query, _topK, _expansionHops, _selectedThemes.ToList());
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
             else

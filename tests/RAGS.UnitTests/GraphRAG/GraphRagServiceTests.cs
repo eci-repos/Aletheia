@@ -270,6 +270,87 @@ public sealed class GraphRagServiceTests
     }
 
     [Fact]
+    public async Task RetrieveAsync_theme_scope_filters_resolved_entities()
+    {
+        // Sprint 64: when sourceIds are supplied, entities outside the selected sources are dropped
+        // before community resolution and summary candidate building.
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var sourceA = Guid.NewGuid();
+        var sourceB = Guid.NewGuid();
+        await graphProvider.CreateNodeAsync(new GraphNode(
+            "entity-alpha",
+            "Alpha",
+            "Person",
+            new Dictionary<string, object>
+            {
+                ["sourceId"] = sourceA.ToString(),
+                ["summary"] = "Alpha coordinates the launch workstream."
+            }));
+        await graphProvider.CreateNodeAsync(new GraphNode(
+            "entity-beta",
+            "Beta",
+            "Person",
+            new Dictionary<string, object>
+            {
+                ["sourceId"] = sourceB.ToString(),
+                ["summary"] = "Beta coordinates the launch workstream."
+            }));
+
+        var entities = new List<GraphNode>
+        {
+            new("entity-alpha", "Alpha", "Person", new Dictionary<string, object> { ["sourceId"] = sourceA.ToString() }),
+            new("entity-beta", "Beta", "Person", new Dictionary<string, object> { ["sourceId"] = sourceB.ToString() })
+        };
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            graphSummary: new StoredSummaryGraphSummaryService(graphProvider),
+            graphReasoning: new ScopedEntitiesReasoningService(ragsService, graphProvider, entities));
+
+        var result = await service.RetrieveAsync("Alpha", topK: 1, sourceIds: new[] { sourceA });
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Contains("Entity Summary: Alpha", item.Chunk.Content);
+        Assert.DoesNotContain("Entity Summary: Beta", item.Chunk.Content);
+    }
+
+    [Fact]
+    public async Task SearchAsync_theme_scope_filters_communities_by_member_source()
+    {
+        // Sprint 64: global search scoped to a source keeps only communities whose members belong
+        // to that source, so community summaries stay within the theme scope.
+        var graphProvider = new MockGraphProvider();
+        var sourceA = Guid.NewGuid();
+        var sourceB = Guid.NewGuid();
+        await graphProvider.CreateNodeAsync(new GraphNode(
+            "entity-alpha",
+            "Alpha",
+            "Person",
+            new Dictionary<string, object> { ["sourceId"] = sourceA.ToString() }));
+        await graphProvider.CreateNodeAsync(new GraphNode(
+            "entity-beta",
+            "Beta",
+            "Person",
+            new Dictionary<string, object> { ["sourceId"] = sourceB.ToString() }));
+
+        var service = new GlobalGraphSearchService(
+            new SourceScopedCommunityDetectionService(),
+            new MockGraphSummaryService(),
+            new MockHierarchicalSummaryService(),
+            new MockGraphContextBuilder(),
+            new MockCitationPathService(),
+            graphProvider: graphProvider);
+
+        var result = await service.SearchAsync("What are the main themes?", sourceIds: new[] { sourceA });
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("Community: Community A", result.Value!.Answer);
+        Assert.DoesNotContain("Community: Community B", result.Value.Answer);
+    }
+
+    [Fact]
     public async Task IngestAsync_uses_batched_graph_writes()
     {
         // Sprint 63: the full ingest path must issue batched (UNWIND) node/relationship writes
@@ -548,6 +629,26 @@ public sealed class GraphRagServiceTests
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             return Result<IReadOnlyList<GraphNode>>.Success(Array.Empty<GraphNode>());
+        }
+    }
+
+    /// <summary>
+    /// Returns a fixed set of graph entities from <see cref="SelectEntitiesAsync"/> — used to
+    /// exercise the Sprint 64 theme-scope filtering of resolved entities.
+    /// </summary>
+    private sealed class ScopedEntitiesReasoningService : MockGraphReasoningService
+    {
+        private readonly IReadOnlyList<GraphNode> _entities;
+
+        public ScopedEntitiesReasoningService(IRagsService ragsService, IGraphProvider provider, IReadOnlyList<GraphNode> entities)
+            : base(ragsService, provider)
+        {
+            _entities = entities;
+        }
+
+        public override Task<Result<IReadOnlyList<GraphNode>>> SelectEntitiesAsync(string query, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<GraphNode>>.Success(_entities));
         }
     }
 
@@ -888,6 +989,60 @@ public sealed class GraphRagServiceTests
         }
     }
 
+    /// <summary>
+    /// Two top-level communities, each tied to a single source — used to exercise the Sprint 64
+    /// theme-scope community filtering in global search.
+    /// </summary>
+    private sealed class SourceScopedCommunityDetectionService : ICommunityDetectionService
+    {
+        private readonly IReadOnlyList<GraphCommunity> _communities = new[]
+        {
+            new GraphCommunity
+            {
+                Id = "comm-a",
+                Name = "Community A",
+                Description = "Source A themes.",
+                MemberIds = new[] { "entity-alpha" },
+                Metadata = new Dictionary<string, object> { ["level"] = 1 }
+            },
+            new GraphCommunity
+            {
+                Id = "comm-b",
+                Name = "Community B",
+                Description = "Source B themes.",
+                MemberIds = new[] { "entity-beta" },
+                Metadata = new Dictionary<string, object> { ["level"] = 1 }
+            }
+        };
+
+        public Task<Result<IReadOnlyList<GraphCommunity>>> DiscoverAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<GraphCommunity>>.Success(_communities));
+        }
+
+        public Task<Result<IReadOnlyList<GraphCommunity>>> DetectClustersAsync(CancellationToken cancellationToken = default)
+        {
+            return DiscoverAsync(cancellationToken);
+        }
+
+        public Task<Result> AssignAsync(string nodeId, string communityId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<GraphCommunity?>> GetCommunityAsync(string communityId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<GraphCommunity?>.Success(
+                _communities.FirstOrDefault(c => c.Id == communityId)));
+        }
+
+        public Task<Result<IReadOnlyList<GraphCommunity>>> GetCommunitiesForNodeAsync(string nodeId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result<IReadOnlyList<GraphCommunity>>.Success(
+                _communities.Where(c => c.MemberIds.Contains(nodeId)).ToList()));
+        }
+    }
+
     private sealed class MockGraphContextBuilder : IGraphContextBuilder
     {
         public Task<Result<string>> BuildContextAsync(string query, GraphContextSources sources, CancellationToken cancellationToken = default)
@@ -921,7 +1076,7 @@ public sealed class GraphRagServiceTests
 
     private sealed class MockGlobalGraphSearchService : IGlobalGraphSearchService
     {
-        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default)
+        public Task<Result<GlobalSearchResult>> SearchAsync(string query, CancellationToken cancellationToken = default, IReadOnlyList<Guid>? sourceIds = null)
         {
             var result = new GlobalSearchResult(
                 $"Global answer for: {query}",

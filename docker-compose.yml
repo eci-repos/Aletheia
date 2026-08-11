@@ -95,6 +95,7 @@ services:
       Authentication__Jwt__AccessTokenLifetimeMinutes: "${ALETHEIA_ACCESS_TOKEN_MINUTES:-43200}"
       Authentication__Jwt__RefreshTokenLifetimeMinutes: "${ALETHEIA_REFRESH_TOKEN_MINUTES:-525600}"
       Authentication__Jwt__ClockSkewMinutes: "${ALETHEIA_JWT_CLOCK_SKEW_MINUTES:-43200}"
+      FeatureFlags__ShowInternalSearch: "${SHOW_INTERNAL_SEARCH:-false}"
     depends_on:
       postgres:
         condition: service_healthy

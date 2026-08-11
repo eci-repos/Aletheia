@@ -132,7 +132,7 @@ curl -X POST http://localhost:8080/api/wiki/briefs/regenerate -H "Authorization:
 
 The response is an IngestionJobSnapshot (kind DocumentBriefs); watch progress in the Activity panel or GET /api/jobs. Documents without a canonical template are skipped (briefs are generated only for `Canonical` documents; uncategorized rows can be promoted first via `POST /api/knowledge/reevaluate`).
 
-Internal retrieval surfaces (raw Wiki/WRAGS modes, GraphRAG, LazyGraphRAG, global-graph search) are hidden from end users by default. Set FeatureFlags:ShowInternalSearch=true (or FeatureFlags__ShowInternalSearch=true) to re-enable them for admin/diagnostics work.
+Internal retrieval surfaces (raw Wiki/WRAGS modes, GraphRAG, LazyGraphRAG, global-graph search) are hidden from end users by default. Set FeatureFlags:ShowInternalSearch=true (or FeatureFlags__ShowInternalSearch=true) to re-enable them for admin/diagnostics work. In the Docker Compose topology the flag is env-mapped: run `SHOW_INTERNAL_SEARCH=true docker compose up -d api` (default `false`) to open the internal endpoints and show the Search Center operator controls.
 
 ### WRAGS Page Lifecycle
 

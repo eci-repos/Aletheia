@@ -4,7 +4,7 @@
 
 Full authority: `docs/sprints/Sprint-61 - Chat Approval Prompt and Admin Settings.md` (created 2026-08-10). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 60 (GraphRAG and LazyGraphRAG Quick Wins) is **complete, committed, and pushed**: commit `c6c3e48` is on `origin/master`; its optional Docker smoke test remains as a parallel verification task.
+Sprint 60 (GraphRAG and LazyGraphRAG Quick Wins) is **complete, committed, and pushed**: commit `c6c3e48` is on `origin/master`; its optional Docker smoke test was **run 2026-08-10** — retrieval traces verified end-to-end (LazyGraphRAG + GraphRAG), 5 concurrent LazyGraphRAG retrievals clean, concurrent GraphRAG hits the 30s hard deadline under LLM saturation (see the Sprint 60 sprint file "Smoke Test Results"). Reembed verified working but slow (full `IndexAsync`, ~100+ LLM calls/doc).
 
 ## Objective
 

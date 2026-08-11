@@ -399,7 +399,11 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
                 $"Still re-embedding {source.SourceName}.",
                 async ct =>
                 {
-                    var reembedded = await _knowledgeSourceIngestionService.EnsureIngestedAsync(source, ct).ConfigureAwait(false);
+                    // Sprint 62: reembed regenerates embeddings, so use the lightweight indexer
+                    // (parity with file uploads) instead of the full LLM graph-intelligence pipeline.
+                    var reembedded = await _knowledgeSourceIngestionService
+                        .EnsureIngestedAsync(source, ct, KnowledgeIndexMode.Lightweight)
+                        .ConfigureAwait(false);
                     return reembedded.IsFailure
                         ? Result.Failure(reembedded.Error ?? $"Re-embedding failed for {source.SourceName}.")
                         : Result.Success();

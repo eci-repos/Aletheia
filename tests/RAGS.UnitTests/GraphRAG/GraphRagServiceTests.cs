@@ -3,6 +3,7 @@ using Aletheia.KnowledgeGraph.Abstractions.Models;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.RAGS.Application.GraphRAG;
+using Aletheia.RAGS.Application.LazyGraphRAG;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
@@ -223,27 +224,75 @@ public sealed class GraphRagServiceTests
         Assert.Contains("entity-resolution", first.Trace.Steps);
     }
 
+    [Fact]
+    public async Task RetrieveAsync_deadline_fires_degrades_to_semantic_timeout_fallback()
+    {
+        // Sprint 62: when the per-request execution deadline fires (but the caller did NOT cancel),
+        // GraphRAG degrades to a best-effort semantic retrieval instead of hard-failing.
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            graphReasoning: new SlowSelectEntitiesReasoningService(ragsService, graphProvider),
+            budgetFactory: () => new GraphTraversalBudget(maxExecutionTime: TimeSpan.FromMilliseconds(50)));
+
+        var result = await service.RetrieveAsync("query", topK: 2);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotEmpty(result.Value!);
+        var first = result.Value!.First();
+        Assert.NotNull(first.Trace);
+        Assert.Equal("semantic-timeout-fallback", first.Trace!.Strategy);
+        Assert.Contains("deadline-exceeded", first.Trace.Steps);
+        Assert.Contains("semantic-fallback", first.Trace.Steps);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_caller_cancellation_returns_failure_not_fallback()
+    {
+        // Sprint 62: caller cancellation is a hard signal — no best-effort fallback.
+        var ragsService = new MockRagsService();
+        var graphProvider = new MockGraphProvider();
+        var service = CreateService(
+            ragsService,
+            graphProvider,
+            graphReasoning: new SlowSelectEntitiesReasoningService(ragsService, graphProvider),
+            budgetFactory: () => new GraphTraversalBudget(maxExecutionTime: TimeSpan.FromMinutes(1)));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var result = await service.RetrieveAsync("query", topK: 2, cancellationToken: cts.Token);
+
+        Assert.True(result.IsFailure);
+        Assert.Contains("cancelled", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static GraphRagService CreateService(
         IRagsService ragsService,
         IGraphProvider graphProvider,
         IEntityExtractionService? entityExtraction = null,
         IRelationshipExtractionService? relationshipExtraction = null,
         IGraphSummaryService? graphSummary = null,
-        ILazyEnrichmentKnowledgeSink? knowledgeSink = null)
+        ILazyEnrichmentKnowledgeSink? knowledgeSink = null,
+        IGraphReasoningService? graphReasoning = null,
+        Func<IGraphTraversalBudget>? budgetFactory = null)
     {
         return new GraphRagService(
             ragsService,
             graphProvider,
             entityExtraction ?? new MockEntityExtractionService(),
             relationshipExtraction ?? new MockRelationshipExtractionService(),
-            new MockGraphReasoningService(ragsService, graphProvider),
+            graphReasoning ?? new MockGraphReasoningService(ragsService, graphProvider),
             graphSummary ?? new MockGraphSummaryService(),
             new MockHierarchicalSummaryService(),
             new MockCommunityDetectionService(graphProvider),
             new MockGraphContextBuilder(),
             new MockCitationPathService(),
             new MockGlobalGraphSearchService(),
-            knowledgeSink);
+            knowledgeSink,
+            budgetFactory: budgetFactory);
     }
 
     private sealed class ChunkEntityExtractionService : IEntityExtractionService
@@ -362,7 +411,7 @@ public sealed class GraphRagServiceTests
         }
     }
 
-    private sealed class MockGraphReasoningService : IGraphReasoningService
+    private class MockGraphReasoningService : IGraphReasoningService
     {
         private readonly IRagsService _ragsService;
         private readonly IGraphProvider _provider;
@@ -389,7 +438,7 @@ public sealed class GraphRagServiceTests
             return Result<IReadOnlyList<SearchResult>>.Success(result.Value.Take(topK * 2).ToList());
         }
 
-        public Task<Result<IReadOnlyList<GraphNode>>> SelectEntitiesAsync(string query, CancellationToken cancellationToken = default)
+        public virtual Task<Result<IReadOnlyList<GraphNode>>> SelectEntitiesAsync(string query, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Result<IReadOnlyList<GraphNode>>.Success(Array.Empty<GraphNode>()));
         }
@@ -397,6 +446,25 @@ public sealed class GraphRagServiceTests
         public Task<Result<IReadOnlyList<GraphCommunity>>> SelectCommunitiesAsync(string query, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Result<IReadOnlyList<GraphCommunity>>.Success(Array.Empty<GraphCommunity>()));
+        }
+    }
+
+    /// <summary>
+    /// Blocks in <see cref="SelectEntitiesAsync"/> until the request token is cancelled — used to
+    /// exercise the Sprint 62 deadline path (a cancelled token throws <see cref="TaskCanceledException"/>,
+    /// which the soft-deadline catch degrades instead of failing).
+    /// </summary>
+    private sealed class SlowSelectEntitiesReasoningService : MockGraphReasoningService
+    {
+        public SlowSelectEntitiesReasoningService(IRagsService ragsService, IGraphProvider provider)
+            : base(ragsService, provider)
+        {
+        }
+
+        public override async Task<Result<IReadOnlyList<GraphNode>>> SelectEntitiesAsync(string query, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            return Result<IReadOnlyList<GraphNode>>.Success(Array.Empty<GraphNode>());
         }
     }
 

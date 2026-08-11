@@ -49,7 +49,8 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
 
     public async Task<Result<bool>> EnsureIngestedAsync(
         KnowledgeSource source,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        KnowledgeIndexMode mode = KnowledgeIndexMode.Full)
     {
         if (source is null)
         {
@@ -143,11 +144,26 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
             return Result<bool>.Failure(ingestion.Error ?? "Knowledge source RAGS ingestion failed.");
         }
 
-        _logger.LogInformation("Knowledge source {SourceName} RAGS ingestion completed; indexing content.", source.SourceName);
+        _logger.LogInformation(
+            "Knowledge source {SourceName} RAGS ingestion completed; indexing content ({IndexMode} mode).",
+            source.SourceName,
+            mode);
 
-        await _knowledgeIndexer
-            .IndexAsync(source.SourceId, source.SourceName, extraction.Value.Text, cancellationToken)
-            .ConfigureAwait(false);
+        // Sprint 62: reembed uses the lightweight indexer (no LLM graph-intelligence calls) for
+        // parity with file uploads; repair and chat hydration keep the full path so the graph is
+        // fully derived for them.
+        if (mode == KnowledgeIndexMode.Lightweight)
+        {
+            await _knowledgeIndexer
+                .IndexLightweightAsync(source.SourceId, source.SourceName, extraction.Value.Text, null, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            await _knowledgeIndexer
+                .IndexAsync(source.SourceId, source.SourceName, extraction.Value.Text, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         _logger.LogInformation("Knowledge source hydration completed for {SourceName}.", source.SourceName);
 

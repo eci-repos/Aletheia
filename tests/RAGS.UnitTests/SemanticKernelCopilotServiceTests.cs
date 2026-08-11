@@ -493,7 +493,7 @@ public class SemanticKernelCopilotServiceTests
 
         public KnowledgeSource? LastSource { get; private set; }
 
-        public Task<Result<bool>> EnsureIngestedAsync(KnowledgeSource source, CancellationToken cancellationToken = default)
+        public Task<Result<bool>> EnsureIngestedAsync(KnowledgeSource source, CancellationToken cancellationToken = default, KnowledgeIndexMode mode = KnowledgeIndexMode.Full)
         {
             LastSource = source;
             return Task.FromResult(Result<bool>.Success(_ingest(source)));

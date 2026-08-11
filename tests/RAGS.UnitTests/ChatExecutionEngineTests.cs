@@ -2545,7 +2545,7 @@ public class ChatExecutionEngineTests
 
         public IReadOnlyList<KnowledgeSource> Sources => _sources;
 
-        public Task<Result<bool>> EnsureIngestedAsync(KnowledgeSource source, CancellationToken cancellationToken = default)
+        public Task<Result<bool>> EnsureIngestedAsync(KnowledgeSource source, CancellationToken cancellationToken = default, KnowledgeIndexMode mode = KnowledgeIndexMode.Full)
         {
             _sources.Add(source);
             _onIngested(source);
@@ -2796,7 +2796,7 @@ public class ChatExecutionEngineTests
     {
         public int CallCount { get; private set; }
 
-        public async Task<Result<bool>> EnsureIngestedAsync(KnowledgeSource source, CancellationToken cancellationToken = default)
+        public async Task<Result<bool>> EnsureIngestedAsync(KnowledgeSource source, CancellationToken cancellationToken = default, KnowledgeIndexMode mode = KnowledgeIndexMode.Full)
         {
             CallCount++;
             await Task.Delay(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);

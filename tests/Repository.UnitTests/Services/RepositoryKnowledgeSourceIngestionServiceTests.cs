@@ -81,9 +81,53 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
         ingestionJobs.Verify(x => x.EnqueueDocumentBriefs(It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
     }
 
+    [Fact]
+    public async Task EnsureIngestedAsync_lightweight_mode_uses_lightweight_indexer_not_full()
+    {
+        // Sprint 62: reembed passes KnowledgeIndexMode.Lightweight so it regenerates embeddings
+        // without the LLM graph-intelligence pipeline (parity with file uploads).
+        var sourceId = Guid.NewGuid();
+        var source = new KnowledgeSource(sourceId, "CMP 2026 - 3. RFP Analysis.docx", DateTimeOffset.UtcNow);
+
+        var metadataRepository = new Mock<IMetadataRepository>();
+        metadataRepository
+            .Setup(x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+
+        var knowledgeIndexer = new Mock<IUploadedContentKnowledgeIndexer>();
+        knowledgeIndexer
+            .Setup(x => x.IndexAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+        knowledgeIndexer
+            .Setup(x => x.IndexLightweightAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<IIngestionProgressSink?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+
+        var service = CreateService(metadataRepository.Object, knowledgeIndexer: knowledgeIndexer);
+
+        var result = await service.EnsureIngestedAsync(source, mode: KnowledgeIndexMode.Lightweight);
+
+        Assert.True(result.IsSuccess);
+        knowledgeIndexer.Verify(
+            x => x.IndexLightweightAsync(sourceId, source.SourceName, It.IsAny<string>(), null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        knowledgeIndexer.Verify(
+            x => x.IndexAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static RepositoryKnowledgeSourceIngestionService CreateService(
         IMetadataRepository metadataRepository,
-        Lazy<IIngestionJobService>? ingestionJobs = null)
+        Lazy<IIngestionJobService>? ingestionJobs = null,
+        Mock<IUploadedContentKnowledgeIndexer>? knowledgeIndexer = null)
     {
         var download = new Mock<IDownloadUseCase>();
         download
@@ -112,8 +156,8 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
             .Setup(x => x.IngestAsync(It.IsAny<IngestionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success());
 
-        var knowledgeIndexer = new Mock<IUploadedContentKnowledgeIndexer>();
-        knowledgeIndexer
+        var indexer = knowledgeIndexer ?? new Mock<IUploadedContentKnowledgeIndexer>();
+        indexer
             .Setup(x => x.IndexAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<string>(),
@@ -125,7 +169,7 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
             download.Object,
             textExtractor.Object,
             ragsService.Object,
-            knowledgeIndexer.Object,
+            indexer.Object,
             templateRegistry: new DocumentTemplateRegistry(),
             metadataRepository: metadataRepository,
             ingestionJobs: ingestionJobs);

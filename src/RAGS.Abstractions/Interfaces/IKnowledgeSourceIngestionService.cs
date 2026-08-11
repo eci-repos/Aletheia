@@ -7,5 +7,6 @@ public interface IKnowledgeSourceIngestionService
 {
     Task<Result<bool>> EnsureIngestedAsync(
         KnowledgeSource source,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        KnowledgeIndexMode mode = KnowledgeIndexMode.Full);
 }

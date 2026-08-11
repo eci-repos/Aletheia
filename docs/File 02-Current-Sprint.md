@@ -1,48 +1,53 @@
-# Sprint 61 - Chat Approval Prompt and Admin Settings
+# Sprint 62 - GraphRAG Soft Deadline and Reembed Parity
 
-**Status:** Complete (2026-08-11)
+**Status:** Active (2026-08-11)
 
-Full authority: `docs/sprints/Sprint-61 - Chat Approval Prompt and Admin Settings.md` (created 2026-08-10). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-62 - GraphRAG Soft Deadline and Reembed Parity.md` (created 2026-08-11). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 60 (GraphRAG and LazyGraphRAG Quick Wins) is **complete, committed, and pushed**: commit `c6c3e48` is on `origin/master`; its optional Docker smoke test was **run 2026-08-10** — retrieval traces verified end-to-end (LazyGraphRAG + GraphRAG), 5 concurrent LazyGraphRAG retrievals clean, concurrent GraphRAG hits the 30s hard deadline under LLM saturation (see the Sprint 60 sprint file "Smoke Test Results"). Reembed verified working but slow (full `IndexAsync`, ~100+ LLM calls/doc).
+Sprint 61 (Chat Approval Prompt and Admin Settings) is **complete, committed, and pushed**: commits `4d10561` (item 1 modal), `793fc52` (items 2+3+4 settings foundation + approval preference + admin override), `f8f5292` (item 5 admin Settings page) are on `origin/master`. All unit suites green (RAGS 270 / Repository 129 / Foundation 55 / Aletheia.Web.UnitTests 46). Its residual manual verification (hard-refresh `/copilot` + `/settings`) is user-side and optional.
 
 ## Objective
 
-Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, then give users and admins first-class control over when approval is required:
+Two GraphRAG / ingestion follow-ups surfaced by the Sprint 60 Docker smoke test (2026-08-10):
 
-1. **Modal approval prompt (visibility fix)** — render the plan preview in a centered modal overlay above the Activity/Chats panels so a submitted prompt always surfaces its approval request; auto-expand a collapsed Execution column on submit.
-2. **Server-side settings foundation** — `app_settings` / `user_settings` tables + migration + `init.sql`; singleton `SettingsService`; `GET/PUT /api/settings` (admin) and `GET/PUT /api/settings/me` (authenticated).
-3. **Chat approval preference** — `copilot.requireApproval`, per-user, **default true**; "Don't ask again" checkbox on the modal writes the preference; when off, plans auto-approve and execute immediately.
-4. **Admin override for approval** — admin-managed global/role setting that forces approval even for opted-out users.
-5. **Admin Settings page** — `/settings` gated to Administrator, listing global settings with edit controls; users see their own editable preferences.
+1. **Reembed indexer parity** — make `POST /api/jobs/rags/reembed` honor the lightweight indexer (`IndexLightweightAsync`, no LLM) instead of the full graph-intelligence pipeline, so re-embedding after a provider/dimension change is fast (~minutes, not 40+ for a 3-doc corpus).
+2. **GraphRAG soft deadline / best-partial result** — a GraphRAG retrieval that blows the 30s `CancelAfter(MaxExecutionTime)` under LLM saturation should degrade to plain semantic retrieval (HTTP 200, trace strategy `semantic-timeout-fallback`) instead of hard-failing with HTTP 400.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Modal approval prompt**: render `PlanPreview` in a centered modal overlay (z-index above the Activity/Chats panels); auto-expand a collapsed Execution column on submit; keep the in-context plan preview in the column.
-2. **Settings foundation**: `app_settings`/`user_settings` tables + idempotent migration + `init.sql`; singleton `SettingsService` with typed accessors + caching; `GET/PUT /api/settings` (admin) and `GET/PUT /api/settings/me` (authenticated).
-3. **Approval preference**: `copilot.requireApproval` per-user, default true; "Don't ask again" checkbox on the modal; auto-approve + execute when off.
-4. **Admin override**: admin-managed global/role setting forcing approval for opted-out users.
-5. **Admin Settings page**: `/settings` Administrator-gated (Governance pattern) + admin NavMenu entry; users see their own preferences.
-6. **Tests**: Web (modal markup/binding, settings service, preference), API (settings endpoints); existing suites green.
-7. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, handoff; backlog statuses updated.
+1. `KnowledgeIndexMode` enum (`Full` / `Lightweight`) in `RAGS.Abstractions.Models`; optional `mode = KnowledgeIndexMode.Full` param on `IKnowledgeSourceIngestionService.EnsureIngestedAsync` and its implementation (branch to `IndexLightweightAsync` when Lightweight); reembed passes `Lightweight`, repair + chat hydration keep `Full`.
+2. Soft-deadline catch in `GraphRagService.RetrieveAsync`: deadline-fires → best-effort semantic fallback under a ~10s secondary deadline, Success with trace strategy `semantic-timeout-fallback` + steps `deadline-exceeded` / `semantic-fallback`; caller-cancel → Failure; other exceptions unchanged. Optional `Func<IGraphTraversalBudget>? budgetFactory` ctor param for testability.
+3. **Tests**: Repository (lightweight mode calls `IndexLightweightAsync`, not `IndexAsync`), RAGS (deadline-fires → `semantic-timeout-fallback` success; caller-cancel → failure). Existing suites green.
+4. **Docs**: Architecture, OperationsGuide (reembed), Development-Guidelines, AGENTS, File 02/03, handoff; backlog items 7 + 8 statuses updated.
 
 ## Acceptance Criteria
 
-- With the Activity or Chats panel open, submitting a chat prompt shows the approval prompt in a modal above the panels; the user can Run/Revise/Cancel.
-- A collapsed Execution column auto-expands on submit; progress remains visible after approval.
-- Settings foundation: `app_settings`/`user_settings` tables exist (migration + `init.sql` in sync); `SettingsService` caches; admin and per-user endpoints work.
-- `copilot.requireApproval` defaults true; the modal's "Don't ask again" persists the preference; opting out auto-approves and executes.
-- Admin override forces approval for opted-out users.
-- `/settings` is Administrator-gated; users see their own preferences.
-- RAGS / Repository / Foundation / Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
+- Reembed runs the lightweight indexer (no LLM graph-intelligence calls); a 3-doc corpus re-embeds in minutes.
+- A GraphRAG retrieval that blows the execution deadline returns HTTP 200 with a semantic result carrying trace strategy `semantic-timeout-fallback` and a `deadline-exceeded` step — not HTTP 400.
+- A caller-cancelled retrieval still fails; non-deadline exceptions still fail as before.
+- Repository / RAGS / Foundation / Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
 - Persisting the LazyGraphRAG corpus index to PostgreSQL (GraphRAG backlog item 2); batch GraphRAG ingest (GraphRAG backlog item 3); theme-aware graph retrieval (Canonical backlog item 5).
+- Parallelizing / batching graph-intelligence LLM calls (backlog item 3); changing repair or chat-hydration indexing behavior.
 
 ---
 
 ## Progress
+
+### Sprint 62 items 1 + 2 — reembed parity + soft deadline (2026-08-11)
+
+**Implemented.** See the sprint file "Implementation Status" for full detail:
+
+- **Item 1 (reembed parity):** `KnowledgeIndexMode` enum (`Full`/`Lightweight`) in `RAGS.Abstractions.Models`; `EnsureIngestedAsync` takes `mode = Full` and branches to `IndexLightweightAsync` when Lightweight; `RunReembedJobAsync` passes `Lightweight` (repair/chat keep `Full`).
+- **Item 2 (soft deadline):** `GraphRagService.RetrieveAsync` catch distinguishes deadline-fires from caller-cancel — deadline degrades to best-effort semantic retrieval under a ~10s secondary deadline, returning Success with trace strategy `semantic-timeout-fallback` + steps `deadline-exceeded`/`semantic-fallback`; caller-cancel and other exceptions still fail. Optional `budgetFactory` ctor param for tests.
+
+**Verification:** Repository 130 (+1) / RAGS 272 (+2) / Foundation 55 / Web 46 green; `dotnet build Aletheia.slnx` succeeds. Pending: commit + optional Docker smoke test (reembed speed + `semantic-timeout-fallback` trace under LLM saturation).
+
+---
+
+## Sprint 61 progress log (2026-08-10/11) — completed
 
 ### Sprint 61 item 1 — modal approval prompt (2026-08-10)
 
@@ -52,7 +57,7 @@ Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, 
 - `SendChat()` now auto-expands a collapsed Execution column on submit, so the approval prompt and later progress are always visible.
 - CSS added to `Index.razor.css` (fixed backdrop, centered card, `max-height` + scroll).
 
-**Verification:** `dotnet build src/Aletheia.Web/Aletheia.Web.csproj` 0 warnings/0 errors; Aletheia.Web.UnitTests 39/39 green (binding tests still pass). Full solution build + unit suites below.
+**Verification:** `dotnet build src/Aletheia.Web/Aletheia.Web.csproj` 0 warnings/0 errors; Aletheia.Web.UnitTests 39/39 green (binding tests still pass). Committed `4d10561`.
 
 ### Sprint 61 items 2+3+4 — settings foundation + approval preference + admin override (2026-08-10)
 
@@ -66,17 +71,13 @@ Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, 
 
 ### Sprint 61 item 5 — admin Settings page (2026-08-10)
 
-**Implemented.** `Pages/Settings/Index.razor` at `/settings` — **My Preferences** (own `copilot.requireApproval` toggle, any authenticated user) + **Global Settings (Administrator)** card (`copilot.requireApproval.force` toggle) rendered only via `AuthorizeView Roles="Administrator"`; loads/saves via the item 2 settings endpoints. Admin-only **Settings** entry added to the NavMenu (`.icon-settings`). Gating matches the Governance pattern (API enforces admin; UI hides the admin card/nav entry for non-admins while every user edits their own preference).
+**Implemented and pushed (`f8f5292`).** `Pages/Settings/Index.razor` at `/settings` — **My Preferences** (own `copilot.requireApproval` toggle, any authenticated user) + **Global Settings (Administrator)** card (`copilot.requireApproval.force` toggle) rendered only via `AuthorizeView Roles="Administrator"`; loads/saves via the item 2 settings endpoints. Admin-only **Settings** entry added to the NavMenu (`.icon-settings`). Gating matches the Governance pattern (API enforces admin; UI hides the admin card/nav entry for non-admins while every user edits their own preference).
 
 **Verification:** Aletheia.Web.UnitTests **46** (was 44, +2) green; RAGS 270 / Repository 129 / Foundation 55 unchanged; build succeeds.
 
----
+### Sprint 61 complete (2026-08-11)
 
-## Sprint 61 Complete (2026-08-11)
-
-All 5 items are **implemented, committed, and pushed** to `origin/master`: item 1 (`4d10561`), items 2+3+4 (`793fc52`), item 5 (`f8f5292`). Unit suites green: RAGS 270 / Repository 129 / Foundation 55 / Aletheia.Web.UnitTests 46; `dotnet build Aletheia.slnx` succeeds. The parallel Sprint 60 Docker smoke test was completed 2026-08-10 (committed `3c5b509`).
-
-**No next sprint file exists yet — no new work is authorized** until a new sprint file is created under `docs/sprints/` and promoted here. Residual manual (optional, user-side): hard-refresh `/copilot` and `/settings` for a live visual check of the modal + settings page (verified via unit/binding tests only).
+All 5 items implemented, committed, and pushed to `origin/master`. Unit suites green: RAGS 270 / Repository 129 / Foundation 55 / Aletheia.Web.UnitTests 46; `dotnet build Aletheia.slnx` succeeds. The parallel Sprint 60 Docker smoke test was completed 2026-08-10 (committed `3c5b509`).
 
 ---
 
@@ -84,81 +85,38 @@ All 5 items are **implemented, committed, and pushed** to `origin/master`: item 
 
 ### Sprint 59 (completed) — Canonical Gate Softening, Multi-Theme, and Shared Theme Scope
 
-Committed and pushed as `c151ea2`. Full details below for reference.
+Committed and pushed as `c151ea2`. Full details in the Sprint 59 sprint file and the pre-Sprint-62 history.
 
-### Implementation complete — all four deliverables implemented, tested, documented
+### Sprint 60 implementation (2026-08-07) — all four deliverables implemented
 
-**Backend (1-3):**
-- Migration `2026-08-07-file-metadata-template-status-themes.sql` + `init.sql`: `template_status TEXT`, `theme` -> `text[]` (GIN index), `idx_file_metadata_template_status`.
-- Softened gate: no matching template => persist `Uncategorized` and continue ingestion; briefs only for `Canonical`.
-- Multi-theme: `TryGetThemes`, `ResolveSourceIdsAsync` match-any, per-theme counts, `text[]` persistence.
-- Backfill/promotion: `TemplateReevaluationService` + `GET /api/knowledge/uncategorized` + `POST /api/knowledge/reevaluate`.
-- `GET /api/rags/retrieve?themes=` resolves theme set -> `SourceIds`.
-- Diagnostics: template-gate-skip counters repurposed to `UncategorizedIngestCount`/`UncategorizedIngests`.
+See `docs/sprints/Sprint-60 - GraphRAG and LazyGraphRAG Quick Wins.md` "Smoke Test Results (2026-08-10)" for the verified traces, concurrency checks, hard-deadline behavior, and reembed timing that motivated Sprint 62 items 7 + 8.
 
-**Web (4):**
-- `SearchScopeStateService` (localStorage scope), Search Center theme filter chips + "Scoped to N themes" indicator (semantic only), admin uncategorized list + re-evaluate panel.
-- `RepositoryApiClient`: `themes=` param, `GetUncategorizedAsync`, `ReevaluateTemplatesAsync`.
+**Verification:** RAGS.UnitTests **265 passed**; `dotnet build Aletheia.slnx` succeeds; Aletheia.Web.UnitTests 6 pre-existing failures fixed 2026-08-10 (all stale tests — see below).
 
-**Verification:**
-- RAGS.UnitTests 251 passed / Repository.UnitTests 121 passed / Foundation.UnitTests 55 passed / `dotnet build Aletheia.slnx` succeeds.
-- Aletheia.Web.UnitTests 33 passed / 6 failed — **pre-existing failures** (verified identical on clean `4fdfaf0` via `git stash`); unrelated to Sprint 59 (UploadAsync, Copilot page/state), tracked for a separate fix.
+### Post-implementation web-test fix (2026-08-10)
 
-**Docs:** Architecture / AdministratorGuide / OperationsGuide / Development-Guidelines / user guide (04/05/07) / AGENTS / File 02/03 / handoff updated; backlog item statuses updated.
+The 6 pre-existing `Aletheia.Web.UnitTests` failures fixed — all **stale tests, no code regressions**:
 
-**Remaining:** Docker smoke test (optional, can run in parallel — see Sprint 59 sprint file).
+- `RepositoryApiClientUploadTests` ×4 — fake `HttpClient` missing the `BaseAddress` production always sets (`Program.cs:27`); fake now sets `http://localhost`.
+- `CopilotStateServiceTests.ClearAsync` — asserted storage key `v1`; intentionally bumped to `v2` in `dfc9d1b` (Sprint 58). Test now asserts `v2`.
+- `CopilotIndexBindingTests.Wiki_shows_all_rags_mode_buttons` — asserted `>WRAGS</button>`; renamed to `>Wiki</button>` in Sprint 55.
+
+**Verification:** Aletheia.Web.UnitTests **39 passed**; full solution build 0 errors; RAGS 265 / Repository 121 / Foundation 55 green. Committed with the Sprint-16 sprint-file filename normalization (space → dash).
 
 ### Post-implementation chat fix (2026-08-07)
 
 Smoke-test report "Chat does not work at all" traced to the Copilot restore path: after a page reload the Web page restored a pending plan and polled `GET /api/copilot/plans/{id}/progress`, which returned **404** for a plan with no execution job yet — the client then polled every 2s **forever**. Fixed:
 
 - API `GetPlanProgress`: a plan without an execution job now returns **200** with `JobId = Guid.Empty` (not-started state) instead of 404; "plan not found" still 404s.
-- Web `Index.razor`: the polling loop treats `JobId == Guid.Empty` as "not started" — clears stale restored execution state, keeps the plan preview so **Run** works — and stops after 3 consecutive no-progress polls instead of looping indefinitely (covers API restarts where in-memory chat plans/jobs are lost).
+- Web `Index.razor`: the polling loop treats `JobId == Guid.Empty` as "not started" — clears stale restored execution state, keeps the plan preview so **Run** works — and stops after 3 consecutive no-progress polls instead of looping indefinitely.
 
-Verified end-to-end via curl (plan → progress-before-execute 200/empty jobId → approve → execute → job completes with an answer); RAGS 251 / Repository 121 / Foundation 55 green; Web.UnitTests still the same 6 pre-existing failures. Containers rebuilt. **Browser action required: hard refresh (Ctrl+F5)** to load the new WASM bundle.
+Verified end-to-end via curl; RAGS 251 / Repository 121 / Foundation 55 green; Web.UnitTests still the same 6 pre-existing failures at the time. Containers rebuilt. **Browser action required: hard refresh (Ctrl+F5)** to load the new WASM bundle.
 
 ### Post-implementation graph UX fix (2026-08-07)
 
-Smoke-test feedback: the Graph Explorer "jumps around" while the layout runs and gives no feedback, so users press buttons and think it is running wild. Fixed with two coordinated changes:
+Smoke-test feedback: the Graph Explorer "jumps around" while the layout runs and gives no feedback. Fixed:
 
-- **Visible "preparing graph" state**: `GraphExplorer.razor` now shows a spinner + staged status line over the canvas ("Loading graph…" → "Loading edges…" → "Rendering layout…") while the graph loads and lays out. The Refresh / Import / Fit / Re-layout / Spread / Find Path buttons are disabled during the load so the user cannot trigger more work mid-render. The overlay clears when the layout settles.
-- **Render once, don't re-layout**: `window.initGraph` now accepts a `dotNetRef` + `preservePositions` flag. On scope changes (context selection, chunk toggle) the page re-renders the graph but keeps existing node positions (`randomize: false`) instead of re-running the randomized `cose` layout, so the view no longer jumps around. The JS hooks `layoutstop` to invoke `OnGraphLayoutSettled` on the page, which clears the loading overlay.
+- **Visible "preparing graph" state**: `GraphExplorer.razor` spinner + staged status line over the canvas; Refresh/Import/Fit/Re-layout/Spread/Find Path disabled during load.
+- **Render once, don't re-layout**: `window.initGraph` accepts `dotNetRef` + `preservePositions`; on scope changes the graph re-renders keeping node positions (`randomize: false`); JS hooks `layoutstop` → `OnGraphLayoutSettled` clears the overlay.
 
-Contract: `initGraph(containerId, nodes, edges, dotNetRef, preservePositions)`; the page owns a `DotNetObjectReference<GraphExplorer>` (disposed in `Dispose`) and exposes `[JSInvokable] OnGraphLayoutSettled()`. Web project builds clean (0 warnings/errors).
-
-### Sprint 60 implementation status (2026-08-07) — all four deliverables implemented
-
-**1. Per-request `GraphTraversalBudget`**
-- `IGraphTraversalBudget` gained `CreatePerRequest()` + read-only counters (`LlmCalls`, `TokensConsumed`, `NodesVisited`, `RelationshipsTraversed`); `GraphTraversalBudget` implements via `Volatile`/`Interlocked`.
-- `LazyGraphRagService` keeps the injected budget as a **template** (`_budgetTemplate`, optional ctor param moved to the end) and calls `CreatePerRequest()` per `RetrieveAsync`; `_indexedSources` guarded by `lock (_indexedSourcesLock)`.
-- `GraphRagService.RetrieveAsync` constructs `new GraphTraversalBudget()` inline per request; the `AddSingleton<IGraphTraversalBudget>` in `Repository.API/Program.cs` was removed.
-
-**2. Real token accounting + hard deadline**
-- `TokenUsageHelper.GetTotalTokens(ChatMessageContent?)` reads `Metadata` with provider-agnostic key sets (input/output/total, camel/Pascal/snake_case) + nested `"Usage"` + reflection over provider usage objects (no provider SDK refs).
-- Wired into `EntityExtractionService.DiscoverAsync` and `LazyRelationshipDiscoveryService.DiscoverAtQueryTimeAsync` (`budget?.RecordTokens(...)`).
-- **`RecordTokens` semantics corrected during testing**: it previously capped tokens, so the token budget never fired `IsExceeded()` (dead code). It now records actual consumption even past the budget and returns `updated <= MaxTokenBudget`, so `IsExceeded()` halts traversal (test asserts 120 recorded against a 100 budget).
-- Both `RetrieveAsync` paths: `CreateLinkedTokenSource(cancellationToken)` + `CancelAfter(MaxExecutionTime)`; all LLM/traversal calls flow `ct`.
-
-**3. Stop noise-entity persistence**
-- `NoiseEntityFilter.IsNoise` (`keyword` + `statistical-candidate`); applied in `LazyEntityDiscoveryService.PersistAsync`, `LazyGraphRagService.PersistDiscoveryAsync` (also drops relationships with noise endpoints), `GraphRagService.IngestAsync`, `GraphRagService.EnsureQueryTimeEnrichmentAsync`. Noise entities stay retrieval-only.
-
-**4. Per-query retrieval trace**
-- New `RetrievalTrace` model + settable `SearchResult.Trace` (additive). LazyGraphRAG reports real budget counters + pruning ratio + steps; GraphRAG reports approximate `llmCalls` + budget tokens + steps (per-call token accounting for summary/reasoning services is a documented follow-up).
-- Web Search Center renders the trace block per result card (strategy, LLM calls, tokens, nodes, relationships, pruning retained %, elapsed ms, step chain).
-
-**Verification**
-- RAGS.UnitTests **265 passed** (was 251): new GraphTraversalBudgetTests (6), LazyGraphRagServiceTests (+3: per-request budget isolation, 5 concurrent retrievals, trace), LazyEntityDiscoveryServiceTests (+3 noise), GraphRagServiceTests (+2: noise not persisted, trace). All mocks updated for the new `IGraphTraversalBudget? budget` params.
-- `dotnet build Aletheia.slnx` succeeds (pre-existing AngleSharp NU1902 warning only). RAGS 265 / Repository 121 / Repository.IntegrationTests 8 / Foundation 55 green. Web compiles clean.
-- Aletheia.Web.UnitTests had the same **6 pre-existing failures** (CopilotStateService session-key `v1` vs `v2`, RepositoryApiClientUploadTests x4, Wiki mode-buttons) — verified identical on a clean HEAD worktree; unrelated to Sprint 60. **Fixed 2026-08-10** (see below).
-
-**Remaining:** commit when the user requests; optional Docker smoke test.
-
-### Post-implementation web-test fix (2026-08-10)
-
-The 6 pre-existing `Aletheia.Web.UnitTests` failures are fixed — all were **stale tests, no code regressions** (verified against the production wiring and git history):
-
-- `RepositoryApiClientUploadTests` ×4 — the test harness built `new HttpClient(handler)` with no `BaseAddress`, but `UploadAsync` posts a relative `/api/files/upload`; production always sets `BaseAddress` via `ConfigureRepositoryApi` (`Program.cs:27`). The fake now sets `BaseAddress = new Uri("http://localhost")` in `CreateClient`.
-- `CopilotStateServiceTests.ClearAsync` — asserted storage key `v1`; the key was **intentionally** bumped to `v2` in `dfc9d1b` (Sprint 58 session theme filtering, serialized session shape changed). Test now asserts `v2`.
-- `CopilotIndexBindingTests.Wiki_shows_all_rags_mode_buttons` — asserted a `>WRAGS</button>` button; the wiki's internal `wrags` mode was renamed to the user-facing `>Wiki</button>` label in Sprint 55. Test now asserts `>Wiki</button>`.
-
-**Verification:** Aletheia.Web.UnitTests **39 passed** (was 33/6); full solution build 0 errors; RAGS 265 / Repository 121 / Foundation 55 green. `Repository.IntegrationTests` (8) not run — PostgreSQL container not up (needs live PG + Neo4j). Committed with the Sprint-16 sprint-file filename normalization (space → dash).
+Contract: `initGraph(containerId, nodes, edges, dotNetRef, preservePositions)`; page owns a `DotNetObjectReference<GraphExplorer>` disposed in `Dispose`. Web project builds clean.

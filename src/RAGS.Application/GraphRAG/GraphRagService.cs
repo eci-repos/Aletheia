@@ -15,12 +15,18 @@ namespace Aletheia.RAGS.Application.GraphRAG;
 public sealed class GraphRagService : IGraphRagService
 {
     private const string RetrievalFailedMessage = "GraphRAG retrieval failed.";
+    private const string SemanticTimeoutFallbackStrategy = "semantic-timeout-fallback";
     private const int MaxGraphChunks = 250;
     private const int MaxEntitiesPerChunk = 30;
     private const int MaxLazyChunksPerQuery = 3;
     private const int MaxLazyEntitiesPerChunk = 8;
     private const int MaxLazyEntitySummariesPerQuery = 4;
     private const int MaxLazyRelationshipsPerChunk = 8;
+
+    // Sprint 62: when the per-request execution deadline fires, the best-effort semantic
+    // fallback runs under its own short secondary deadline so a saturating LLM provider
+    // cannot hang the degraded path indefinitely.
+    private static readonly TimeSpan FallbackExecutionTime = TimeSpan.FromSeconds(10);
 
     private readonly IRagsService _ragsService;
     private readonly IGraphProvider _graphProvider;
@@ -35,6 +41,7 @@ public sealed class GraphRagService : IGraphRagService
     private readonly IGlobalGraphSearchService _globalSearch;
     private readonly ILazyEnrichmentKnowledgeSink? _knowledgeSink;
     private readonly ChunkingPipeline _chunkingPipeline;
+    private readonly Func<IGraphTraversalBudget> _budgetFactory;
 
     public GraphRagService(
         IRagsService ragsService,
@@ -49,7 +56,8 @@ public sealed class GraphRagService : IGraphRagService
         ICitationPathService citationPath,
         IGlobalGraphSearchService globalSearch,
         ILazyEnrichmentKnowledgeSink? knowledgeSink = null,
-        ChunkingPipeline? chunkingPipeline = null)
+        ChunkingPipeline? chunkingPipeline = null,
+        Func<IGraphTraversalBudget>? budgetFactory = null)
     {
         _ragsService = ragsService ?? throw new ArgumentNullException(nameof(ragsService));
         _graphProvider = graphProvider ?? throw new ArgumentNullException(nameof(graphProvider));
@@ -64,6 +72,7 @@ public sealed class GraphRagService : IGraphRagService
         _globalSearch = globalSearch ?? throw new ArgumentNullException(nameof(globalSearch));
         _knowledgeSink = knowledgeSink;
         _chunkingPipeline = chunkingPipeline ?? new ChunkingPipeline();
+        _budgetFactory = budgetFactory ?? (() => new GraphTraversalBudget());
     }
 
     public async Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
@@ -232,7 +241,7 @@ public sealed class GraphRagService : IGraphRagService
 
         // Each request gets its own budget and a hard execution deadline so a single
         // slow LLM call cannot blow the budget or hang the request.
-        var budget = new GraphTraversalBudget();
+        var budget = _budgetFactory();
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(budget.MaxExecutionTime);
         var ct = timeoutCts.Token;
@@ -491,7 +500,50 @@ public sealed class GraphRagService : IGraphRagService
         }
         catch (Exception ex)
         {
-            return Result<IReadOnlyList<SearchResult>>.Failure($"{RetrievalFailedMessage} {ex.Message}");
+            // Sprint 62: a deadline cancellation is a soft signal, not a hard failure. When the
+            // per-request execution deadline fires (but the caller did NOT cancel), degrade to a
+            // best-effort plain semantic retrieval under a short secondary deadline and return the
+            // best partial result with a visible timeout trace instead of failing the whole request.
+            if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                steps.Add("deadline-exceeded");
+                llmCalls++;
+                try
+                {
+                    using var fallbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    fallbackCts.CancelAfter(FallbackExecutionTime);
+                    var fallback = await _ragsService.RetrieveAsync(
+                        new RetrievalRequest(query, topK), fallbackCts.Token).ConfigureAwait(false);
+
+                    if (fallback.IsSuccess && fallback.Value is not null && fallback.Value.Any())
+                    {
+                        steps.Add("semantic-fallback");
+                        var fallbackResults = fallback.Value.ToList();
+                        var fallbackTrace = BuildTrace(
+                            SemanticTimeoutFallbackStrategy,
+                            llmCalls,
+                            budget,
+                            steps,
+                            stopwatch.ElapsedMilliseconds);
+
+                        return Result<IReadOnlyList<SearchResult>>.Success(WithTrace(fallbackResults, fallbackTrace));
+                    }
+
+                    return Result<IReadOnlyList<SearchResult>>.Failure(
+                        fallback.Error ?? $"{RetrievalFailedMessage} The retrieval deadline was exceeded and the semantic fallback produced no results.");
+                }
+                catch (Exception fallbackEx)
+                {
+                    return Result<IReadOnlyList<SearchResult>>.Failure(
+                        $"{RetrievalFailedMessage} The retrieval deadline was exceeded and the semantic fallback failed: {fallbackEx.Message}");
+                }
+            }
+
+            // Caller cancellation and unexpected failures keep the hard-failure contract.
+            return Result<IReadOnlyList<SearchResult>>.Failure(
+                cancellationToken.IsCancellationRequested
+                    ? $"{RetrievalFailedMessage} The operation was cancelled."
+                    : $"{RetrievalFailedMessage} {ex.Message}");
         }
     }
 

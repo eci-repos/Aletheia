@@ -4,7 +4,7 @@
 
 Full authority: this file. Sprint 58 (Session Knowledge Theme Filtering) is **committed and pushed** (`4fdfaf0` on `origin/master`); its remaining verification is the Docker smoke test, which can run in parallel with Sprint 59 work.
 
-Promotes backlog items 1-4 from `docs/backlog/Canonical-Form-Themes-Filtering-Enhancements.md` (item 5, theme-aware graph retrieval, stays parked).
+Promotes backlog items 1-4 from `docs/backlog/archive/Canonical-Form-Themes-Filtering-Enhancements.md` (item 5, theme-aware graph retrieval, stays parked).
 
 ## Objective
 

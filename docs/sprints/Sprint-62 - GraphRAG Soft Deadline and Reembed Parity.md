@@ -4,7 +4,7 @@
 
 Full authority: this file. Sprint 61 (Chat Approval Prompt and Admin Settings) is **complete, committed, and pushed** (`4d10561` / `793fc52` / `f8f5292` on `origin/master`). Its residual manual verification (hard-refresh `/copilot` + `/settings`) is user-side and optional.
 
-Promotes backlog items 7 and 8 from `docs/backlog/GraphRAG-LazyGraphRAG-Enhancements.md`, both surfaced by the Sprint 60 Docker smoke test (2026-08-10).
+Promotes backlog items 7 and 8 from `docs/backlog/archive/GraphRAG-LazyGraphRAG-Enhancements.md`, both surfaced by the Sprint 60 Docker smoke test (2026-08-10).
 
 ## Objective
 

@@ -1,6 +1,6 @@
 # Backlog: Canonical Form, Themes, and Filtering Enhancements
 
-**Status:** Items 1-4 promoted to Sprint 59 (2026-08-07) and implemented; item 5 promoted to Sprint 64 (2026-08-11) and implemented.
+**Status:** **ARCHIVED 2026-08-11** — all items implemented (1-4 in Sprint 59, 5 in Sprint 64); moved to `docs/backlog/archive/` so the active backlog reads empty. Original status: Items 1-4 promoted to Sprint 59 (2026-08-07) and implemented; item 5 promoted to Sprint 64 (2026-08-11) and implemented.
 **Created:** 2026-08-07
 **Source:** Review of the canonical-template gate (`RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync`, `DocumentTemplateRegistry`), the theme model (`file_metadata.template_name`/`theme`, `ListSourceIdsByThemeAsync`, `GET /api/knowledge/themes`), and theme filtering (`ChatSession.ThemeFilter` -> `RetrievalRequest.SourceIds`). Companion discussion: `docs/LLM-Wiki-Semantic-Search-GraphRAG-LazyGraphRAG.md` (Section 2, 7).
 

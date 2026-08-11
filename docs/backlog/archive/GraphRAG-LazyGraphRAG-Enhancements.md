@@ -1,6 +1,6 @@
 # Backlog: GraphRAG / LazyGraphRAG Enhancements
 
-**Status:** Items 1, 4, 5, 6 promoted to Sprint 60 and **implemented** (committed `c6c3e48`, pushed 2026-08-08); items 7 and 8 promoted to Sprint 62 and **implemented** (2026-08-11); items 2 and 3 promoted to Sprint 63 and **implemented** (2026-08-11). All 8 items are now implemented. Items 7 and 8 come from the Sprint 60 Docker smoke test (2026-08-10).
+**Status:** **ARCHIVED 2026-08-11** — all 8 items implemented; moved to `docs/backlog/archive/` so the active backlog reads empty. Original status: Items 1, 4, 5, 6 promoted to Sprint 60 and **implemented** (committed `c6c3e48`, pushed 2026-08-08); items 7 and 8 promoted to Sprint 62 and **implemented** (2026-08-11); items 2 and 3 promoted to Sprint 63 and **implemented** (2026-08-11). All 8 items are now implemented. Items 7 and 8 come from the Sprint 60 Docker smoke test (2026-08-10).
 **Created:** 2026-08-06
 **Source:** Review of `GraphRagService.cs`, `LazyGraphRagService.cs`, `GraphTraversalBudget.cs`, `CorpusDiscoveryIndex.cs`, `SubgraphPruningService.cs`, `GraphRagResultRanker.cs`, `Neo4jGraphProvider.cs`, and the GraphIntelligence services.
 

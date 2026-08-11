@@ -11,7 +11,7 @@
 
 - Keep AGENTS.md, `docs/File 02-Current-Sprint.md`, `docs/File 03-openhands.md`, and all history/handoff/log files under `docs/` up to date with every change that advances the project. This is a standing mandate, not an optional step.
 - Whenever any work is completed, partially completed, or parked: update the current sprint file, the relevant handoff notes, and the roadmap/log files that record progress. Do not leave the documentation describing a stale state.
-- Backlog / proposed work lives under `docs/backlog/`. Keep `docs/backlog/*` current as items are promoted (move to a sprint file), dropped (delete/archive), or re-scoped (update). A backlog item is not authorized work until the current sprint promotes it.
+- Backlog / proposed work lives under `docs/backlog/`. Keep `docs/backlog/*` current as items are promoted (move to a sprint file), dropped (delete/archive), or re-scoped (update). A backlog item is not authorized work until the current sprint promotes it. Fully-implemented backlog files are moved to `docs/backlog/archive/` (indexed by `docs/backlog/archive/README.md`) so the active backlog reads empty; keep the historical file contents untouched except for the status header.
 
 ## Wiki / Document Briefs (Sprint 55+)
 

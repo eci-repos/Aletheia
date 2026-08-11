@@ -4,7 +4,7 @@
 
 Full authority: this file. Sprint 63 (Persisted LazyGraphRAG Corpus Index and Batch GraphRAG Ingest) is **complete, committed, and pushed** (`df7627d` on `origin/master`).
 
-Promotes backlog item 5 from `docs/backlog/Canonical-Form-Themes-Filtering-Enhancements.md` — the last remaining item in that backlog.
+Promotes backlog item 5 from `docs/backlog/archive/Canonical-Form-Themes-Filtering-Enhancements.md` — the last remaining item in that backlog.
 
 ## Objective
 

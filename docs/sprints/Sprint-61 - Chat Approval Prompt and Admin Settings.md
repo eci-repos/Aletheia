@@ -4,7 +4,7 @@
 
 Full authority: this file. Sprint 60 (GraphRAG and LazyGraphRAG Quick Wins) is **committed and pushed** (`c6c3e48` on `origin/master`); its optional Docker smoke test was **run 2026-08-10** and its results committed as `3c5b509` (see the Sprint 60 sprint file "Smoke Test Results").
 
-Promotes all 5 items from `docs/backlog/Chat-Approval-Prompt-and-Admin-Settings.md` (created 2026-08-08).
+Promotes all 5 items from `docs/backlog/archive/Chat-Approval-Prompt-and-Admin-Settings.md` (created 2026-08-08).
 
 ## Objective
 
@@ -104,6 +104,6 @@ Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, 
 
 ## Sprint Complete (2026-08-11)
 
-All five items are **implemented, committed, and pushed** to `origin/master`: item 1 (`4d10561`), items 2+3+4 (`793fc52`), item 5 (`f8f5292`). Unit suites green: RAGS **270** / Repository **129** / Foundation **55** / Aletheia.Web.UnitTests **46**; `dotnet build Aletheia.slnx` succeeds. Backlog items 1-5 marked implemented in `docs/backlog/Chat-Approval-Prompt-and-Admin-Settings.md`. The Sprint 60 Docker smoke test that ran in parallel was completed 2026-08-10 (committed `3c5b509`).
+All five items are **implemented, committed, and pushed** to `origin/master`: item 1 (`4d10561`), items 2+3+4 (`793fc52`), item 5 (`f8f5292`). Unit suites green: RAGS **270** / Repository **129** / Foundation **55** / Aletheia.Web.UnitTests **46**; `dotnet build Aletheia.slnx` succeeds. Backlog items 1-5 marked implemented in `docs/backlog/archive/Chat-Approval-Prompt-and-Admin-Settings.md`. The Sprint 60 Docker smoke test that ran in parallel was completed 2026-08-10 (committed `3c5b509`).
 
 **Residual manual verification (optional, user-side):** the modal approval prompt and `/settings` page were verified via unit/binding tests and a clean build, not a live browser run. A hard-refresh of `/copilot` (modal above the panels with Activity/Chats open; "Don't ask again" checkbox persists the preference) and `/settings` (My Preferences + admin Global Settings card) is the final visual check — same pattern as the Sprint 60 trace block.

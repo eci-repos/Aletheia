@@ -4,7 +4,7 @@
 
 Full authority: this file. Sprint 62 (GraphRAG Soft Deadline and Reembed Parity) is **complete, committed, and pushed** (`26995d9` on `origin/master`). Its optional Docker smoke test (reembed speed + `semantic-timeout-fallback` trace under LLM saturation) is user-side and can run in parallel.
 
-Promotes backlog items 2 and 3 from `docs/backlog/GraphRAG-LazyGraphRAG-Enhancements.md` — the two remaining parked items from the GraphRAG/LazyGraphRAG enhancement backlog.
+Promotes backlog items 2 and 3 from `docs/backlog/archive/GraphRAG-LazyGraphRAG-Enhancements.md` — the two remaining parked items from the GraphRAG/LazyGraphRAG enhancement backlog.
 
 ## Objective
 

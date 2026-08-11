@@ -1,6 +1,6 @@
 # Backlog: Chat Approval Prompt Visibility and Admin-Managed Settings
 
-**Status:** Items 1-5 promoted to Sprint 61 (2026-08-10) and **all implemented**; Sprint 61 **complete** (2026-08-11).
+**Status:** **ARCHIVED 2026-08-11** — all items implemented; moved to `docs/backlog/archive/` so the active backlog reads empty. Original status: Items 1-5 promoted to Sprint 61 (2026-08-10) and **all implemented**; Sprint 61 **complete** (2026-08-11).
 **Created:** 2026-08-08
 **Source:** UX review of the Copilot chat approval flow (`src/Aletheia.Web/Pages/Copilot/Index.razor`, `src/Aletheia.Web/Layout/ActivityPanel.razor`/`ChatsPanel.razor` + CSS, `ChatPlanningService.RequiresApproval`, `ChatPlanningOptions`) — reported issue: with the Activity/Chats side panel open, submitting a chat prompt hides the plan-approval prompt behind the fixed `z-index: 20` overlay, so the user sees nothing happen.
 

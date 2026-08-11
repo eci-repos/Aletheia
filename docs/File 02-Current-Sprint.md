@@ -67,9 +67,10 @@ Extend theme enforcement to the GraphRAG / LazyGraphRAG retrieval paths and to g
 **Implemented, committed, and pushed (`26995d9`).** See the Sprint 62 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (reembed parity):** `KnowledgeIndexMode` enum (`Full`/`Lightweight`) in `RAGS.Abstractions.Models`; `EnsureIngestedAsync` takes `mode = Full` and branches to `IndexLightweightAsync` when Lightweight; `RunReembedJobAsync` passes `Lightweight` (repair/chat keep `Full`).
-- **Item 2 (soft deadline):** `GraphRagService.RetrieveAsync` catch distinguishes deadline-fires from caller-cancel — deadline degrades to best-effort semantic retrieval under a ~10s secondary deadline, returning Success with trace strategy `semantic-timeout-fallback` + steps `deadline-exceeded`/`semantic-fallback`; caller-cancel and other exceptions still fail. Optional `budgetFactory` ctor param for tests.
+- **Item 2 (soft deadline):** `GraphRagService.RetrieveAsync` distinguishes deadline-fires from caller-cancel — deadline degrades to best-effort semantic retrieval under a ~10s secondary deadline, returning Success with trace strategy `semantic-timeout-fallback` + steps `deadline-exceeded`/`semantic-fallback`; caller-cancel and other exceptions still fail. Optional `budgetFactory` ctor param for tests.
+- **Smoke-test follow-up fix (`88164e4`):** the degrade now also covers the **returned-Failure** path — `PgVectorStore` converts a cancelled vector search into a returned `Failure` (not a thrown `OperationCanceledException`), so the deadline-fires check is applied to `baseResults.IsFailure` too, via a shared `RunSemanticTimeoutFallbackAsync` helper. Without it a deadline during the base semantic retrieval still hard-failed with HTTP 400.
 
-**Verification:** Repository 130 (+1) / RAGS 272 (+2) / Foundation 55 / Web 46 green; `dotnet build Aletheia.slnx` succeeds. Optional Docker smoke test (reembed speed + `semantic-timeout-fallback` trace under LLM saturation) is user-side.
+**Verification:** Repository 130 (+1) / RAGS 290 (+3) / Foundation 55 / Web 46 green; `dotnet build Aletheia.slnx` succeeds. **Docker smoke test RUN 2026-08-11 — PASS:** reembed completed in ~70s (vs 40+ min pre-Sprint 62); 16 concurrent GraphRAG retrievals under LLM saturation returned all HTTP 200 — 6 hit the 30s deadline and degraded to `semantic-timeout-fallback` with real results, zero HTTP 400 (pre-fix: 3/8 were 400).
 
 ---
 

@@ -58,7 +58,7 @@ Two small GraphRAG / ingestion follow-ups, delivered in one pass because they bo
 
 ## Implementation Status (2026-08-11)
 
-**Implementation complete.** Both items implemented, tested, and documented. Pending: commit (requested by the user) and optional Docker smoke test.
+**Implementation complete.** Both items implemented, tested, and documented. Committed/pushed (`26995d9`); a Docker smoke test run 2026-08-11 surfaced and fixed a follow-up defect in the soft-deadline path (see "Docker Smoke Test" below, committed `88164e4`).
 
 ### 1. Reembed indexer parity (`KnowledgeIndexMode`) — DONE
 - New `KnowledgeIndexMode` enum (`Full` / `Lightweight`) in `Aletheia.RAGS.Abstractions.Models` (`src/RAGS.Abstractions/Models/KnowledgeIndexMode.cs`).
@@ -66,7 +66,8 @@ Two small GraphRAG / ingestion follow-ups, delivered in one pass because they bo
 - `IngestionJobService.RunReembedJobAsync` passes `KnowledgeIndexMode.Lightweight`; repair (`RunRepairJobAsync`), plugin, and chat-hydration callers keep `Full` (default).
 
 ### 2. GraphRAG soft deadline / best-partial result — DONE
-- `GraphRagService.RetrieveAsync` catch block now distinguishes **deadline-fires** (`timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested`): runs a best-effort plain semantic retrieval under a fresh `CancelAfter(FallbackExecutionTime)` (~10s) secondary deadline and returns `Result.Success` with trace strategy `semantic-timeout-fallback` and steps `deadline-exceeded`/`semantic-fallback`; if even the fallback fails, returns the failure with a timeout notice. **Caller-cancel** returns `Result.Failure` with "The operation was cancelled." (no fallback); other exceptions keep the generic failure.
+- `GraphRagService.RetrieveAsync` distinguishes **deadline-fires** (`timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested`): runs a best-effort plain semantic retrieval under a fresh `CancelAfter(FallbackExecutionTime)` (~10s) secondary deadline and returns `Result.Success` with trace strategy `semantic-timeout-fallback` and steps `deadline-exceeded`/`semantic-fallback`; if even the fallback fails, returns the failure with a timeout notice. **Caller-cancel** returns `Result.Failure` with "The operation was cancelled." (no fallback); other exceptions keep the generic failure.
+- **Follow-up fix (smoke test, `88164e4`)**: the degrade must cover the **returned-Failure** path too. `PgVectorStore.SearchAsync` converts a cancelled vector search into a returned `Failure("Vector search failed. The operation was canceled.")` (not a thrown `OperationCanceledException`), so a deadline firing during the semantic base retrieval bypassed the catch block and still hard-failed with HTTP 400. The fallback was factored into a shared `RunSemanticTimeoutFallbackAsync` helper invoked from **both** the thrown-exception catch path and the returned-Failure base-retrieval path (`baseResults.IsFailure` + deadline condition).
 - New optional ctor param `Func<IGraphTraversalBudget>? budgetFactory = null` (default `() => new GraphTraversalBudget()`); `RetrieveAsync` builds the budget from it. No new logging dependency — the trace is the observability surface.
 
 ### 3. Tests — DONE
@@ -80,3 +81,7 @@ Two small GraphRAG / ingestion follow-ups, delivered in one pass because they bo
 ## Remaining
 - **Commit** when the user requests.
 - Optional Docker smoke test: rebuild the api container, run `POST /api/jobs/rags/reembed` and confirm it completes quickly (minutes, not 40+), and run a concurrent GraphRAG retrieval to see trace strategy `semantic-timeout-fallback` instead of HTTP 400 under LLM saturation.
+
+## Docker Smoke Test — RUN 2026-08-11 (complete)
+- **Part 1 — reembed speed: VERIFIED.** `POST /api/jobs/rags/reembed` on the 3-doc corpus completed in **~70 seconds** (18:53:54 → 18:55:04 UTC, lightweight path) vs the 40+ minutes the full indexer took in the Sprint 60 smoke test. Job reported `Succeeded` — "Re-embedding completed for 3 registered document(s)." — with 138 embeddings re-created (53/46/39 per source; semantic search returns results immediately after). Embeddings survive an API container restart (verified 138 → restart → 138).
+- **Part 2 — soft deadline under LLM saturation: VERIFIED (with a fix).** 16 concurrent GraphRAG retrievals against fresh queries saturated the Ollama LLM. **All 16 returned HTTP 200 with zero HTTP 400s; 6 of them hit the 30s execution deadline and degraded to trace strategy `semantic-timeout-fallback` with real corpus results (3 each).** Pre-fix, the same conditions produced HTTP 400 `Vector search failed. The operation was canceled.` on 3 of 8 requests — the deadline fired during the semantic base retrieval and the returned `Failure` bypassed the catch block (the degrade only covered thrown `OperationCanceledException`). Fix committed `88164e4` (see item 2 above); new unit test `RetrieveAsync_deadline_fires_with_returned_failure_degrades_to_semantic_timeout_fallback` (RAGS.UnitTests now **290**, all green).

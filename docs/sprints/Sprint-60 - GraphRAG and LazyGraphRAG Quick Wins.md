@@ -1,6 +1,6 @@
 # Sprint 60 - GraphRAG and LazyGraphRAG Quick Wins
 
-**Status:** Active
+**Status:** Complete (2026-08-10)
 
 Full authority: this file. Sprint 59 (Canonical Gate Softening, Multi-Theme, and Shared Theme Scope) is **committed and pushed** (`c151ea2` on `origin/master`).
 

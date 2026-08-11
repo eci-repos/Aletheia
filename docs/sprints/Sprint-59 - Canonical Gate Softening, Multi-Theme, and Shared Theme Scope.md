@@ -1,6 +1,6 @@
 # Sprint 59 - Canonical Gate Softening, Multi-Theme, and Shared Theme Scope
 
-**Status:** Active
+**Status:** Complete (2026-08-07)
 
 Full authority: this file. Sprint 58 (Session Knowledge Theme Filtering) is **committed and pushed** (`4fdfaf0` on `origin/master`); its remaining verification is the Docker smoke test, which can run in parallel with Sprint 59 work.
 

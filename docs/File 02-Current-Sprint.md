@@ -1,6 +1,6 @@
 # Sprint 61 - Chat Approval Prompt and Admin Settings
 
-**Status:** Active
+**Status:** Complete (2026-08-11)
 
 Full authority: `docs/sprints/Sprint-61 - Chat Approval Prompt and Admin Settings.md` (created 2026-08-10). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
@@ -69,6 +69,14 @@ Fix the Copilot chat approval flow so the plan-approval prompt is never hidden, 
 **Implemented.** `Pages/Settings/Index.razor` at `/settings` — **My Preferences** (own `copilot.requireApproval` toggle, any authenticated user) + **Global Settings (Administrator)** card (`copilot.requireApproval.force` toggle) rendered only via `AuthorizeView Roles="Administrator"`; loads/saves via the item 2 settings endpoints. Admin-only **Settings** entry added to the NavMenu (`.icon-settings`). Gating matches the Governance pattern (API enforces admin; UI hides the admin card/nav entry for non-admins while every user edits their own preference).
 
 **Verification:** Aletheia.Web.UnitTests **46** (was 44, +2) green; RAGS 270 / Repository 129 / Foundation 55 unchanged; build succeeds.
+
+---
+
+## Sprint 61 Complete (2026-08-11)
+
+All 5 items are **implemented, committed, and pushed** to `origin/master`: item 1 (`4d10561`), items 2+3+4 (`793fc52`), item 5 (`f8f5292`). Unit suites green: RAGS 270 / Repository 129 / Foundation 55 / Aletheia.Web.UnitTests 46; `dotnet build Aletheia.slnx` succeeds. The parallel Sprint 60 Docker smoke test was completed 2026-08-10 (committed `3c5b509`).
+
+**No next sprint file exists yet — no new work is authorized** until a new sprint file is created under `docs/sprints/` and promoted here. Residual manual (optional, user-side): hard-refresh `/copilot` and `/settings` for a live visual check of the modal + settings page (verified via unit/binding tests only).
 
 ---
 

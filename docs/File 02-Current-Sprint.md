@@ -1,43 +1,48 @@
-# Sprint 64 - Theme-Aware Graph Retrieval
+# Sprint 65 - Wiki Markdown and HTML View Tabs
 
-**Status:** Active (2026-08-11)
+**Status:** Active (2026-08-13)
 
-Full authority: `docs/sprints/Sprint-64 - Theme-Aware Graph Retrieval.md` (created 2026-08-11). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-65 - Wiki Markdown and HTML View Tabs.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 63 (Persisted LazyGraphRAG Corpus Index and Batch GraphRAG Ingest) is **complete, committed, and pushed** (`df7627d` on `origin/master`). Sprint 62 (GraphRAG Soft Deadline and Reembed Parity) is **complete** (`26995d9`); its optional Docker smoke test (reembed speed + `semantic-timeout-fallback` trace under LLM saturation) is user-side and can run in parallel.
+Sprint 64 (Theme-Aware Graph Retrieval) is **complete, committed, and pushed** on `origin/master`.
 
 ## Objective
 
-Extend theme enforcement to the GraphRAG / LazyGraphRAG retrieval paths and to global (community-summary) search. Today theme filtering works only on the semantic RAG path: `RetrievalRequest.SourceIds` → PgVectorStore set predicate. Graph modes are explicitly out of scope for theme filtering (Sprint 58 boundary), so a user scoping Search Center to a theme gets theme-filtered semantic results but unfiltered GraphRAG / LazyGraphRAG / global-graph results — an inconsistent view of the estate.
+Give wiki pages a tab control so non-technical users get a readable page: **View** (the markdown in `WikiPage.Summary` rendered to styled HTML) and **Source** (the raw markdown read-only in a `<pre>`). Today `Wiki.razor` prints the summary as a plain `<p>`, so users literally see raw markdown syntax as unformatted text. The friendly view is rendered HTML (RTF was rejected — browsers can't render it inline), reusing the mini-renderer Copilot already has, extracted to a shared helper so both surfaces stay consistent.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Theme scope on graph retrieval:** optional `IReadOnlyList<Guid>? sourceIds = null` (after `cancellationToken`) on `IGraphRagService.RetrieveAsync` / `GlobalSearchAsync`, `ILazyGraphRagService.RetrieveAsync` / `GlobalSearchAsync`, and `IGlobalGraphSearchService.SearchAsync`. New `GraphThemeScope` static helper (resolve a node's source id; filter nodes/communities to an allowlist). `GraphRagService` filters resolved entities + expansion nodes and scopes semantic fallback / expansion `RetrievalRequest`s; `LazyGraphRagService` filters corpus seed sources and scopes fallback / expansion requests; `GlobalGraphSearchService` filters communities via a node→source map (match-any semantics).
-2. **API + Web wiring:** `GraphRagController` / `LazyGraphRagController` accept `?themes=` (comma-separated) on `Retrieve` and `GlobalSearch`, resolve via optional `IKnowledgeThemeService? themeService = null` ctor param (RagsController pattern), pass `sourceIds` through. `RepositoryApiClient.GraphRagRetrieveAsync` / `LazyGraphRagRetrieveAsync` accept themes and append `&themes=`. `SearchCenter.razor` passes `_selectedThemes` to graph-mode retrieve calls.
-3. **Tests**: RAGS (theme-scoped GraphRAG retrieval filters entities/communities; theme-scoped LazyGraphRAG retrieval filters corpus seeds; `GlobalGraphSearchService` theme-scoped search filters communities; controllers pass themes through). Existing suites green.
-4. **Docs**: Architecture, OperationsGuide, Development-Guidelines, AGENTS, File 02/03, sprint file; backlog item 5 status updated.
+1. **Shared markdown renderer:** new `src/Aletheia.Web/Services/MarkdownRenderer.cs` (`ToHtml(string)`); Copilot's `RenderMarkdown` keeps only its JSON `<pre>` branch and otherwise delegates to it; move the table/heading/list helpers out of `Copilot/Index.razor`; rename emitted classes `copilot-table*` → `md-table*` (Copilot CSS updated).
+2. **Wiki View/Source tabs:** `Wiki.razor` replaces the `<p class="wiki-summary">` block with a View/Source tab bar (default View); View renders via `MarkdownRenderer.ToHtml` as `MarkupString`, Source shows raw md in a `<pre>`; ephemeral page state, no API/wire changes. CSS in `Wiki.razor.css`.
+3. **Tests:** `MarkdownRendererTests` (headings/tables/lists/paragraphs/inline bold+code/HTML escaping/empty) + Wiki tab source-assertion tests; existing suites stay green.
+4. **Docs:** File 02/03, AGENTS, CLAUDE.md, sprint file; backlog item moved to `docs/backlog/archive/` when complete.
 
 ## Acceptance Criteria
 
-- A Search Center theme scope filters GraphRAG / LazyGraphRAG retrieval results and global-graph (community summary) results to documents in the selected themes.
-- No theme scope → behavior identical to pre-Sprint-64 (graph modes unfiltered).
-- Semantic fallback and entity-expansion `RetrievalRequest`s inside graph retrieval carry the same `sourceIds` scope, so a graph query that degrades to semantic retrieval stays theme-scoped.
+- A wiki page shows a View/Source toggle; View renders headings/tables/lists/bold/code; Source shows raw markdown escaped in a `<pre>`.
+- Copilot chat rendering unchanged except the `copilot-table*` → `md-table*` class rename.
+- Raw HTML in a wiki summary is escaped, never emitted as markup.
 - Repository / RAGS / Foundation / Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- New theme model changes (multi-theme, backfill — already done in Sprint 59).
-- Copilot session theme filter changes (already theme-scoped via `RetrievalRequest.SourceIds`).
-- Wiki / WRAGS theme scoping (Wiki stays curated).
-- Changing the per-request traversal budget, token accounting, or soft-deadline behavior (Sprint 60/62).
+- RTF/PDF/export formats; Markdig/full GFM; per-user tab persistence or API wiring; editing-surface changes.
 
 ---
 
 ## Progress
 
+### Sprint 65 — wiki markdown/HTML view tabs (2026-08-13)
+
+Promoted from `docs/backlog/Wiki-Markdown-HTML-Tabs.md`. Implementation status to be recorded here when the sprint completes.
+
+---
+
+## Sprint 64 progress log (2026-08-11) — completed
+
 ### Sprint 64 — theme-aware graph retrieval (2026-08-11)
 
-**Implemented, committed, and pushed.** See the sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed.** See the Sprint 64 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (theme scope on graph retrieval):** `sourceIds` params on all three graph services; `GraphThemeScope` helper (`TryGetSourceId`, `IsInScope`, `FilterNodes`, `ToAllowSet`, `CommunityHasMemberInScope`); `GraphRagService` filters resolved entities + multi-hop expansion nodes and scopes semantic fallback / entity-expansion `RetrievalRequest`s; `LazyGraphRagService` filters corpus seed sources and scopes fallback / expansion requests; `GlobalGraphSearchService` builds a node→source map via `IGraphProvider.GetNodesAsync()` and filters communities with match-any semantics (returns `Failure("No communities in the selected themes.")` when scoped and empty).
 - **Item 2 (API + Web wiring):** `?themes=` on both graph controllers' `Retrieve` + `GlobalSearch`; `RepositoryApiClient` appends `&themes=`; `SearchCenter.razor` passes `_selectedThemes` to graph-mode retrieve calls (WRAGS note now reads "Theme scope does not apply to WRAGS search.").

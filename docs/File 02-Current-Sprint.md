@@ -1,40 +1,51 @@
-# Sprint 67 - Source Verification: View the Exact Passage in the Document
+# Sprint 68 - Query Expansion for Acronyms
 
 **Status:** Active (2026-08-13)
 
-Full authority: `docs/sprints/Sprint-67 - Source Verification View in Document.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-68 - Query Expansion for Acronyms.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 66 (Remove Redundant Metadata Nav Item) is **complete, committed, and pushed** on `origin/master`.
+Sprint 67 (Source Verification: View the Exact Passage in the Document) is **complete, committed, and pushed** on `origin/master` (`9cbd886`).
 
 ## Objective
 
-Give end-users an in-app document viewer with **page-accurate passage highlighting** so an answer can be verified against the source: a chunk carries a page locator born at extraction time, a preview endpoint streams the original blob inline, a `/document/{id}` viewer renders it (PDF.js for PDF, extracted text for other types), and Search Center / Copilot link results and citations straight to the exact passage.
+Expand domain acronyms in the user query **before embedding** so a short acronym ("AI") retrieves documents that spell it out ("Artificial Intelligence", "Generative AI"), while keeping the literal acronym for the keyword fallback. Deterministic, cheap, no infra change.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Chunk source locator:** nullable `PageNumber`/`OffsetInPage` on `Chunk`; page-aware `ChunkingPipeline`; PDF text extraction with page markers; `page_number` in the embeddings schema; populated via lightweight reembed.
-2. **Preview endpoint:** `GET /api/files/{id}/preview` streaming the original blob inline (PDF → raw bytes, text → extracted text + page markers, other → 415).
-3. **In-app document viewer:** `Pages/Document/View.razor` (`/document/{id}?page=&chunk=`) with a PDF.js renderer (text layer) and an extracted-text renderer.
-4. **Passage highlight + auto-scroll:** locate the chunk's leading phrase in the rendered text layer, highlight + scroll; page-jump fallback.
-5. **Wire-through:** Search Center result cards render "View in document (p. N)"; Copilot citations link to the viewer; `RepositoryApiClient` gains preview/viewer navigation.
-6. **Tests + docs:** locator/preview/viewer/wire-through tests; docs updated.
+1. **QueryExpander:** static `QueryExpander` in `RAGS.Application` with a public `Expansions` dictionary (AI, GenAI, RFP, RFI, ML, LLM, NLP, API, SOW, SLA, KPI, POC, MVP, OCR, PDF, SQL, RAG) and `Expand(string)` — single-pass, longest-first, word-boundary regex that appends the expansion after each standalone acronym.
+2. **Wire-through:** `RagsService.RetrieveAsync` expands the query for the embedding call only; the keyword fallback keeps the original query (whole-string ILIKE match).
+3. **Tests + docs:** `QueryExpanderTests` + `RagsServiceTests` (expanded query reaches the embedding provider; keyword fallback uses the original); docs updated.
 
 ## Acceptance Criteria
 
-- A chunk returned by Search Center / Copilot can be opened in `/document/{id}` and the exact passage is highlighted (or the page is jumped to) — no download required.
-- PDFs render in-browser with a text layer; non-PDF types render extracted text with page markers.
-- Web unit suite green; `dotnet build Aletheia.slnx` succeeds.
+- `QueryExpander.Expand("AI features")` yields "AI Artificial Intelligence features"; "email"/"AIM" are untouched.
+- `RagsService.RetrieveAsync` embeds the expanded query and keyword-falls-back on the original.
+- RAGS unit suite green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Office → PDF conversion in v1 (Office documents get the extracted-text viewer with passage highlight instead).
-- Full-text search *inside* the viewer, annotation/notes, or bookmarks.
-- Version-diff highlighting across document versions.
-- Per-user viewing preferences (this is a global feature).
+- Config-driven expansion dictionaries (static dictionary in v1).
+- Expansion for the keyword fallback path (would break the ILIKE match).
+- Applying expansion to GraphRAG/LazyGraphRAG direct vector-store calls (internal operator modes).
+- A stronger embedding model (separate, infra-level option).
 
 ---
 
 ## Progress
+
+### Sprint 68 — query expansion for acronyms (2026-08-13)
+
+**Implemented, committed, and pushed.** See the Sprint 68 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (QueryExpander):** `src/RAGS.Application/QueryExpander.cs` — static class with a public `Expansions` dictionary (17 domain acronyms: AI, GenAI, RFP, RFI, ML, LLM, NLP, API, SOW, SLA, KPI, POC, MVP, OCR, PDF, SQL, RAG) and `Expand(string)` — single-pass, longest-first, word-boundary regex, case-insensitive, keeps the original token.
+- **Item 2 (wire-through):** `RagsService.RetrieveAsync` embeds `QueryExpander.Expand(request.Query)`; the keyword fallback keeps `request.Query` (whole-string ILIKE match).
+- **Item 3 (tests + docs):** RAGS 302 (+9) — `QueryExpanderTests` (7) + `RagsServiceTests` (+2: expanded query reaches the embedding provider, keyword fallback uses the original). Foundation 55 / Repository 134 / Web 76 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** hard-refresh `/search` and `/copilot`, then re-ask the broad question ("provide a summary of RFP opportunities related to AI") to confirm the AI RFP is now retrieved.
+
+---
+
+## Sprint 67 progress log (2026-08-13) — completed
 
 ### Sprint 67 — source verification view in document (2026-08-13)
 

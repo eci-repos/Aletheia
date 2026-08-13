@@ -226,6 +226,40 @@ public class RagsServiceTests
         Assert.Empty(result.Value!);
     }
 
+    [Fact]
+    public async Task RetrieveAsync_embeds_expanded_query_for_acronyms()
+    {
+        var vectorStore = new FakeVectorStore();
+        var recordingProvider = new RecordingEmbeddingProvider();
+        var service = new RagsService(new ChunkingPipeline(), recordingProvider, vectorStore);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("AI features", 3));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("AI Artificial Intelligence features", recordingProvider.LastEmbeddedText);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_keyword_fallback_uses_original_query()
+    {
+        var vectorStore = new FakeVectorStore
+        {
+            SearchOverride = _ => new List<SearchResult>(),
+            KeywordResults = new List<SearchResult>
+            {
+                CreateKeywordResult("keyword chunk")
+            }
+        };
+        var recordingProvider = new RecordingEmbeddingProvider();
+        var service = new RagsService(new ChunkingPipeline(), recordingProvider, vectorStore);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("AI", 3));
+
+        Assert.True(result.IsSuccess);
+        // The keyword fallback must search the literal acronym, not the expanded phrase (ILIKE match).
+        Assert.Equal("AI", vectorStore.LastKeywordQuery);
+    }
+
     private static SearchResult CreateKeywordResult(string content)
     {
         return new SearchResult(
@@ -246,6 +280,7 @@ public class RagsServiceTests
         public Func<int, IReadOnlyList<SearchResult>>? SearchOverride { get; set; }
         public IReadOnlyList<SearchResult>? KeywordResults { get; set; }
         public bool KeywordSearchSupported { get; set; } = true;
+        public string? LastKeywordQuery { get; private set; }
 
         public Task<Result> StoreAsync(Guid chunkId, ReadOnlyMemory<float> vector, Chunk chunk, CancellationToken cancellationToken = default)
         {
@@ -287,7 +322,20 @@ public class RagsServiceTests
                 return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Failure("Keyword search is not supported by this store."));
             }
 
+            LastKeywordQuery = query;
             return Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(KeywordResults ?? new List<SearchResult>()));
+        }
+    }
+
+    private sealed class RecordingEmbeddingProvider : IEmbeddingProvider
+    {
+        public int VectorDimension => 128;
+        public string? LastEmbeddedText { get; private set; }
+
+        public Task<Result<ReadOnlyMemory<float>>> GenerateAsync(string text, CancellationToken cancellationToken = default)
+        {
+            LastEmbeddedText = text;
+            return Task.FromResult(Result<ReadOnlyMemory<float>>.Success(new ReadOnlyMemory<float>(new float[128])));
         }
     }
 

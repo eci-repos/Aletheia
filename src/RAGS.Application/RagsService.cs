@@ -84,9 +84,13 @@ public sealed class RagsService : IRagsService
             throw new ArgumentNullException(nameof(request));
         }
 
-        _logger.LogInformation("RAGS retrieval started for query '{Query}' (topK={TopK}, sourceId={SourceId}).", request.Query, request.TopK, request.SourceId);
+        // Sprint 68: expand domain acronyms ("AI" → "AI Artificial Intelligence") before embedding so a
+        // short acronym retrieves documents that spell it out. The keyword fallback keeps the original
+        // query — it is a whole-string ILIKE match and would not match the expanded phrase.
+        var expandedQuery = QueryExpander.Expand(request.Query);
+        _logger.LogInformation("RAGS retrieval started for query '{Query}' (expanded '{ExpandedQuery}', topK={TopK}, sourceId={SourceId}).", request.Query, expandedQuery, request.TopK, request.SourceId);
 
-        var embeddingResult = await _embeddingProvider.GenerateAsync(request.Query, cancellationToken).ConfigureAwait(false);
+        var embeddingResult = await _embeddingProvider.GenerateAsync(expandedQuery, cancellationToken).ConfigureAwait(false);
         if (embeddingResult.IsFailure || embeddingResult.Value.IsEmpty)
         {
             _logger.LogWarning("RAGS embedding generation failed for query '{Query}': {Error}.", request.Query, embeddingResult.Error);

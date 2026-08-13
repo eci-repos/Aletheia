@@ -1,36 +1,43 @@
-# Sprint 65 - Wiki Markdown and HTML View Tabs
+# Sprint 66 - Remove Redundant Metadata Nav Item
 
 **Status:** Active (2026-08-13)
 
-Full authority: `docs/sprints/Sprint-65 - Wiki Markdown and HTML View Tabs.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-66 - Remove Redundant Metadata Nav Item.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 64 (Theme-Aware Graph Retrieval) is **complete, committed, and pushed** on `origin/master`.
+Sprint 65 (Wiki Markdown and HTML View Tabs) is **complete, committed, and pushed** on `origin/master`.
 
 ## Objective
 
-Give wiki pages a tab control so non-technical users get a readable page: **View** (the markdown in `WikiPage.Summary` rendered to styled HTML) and **Source** (the raw markdown read-only in a `<pre>`). Today `Wiki.razor` prints the summary as a plain `<p>`, so users literally see raw markdown syntax as unformatted text. The friendly view is rendered HTML (RTF was rejected — browsers can't render it inline), reusing the mini-renderer Copilot already has, extracted to a shared helper so both surfaces stay consistent.
+Remove the **Metadata** side-menu item from `NavMenu.razor`. The page is a file-picker that opens the metadata editor, and **Browse** already provides the same flow via its ✎ Edit action (deep-link to `metadata?fileId=...`). The standalone nav item is a redundant, weaker entry point. The `/metadata` page, its route, and Browse's Edit deep-link stay untouched.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Shared markdown renderer:** new `src/Aletheia.Web/Services/MarkdownRenderer.cs` (`ToHtml(string)`); Copilot's `RenderMarkdown` keeps only its JSON `<pre>` branch and otherwise delegates to it; move the table/heading/list helpers out of `Copilot/Index.razor`; rename emitted classes `copilot-table*` → `md-table*` (Copilot CSS updated).
-2. **Wiki View/Source tabs:** `Wiki.razor` replaces the `<p class="wiki-summary">` block with a View/Source tab bar (default View); View renders via `MarkdownRenderer.ToHtml` as `MarkupString`, Source shows raw md in a `<pre>`; ephemeral page state, no API/wire changes. CSS in `Wiki.razor.css`.
-3. **Tests:** `MarkdownRendererTests` (headings/tables/lists/paragraphs/inline bold+code/HTML escaping/empty) + Wiki tab source-assertion tests; existing suites stay green.
-4. **Docs:** File 02/03, AGENTS, CLAUDE.md, sprint file; backlog item moved to `docs/backlog/archive/` when complete.
+1. **Remove the Metadata nav item:** delete the `NavLink href="metadata"` block from `src/Aletheia.Web/Layout/NavMenu.razor`. No page, route, or API changes.
+2. **Binding test:** assert `NavMenu.razor` no longer contains `href="metadata"` and `Browse.razor` still contains `metadata?fileId=` (Edit action preserved).
+3. **Docs:** File 02/03, AGENTS, CLAUDE.md, sprint file; backlog item moved to `docs/backlog/archive/` when complete.
 
 ## Acceptance Criteria
 
-- A wiki page shows a View/Source toggle; View renders headings/tables/lists/bold/code; Source shows raw markdown escaped in a `<pre>`.
-- Copilot chat rendering unchanged except the `copilot-table*` → `md-table*` class rename.
-- Raw HTML in a wiki summary is escaped, never emitted as markup.
-- Repository / RAGS / Foundation / Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
+- The Metadata entry is gone from the side nav; `/metadata` still resolves and Browse's ✎ Edit action still opens the editor.
+- Web unit suite green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- RTF/PDF/export formats; Markdig/full GFM; per-user tab persistence or API wiring; editing-surface changes.
+- Removing/renaming the `/metadata` route or `MetadataEditor.razor`.
+- Changing Browse's Edit action or the metadata editor.
+- The "Searching…" hang diagnostic (API availability, not code).
 
 ---
 
 ## Progress
+
+### Sprint 66 — remove redundant Metadata nav item (2026-08-13)
+
+Promoted from `docs/backlog/Remove-Redundant-Metadata-Nav-Item.md`. Implementation status to be recorded here when the sprint completes.
+
+---
+
+## Sprint 65 progress log (2026-08-13) — completed
 
 ### Sprint 65 — wiki markdown/HTML view tabs (2026-08-13)
 
@@ -40,7 +47,7 @@ Give wiki pages a tab control so non-technical users get a readable page: **View
 - **Item 2 (Wiki View/Source tabs):** `Wiki.razor` shows a View/Source tab bar (default View); View renders the summary via `MarkdownRenderer.ToHtml` as a `MarkupString`, Source shows raw md in `<pre class="wiki-source-view">`; ephemeral `_viewMode` page state, no API/wire changes.
 - **Item 3 (tests):** Web 61 (+15) — `MarkdownRendererTests` (11) + `WikiViewTabsBindingTests` (4).
 
-**Verification:** Foundation 55 / Repository 130 / RAGS 290 / Web 61 green; `dotnet build Aletheia.slnx` succeeds (0 errors). Backlog item archived. No sprint currently active — next promotion will set it.
+**Verification:** Foundation 55 / Repository 130 / RAGS 290 / Web 61 green; `dotnet build Aletheia.slnx` succeeds (0 errors). Backlog item archived.
 
 ---
 

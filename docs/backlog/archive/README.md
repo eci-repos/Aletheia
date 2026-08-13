@@ -11,5 +11,6 @@ Fully-implemented backlog files are moved here from `docs/backlog/` so the activ
 | `Remove-Redundant-Metadata-Nav-Item.md` | All 3 items implemented (Sprint 66) — archived 2026-08-13 |
 | `Source-Verification-View-in-Document.md` | All 6 items implemented (Sprint 67) — archived 2026-08-13 |
 | `Query-Expansion-for-Acronyms.md` | All 3 items implemented (Sprint 68) — archived 2026-08-13 |
+| `Ingestion-Status-in-Repository-Browser.md` | All 4 items implemented (Sprint 69) — archived 2026-08-13 |
 
 Keep the historical file contents untouched except for the status header: the promotion history (sprint, commit, date) is the record of how each item was delivered.

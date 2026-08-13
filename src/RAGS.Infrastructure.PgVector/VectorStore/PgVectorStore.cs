@@ -284,6 +284,38 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         }
     }
 
+    public async Task<Result<IReadOnlyDictionary<Guid, int>>> GetChunkCountsAsync(
+        IReadOnlyList<Guid> sourceIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceIds is null || sourceIds.Count == 0)
+        {
+            return Result<IReadOnlyDictionary<Guid, int>>.Success(new Dictionary<Guid, int>());
+        }
+
+        const string sql = @"
+            SELECT e.source_id as ""SourceId"", COUNT(*) as ""Count""
+            FROM embeddings e
+            WHERE e.source_id = ANY(@SourceIds)
+            GROUP BY e.source_id";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<ChunkCountRow>(
+                new CommandDefinition(sql, new { SourceIds = sourceIds }, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
+
+            return Result<IReadOnlyDictionary<Guid, int>>.Success(rows.ToDictionary(row => row.SourceId, row => row.Count));
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyDictionary<Guid, int>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
     public async Task<Result> DeleteBySourceAsync(Guid sourceId, CancellationToken cancellationToken = default)
     {
         const string sql = "DELETE FROM embeddings WHERE source_id = @SourceId";
@@ -429,6 +461,12 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         public double Score { get; set; }
         public int ChunkIndex { get; set; }
         public int? PageNumber { get; set; }
+    }
+
+    private record ChunkCountRow
+    {
+        public Guid SourceId { get; set; }
+        public int Count { get; set; }
     }
 }
 

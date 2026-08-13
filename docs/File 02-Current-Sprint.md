@@ -1,37 +1,52 @@
-# Sprint 68 - Query Expansion for Acronyms
+# Sprint 69 - Ingestion Status in the Repository Browser
 
 **Status:** Active (2026-08-13)
 
-Full authority: `docs/sprints/Sprint-68 - Query Expansion for Acronyms.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-69 - Ingestion Status in Repository Browser.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 67 (Source Verification: View the Exact Passage in the Document) is **complete, committed, and pushed** on `origin/master` (`9cbd886`).
+Sprint 68 (Query Expansion for Acronyms) is **complete, committed, and pushed** on `origin/master` (`3a77fe5`).
 
 ## Objective
 
-Expand domain acronyms in the user query **before embedding** so a short acronym ("AI") retrieves documents that spell it out ("Artificial Intelligence", "Generative AI"), while keeping the literal acronym for the keyword fallback. Deterministic, cheap, no infra change.
+Give the Repository Browser a per-file **ingestion status** so a user can see at a glance whether an uploaded document actually made it into retrieval (has embeddings) or silently failed. The ground-truth signal is durable: **a source with ≥1 embedding is ingested** — job status is in-memory and lost on container restart.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **QueryExpander:** static `QueryExpander` in `RAGS.Application` with a public `Expansions` dictionary (AI, GenAI, RFP, RFI, ML, LLM, NLP, API, SOW, SLA, KPI, POC, MVP, OCR, PDF, SQL, RAG) and `Expand(string)` — single-pass, longest-first, word-boundary regex that appends the expansion after each standalone acronym.
-2. **Wire-through:** `RagsService.RetrieveAsync` expands the query for the embedding call only; the keyword fallback keeps the original query (whole-string ILIKE match).
-3. **Tests + docs:** `QueryExpanderTests` + `RagsServiceTests` (expanded query reaches the embedding provider; keyword fallback uses the original); docs updated.
+1. **Chunk-count query:** `IVectorStore.GetChunkCountsAsync(IReadOnlyList<Guid> sourceIds)` (default no-op impl so fakes keep compiling) + `PgVectorStore` grouped `COUNT(*)` override.
+2. **API stamping:** `FileMetadata.ChunkCount` (int?) + computed `Ingested`; `SearchController` injects `IVectorStore` and stamps the current page's files (0 when missing from the map).
+3. **UI badge:** `Browse.razor` Ingestion column — green **Ingested** / amber **Not ingested** badges with a failure-mode tooltip.
+4. **Tests + docs:** `SearchControllerTests` (stamping, missing sources, failure) + `BrowseBindingTests` (column + badges); docs updated.
 
 ## Acceptance Criteria
 
-- `QueryExpander.Expand("AI features")` yields "AI Artificial Intelligence features"; "email"/"AIM" are untouched.
-- `RagsService.RetrieveAsync` embeds the expanded query and keyword-falls-back on the original.
-- RAGS unit suite green; `dotnet build Aletheia.slnx` succeeds.
+- A file with embeddings shows a green **Ingested** badge; a file without shows an amber **Not ingested** badge with the failure-mode tooltip.
+- `SearchController` stamps the current page's files without a cross-module dependency; fakes compile against the default `GetChunkCountsAsync` impl.
+- Repository + Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Config-driven expansion dictionaries (static dictionary in v1).
-- Expansion for the keyword fallback path (would break the ILIKE match).
-- Applying expansion to GraphRAG/LazyGraphRAG direct vector-store calls (internal operator modes).
-- A stronger embedding model (separate, infra-level option).
+- Per-file ingestion *error* surfacing (the Activity panel already shows job errors; the badge links the failure mode in a tooltip only).
+- Re-triggering ingestion from the badge (re-upload / repair job remain the manual path).
+- Showing ingestion status outside the Repository Browser (Search Center, Copilot, Dashboard).
 
 ---
 
 ## Progress
+
+### Sprint 69 — ingestion status in the repository browser (2026-08-13)
+
+**Implemented.** See the Sprint 69 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (chunk-count query):** `IVectorStore.GetChunkCountsAsync` (default no-op impl — fakes keep compiling) + `PgVectorStore` grouped `COUNT(*)` override.
+- **Item 2 (API stamping):** `FileMetadata.ChunkCount`/`Ingested`; `SearchController` injects `IVectorStore` and stamps the current page's files (0 when missing from the map). No cross-module dependency.
+- **Item 3 (UI badge):** `Browse.razor` Ingestion column — green **Ingested** / amber **Not ingested** badges with a failure-mode tooltip.
+- **Item 4 (tests + docs):** Repository 137 (+3) — `SearchControllerTests`; Web 79 (+3) — `BrowseBindingTests`. RAGS 302 / Foundation 55 unchanged; build 0 errors.
+
+**Residual manual (user-side):** hard-refresh `/browse`; the CMP 2026 – 3. RFP Analysis.docx row should now show an amber **Not ingested** badge, confirming the diagnosis that its ingestion job failed. Re-upload it (or run a repair job) to turn it green.
+
+---
+
+## Sprint 68 progress log (2026-08-13) — completed
 
 ### Sprint 68 — query expansion for acronyms (2026-08-13)
 

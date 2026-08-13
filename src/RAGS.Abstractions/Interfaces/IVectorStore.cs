@@ -24,4 +24,9 @@ public interface IVectorStore
     /// <summary>Returns the first <paramref name="take"/> chunks of a source in document order (by chunk index).</summary>
     Task<Result<IReadOnlyList<SearchResult>>> GetSourceChunksAsync(Guid sourceId, int take, CancellationToken cancellationToken = default)
         => Task.FromResult(Result<IReadOnlyList<SearchResult>>.Success(Array.Empty<SearchResult>()));
+
+    /// <summary>Returns the number of stored embeddings per source id (Sprint 69 — ingestion status in the
+    /// Repository Browser). Default returns an empty map; stores may override.</summary>
+    Task<Result<IReadOnlyDictionary<Guid, int>>> GetChunkCountsAsync(IReadOnlyList<Guid> sourceIds, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result<IReadOnlyDictionary<Guid, int>>.Success(new Dictionary<Guid, int>()));
 }

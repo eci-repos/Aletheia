@@ -63,6 +63,12 @@ public sealed class FileMetadata
     /// <summary>Canonical template status (Canonical / Uncategorized). Null for pre-Sprint-59 rows awaiting re-evaluation.</summary>
     public string? TemplateStatus { get; }
 
+    /// <summary>Number of RAGS embeddings for this source, populated by the search path (Sprint 69). Null when not populated.</summary>
+    public int? ChunkCount { get; set; }
+
+    /// <summary>True when the source has at least one embedding — i.e. ingestion completed and the document is retrievable.</summary>
+    public bool Ingested => ChunkCount is > 0;
+
     private static IReadOnlyList<string>? NormalizeThemes(IReadOnlyList<string>? theme)
     {
         if (theme is null || theme.Count == 0)

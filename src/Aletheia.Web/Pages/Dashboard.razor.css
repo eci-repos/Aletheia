@@ -1,3 +1,8 @@
+.dashboard-loading {
+    padding: 2rem 0;
+    font-size: 0.95rem;
+}
+
 .dashboard-action {
     border: 1px solid #e5e7eb;
     border-top-width: 3px;

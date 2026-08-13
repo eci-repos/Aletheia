@@ -49,6 +49,8 @@ Per the project owner, Governance and Settings were already at the bottom of the
 
 Per the project owner, the Dashboard action cards (Upload/Browse/Search Center/Wiki/Copilot) got very light pastel tints: each card carries a `dashboard-action-<name>` modifier class styled in the new `Dashboard.razor.css` — a light background wash, a 3px colored top border, and a darker shade on the card title (soft green/blue/amber/violet/teal). Text stays dark for contrast; buttons unchanged. Web 67 (+2, `DashboardBindingTests`); build 0 errors.
 
+Follow-up: the Dashboard now shows a **loading indicator** while `_recentFiles` is still `null` (the body only renders after the first API call returns) — a Bootstrap spinner + "Loading repository data…" in a `.dashboard-loading` block, so a slow refresh no longer looks like a blank page. Web 68 (+1, `DashboardBindingTests.Dashboard_shows_loading_indicator_while_data_loads`).
+
 ---
 
 ## Sprint 65 progress log (2026-08-13) — completed

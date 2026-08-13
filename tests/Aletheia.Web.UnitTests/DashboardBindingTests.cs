@@ -15,6 +15,15 @@ public class DashboardBindingTests
     }
 
     [Fact]
+    public void Dashboard_shows_loading_indicator_while_data_loads()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Dashboard.razor"));
+
+        Assert.Contains("spinner-border", source);
+        Assert.Contains("Loading repository data", source);
+    }
+
+    [Fact]
     public void Dashboard_tint_css_defines_light_backgrounds()
     {
         var css = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Dashboard.razor.css"));

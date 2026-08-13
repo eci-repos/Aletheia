@@ -131,6 +131,7 @@ the authorized work.
 ## Remove Redundant Metadata Nav Item (Sprint 66)
 
 - **The Metadata side-menu item is gone.** `NavMenu.razor` no longer has a `NavLink href="metadata"` — the `/metadata` page (`MetadataEditor.razor`) and its route are untouched and remain reachable through **Browse's ✎ Edit action** (`Browse.razor` deep-links to `metadata?fileId=...&fileName=...&version=...`). Do not re-add a Metadata nav entry; the editor is a Browse-owned flow.
+- **Nav grouping:** Governance and Settings sit at the bottom of the side nav under a divider + muted **Management** label (`.nav-section-divider` / `.nav-section-label` in `NavMenu.razor.css`, hidden when the sidebar is collapsed). Keep management/admin items grouped below the primary surfaces (Dashboard → Copilot).
 - The "Searching…" hang on the Metadata/Browse search is an **API-availability diagnostic**, not a code bug: `GET /api/search` → `SearchUseCase` → plain PostgreSQL metadata query (no LLM), so a long "Searching…" means the API is not responding.
 
 ## Wiki Markdown and HTML View Tabs (Sprint 65)

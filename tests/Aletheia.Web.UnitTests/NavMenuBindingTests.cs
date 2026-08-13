@@ -28,6 +28,17 @@ public class NavMenuBindingTests
         Assert.Contains("@page \"/metadata\"", source);
     }
 
+    [Fact]
+    public void Nav_menu_groups_management_items_below_a_divider()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/NavMenu.razor"));
+
+        Assert.Contains("nav-section-divider", source);
+        Assert.Contains(">Management</div>", source);
+        Assert.Contains("href=\"governance\"", source);
+        Assert.Contains("href=\"settings\"", source);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

@@ -41,6 +41,10 @@ Remove the **Metadata** side-menu item from `NavMenu.razor`. The page is a file-
 
 **Verification:** Foundation 55 / Repository 130 / RAGS 290 / Web 64 green; `dotnet build Aletheia.slnx` succeeds (0 errors). No sprint currently active — next promotion will set it.
 
+### Post-Sprint 66 nav grouping (2026-08-13)
+
+Per the project owner, Governance and Settings were already at the bottom of the side nav; added a divider + muted **Management** label above Governance in `NavMenu.razor` so the primary surfaces (Dashboard → Copilot) read as one group and the admin/management items sit clearly apart. Hidden when the sidebar is collapsed. Web 65 (+1, `NavMenuBindingTests.Nav_menu_groups_management_items_below_a_divider`); build 0 errors.
+
 ---
 
 ## Sprint 65 progress log (2026-08-13) — completed

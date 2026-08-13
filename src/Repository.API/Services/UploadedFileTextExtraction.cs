@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Text;
 using System.Xml;
 using Aletheia.Foundation.Shared;
+using Aletheia.RAGS.Abstractions.Models;
+using UglyToad.PdfPig;
 
 namespace Aletheia.Repository.API.Services;
 
@@ -17,7 +19,8 @@ public interface IUploadedFileTextExtractor
 public sealed record UploadedFileTextExtraction(
     bool IsSupported,
     string? Text,
-    string Status);
+    string Status,
+    IReadOnlyList<TextPage>? Pages = null);
 
 public sealed class UploadedFileTextExtractor : IUploadedFileTextExtractor
 {
@@ -59,6 +62,19 @@ public sealed class UploadedFileTextExtractor : IUploadedFileTextExtractor
 
         try
         {
+            if (IsPdf(fileName, contentType))
+            {
+                try
+                {
+                    var text = ExtractPdfText(content);
+                    return Result<UploadedFileTextExtraction>.Success(text);
+                }
+                catch (Exception ex)
+                {
+                    return Result<UploadedFileTextExtraction>.Failure($"PDF extraction failed. {ex.Message}");
+                }
+            }
+
             if (IsDocx(fileName, contentType))
             {
                 var text = ExtractDocxText(content);
@@ -84,10 +100,47 @@ public sealed class UploadedFileTextExtractor : IUploadedFileTextExtractor
         }
     }
 
-    private static UploadedFileTextExtraction CreateSupported(string text, string status)
+    private static UploadedFileTextExtraction CreateSupported(string text, string status, IReadOnlyList<TextPage>? pages = null)
     {
-        var normalized = NormalizeWhitespace(text);
-        return new UploadedFileTextExtraction(true, normalized, status);
+        // Page-aware paths (PDF) build the normalized text page-by-page and pass pages; the
+        // generic paths normalize here. Re-normalizing a page-aware text would break page offsets.
+        var normalized = pages is null ? NormalizeWhitespace(text) : text;
+        return new UploadedFileTextExtraction(true, normalized, status, pages);
+    }
+
+    public static bool IsPdf(string fileName, string contentType)
+    {
+        return string.Equals(Path.GetExtension(fileName), ".pdf", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static UploadedFileTextExtraction ExtractPdfText(Stream content)
+    {
+        using var document = PdfDocument.Open(content);
+        var builder = new StringBuilder();
+        var pages = new List<TextPage>();
+        var offset = 0;
+
+        foreach (var page in document.GetPages())
+        {
+            var normalized = NormalizeWhitespace(page.Text);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+                offset += Environment.NewLine.Length;
+            }
+
+            pages.Add(new TextPage(page.Number, offset, normalized.Length));
+            builder.Append(normalized);
+            offset += normalized.Length;
+        }
+
+        return CreateSupported(builder.ToString(), "PdfExtracted", pages);
     }
 
     private static bool IsDocx(string fileName, string contentType)

@@ -1,6 +1,6 @@
 # Backlog: Source Verification — View the Exact Passage in the Document
 
-**Status:** **Proposed** — not yet promoted to a sprint. No work authorized.
+**Status:** **Implemented (Sprint 67, 2026-08-13) — archived.** All 6 items delivered; see `docs/sprints/Sprint-67 - Source Verification View in Document.md` "Implementation Status". This file is the design record; the sprint file is the implementation authority.
 **Created:** 2026-08-11
 **Source:** Design review with the project owner of the end-user verification loop. Today Search Center and Copilot return chunk-level answers with citations, but the only way to open a source is the raw browser download (`Download.razor` → `DownloadUseCase` → MinIO stream). There is no in-app preview and no way to jump from a result/citation to the exact passage that grounded it: `Chunk` carries only `Id/SourceId/Content/Index` (no page/locator), `ChunkingPipeline` slices text by character count (1000/200) with no page awareness, `SearchResult` wraps the chunk + `Citations`, and `FileMetadata.ContentType` is available to branch a viewer.
 

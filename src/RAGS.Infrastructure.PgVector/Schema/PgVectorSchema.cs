@@ -30,10 +30,12 @@ CREATE TABLE IF NOT EXISTS embeddings (
     source_id UUID NOT NULL,
     content TEXT NOT NULL,
     embedding vector({_vectorDimension}),
-    chunk_index INT
+    chunk_index INT,
+    page_number INT
 );
 
 ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS chunk_index INT;
+ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS page_number INT;
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_source_id ON embeddings(source_id);
 
@@ -62,10 +64,12 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_source_id ON embeddings(source_id);
                     source_id UUID NOT NULL,
                     content TEXT NOT NULL,
                     embedding vector({_vectorDimension}),
-                    chunk_index INT
+                    chunk_index INT,
+                    page_number INT
                 );
 
-                ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS chunk_index INT;",
+                ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS chunk_index INT;
+                ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS page_number INT;",
                 transaction: transaction,
                 commandTimeout: 60))
                 .ConfigureAwait(false);

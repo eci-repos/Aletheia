@@ -36,13 +36,14 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         }
 
         const string sql = @"
-            INSERT INTO embeddings (chunk_id, source_id, content, embedding)
-            VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector)
+            INSERT INTO embeddings (chunk_id, source_id, content, embedding, page_number)
+            VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector, @PageNumber)
             ON CONFLICT (chunk_id)
             DO UPDATE SET
                 source_id = EXCLUDED.source_id,
                 content = EXCLUDED.content,
-                embedding = EXCLUDED.embedding";
+                embedding = EXCLUDED.embedding,
+                page_number = EXCLUDED.page_number";
 
         using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -54,6 +55,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 chunkId,
                 chunk.SourceId,
                 chunk.Content,
+                chunk.PageNumber,
                 Embedding = VectorToString(vector)
             };
 
@@ -84,13 +86,14 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         try
         {
             const string sql = @"
-                INSERT INTO embeddings (chunk_id, source_id, content, embedding)
-                VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector)
+                INSERT INTO embeddings (chunk_id, source_id, content, embedding, page_number)
+                VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector, @PageNumber)
                 ON CONFLICT (chunk_id)
                 DO UPDATE SET
                     source_id = EXCLUDED.source_id,
                     content = EXCLUDED.content,
-                    embedding = EXCLUDED.embedding";
+                    embedding = EXCLUDED.embedding,
+                    page_number = EXCLUDED.page_number";
 
             foreach (var (chunkId, vector, chunk) in itemList)
             {
@@ -99,6 +102,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                     ChunkId = chunkId,
                     chunk.SourceId,
                     chunk.Content,
+                    chunk.PageNumber,
                     Embedding = VectorToString(vector)
                 };
 
@@ -126,6 +130,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
                 e.chunk_index as ""ChunkIndex"",
+                e.page_number as ""PageNumber"",
                 1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -196,6 +201,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
                 e.chunk_index as ""ChunkIndex"",
+                e.page_number as ""PageNumber"",
                 (CASE WHEN m.file_name ILIKE '%' || @Query || '%' THEN 1.0 ELSE 0.9 END) as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -247,6 +253,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
                 e.chunk_index as ""ChunkIndex"",
+                e.page_number as ""PageNumber"",
                 0.0 as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -310,6 +317,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
                 e.chunk_index as ""ChunkIndex"",
+                e.page_number as ""PageNumber"",
                 1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -358,6 +366,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
                 e.content as ""Content"",
                 m.file_name as ""SourceName"",
                 e.chunk_index as ""ChunkIndex"",
+                e.page_number as ""PageNumber"",
                 1 - (e.embedding <=> @QueryEmbedding::vector) as ""Score""
             FROM embeddings e
             LEFT JOIN LATERAL (
@@ -405,7 +414,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
             : new[] { row.SourceName };
 
         return new SearchResult(
-            new Chunk(row.ChunkId, row.SourceId, row.Content, row.ChunkIndex),
+            new Chunk(row.ChunkId, row.SourceId, row.Content, row.ChunkIndex, row.PageNumber),
             (float)row.Score,
             citations,
             retrievalStrategy: retrievalStrategy ?? "semantic");
@@ -419,6 +428,7 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         public string? SourceName { get; set; }
         public double Score { get; set; }
         public int ChunkIndex { get; set; }
+        public int? PageNumber { get; set; }
     }
 }
 

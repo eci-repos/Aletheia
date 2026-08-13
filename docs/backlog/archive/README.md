@@ -9,5 +9,6 @@ Fully-implemented backlog files are moved here from `docs/backlog/` so the activ
 | `GraphRAG-LazyGraphRAG-Enhancements.md` | All 8 items implemented (Sprints 60 + 62 + 63) — archived 2026-08-11 |
 | `Wiki-Markdown-HTML-Tabs.md` | All 3 items implemented (Sprint 65) — archived 2026-08-13 |
 | `Remove-Redundant-Metadata-Nav-Item.md` | All 3 items implemented (Sprint 66) — archived 2026-08-13 |
+| `Source-Verification-View-in-Document.md` | All 6 items implemented (Sprint 67) — archived 2026-08-13 |
 
 Keep the historical file contents untouched except for the status header: the promotion history (sprint, commit, date) is the record of how each item was delivered.

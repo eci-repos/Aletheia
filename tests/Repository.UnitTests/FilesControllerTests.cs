@@ -325,6 +325,92 @@ public class FilesControllerTests
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    [Fact]
+    public async Task Preview_returns_pdf_bytes_for_pdf_content_type()
+    {
+        var fileId = Guid.NewGuid();
+        var metadata = new FileMetadata(new FileDescriptor(fileId, "report.pdf"), "application/pdf", 5, DateTimeOffset.UtcNow);
+        var mocks = CreateMocks();
+        mocks.MetadataRepository
+            .Setup(x => x.GetByFileIdAsync(fileId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<FileMetadata?>.Success(metadata));
+        mocks.DownloadUseCase
+            .Setup(x => x.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<DownloadResponse>.Success(new DownloadResponse(metadata, new MemoryStream(FileBytes))));
+
+        var controller = CreateController(mocks);
+        var result = await controller.Preview(fileId, null, CancellationToken.None);
+
+        var fileResult = Assert.IsType<FileStreamResult>(result);
+        Assert.Equal("application/pdf", fileResult.ContentType);
+        mocks.TextExtractor.Verify(x => x.ExtractAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Preview_returns_extracted_text_for_text_content_type()
+    {
+        var fileId = Guid.NewGuid();
+        var metadata = new FileMetadata(new FileDescriptor(fileId, "notes.txt"), "text/plain", 5, DateTimeOffset.UtcNow);
+        var mocks = CreateMocks();
+        mocks.MetadataRepository
+            .Setup(x => x.GetByFileIdAsync(fileId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<FileMetadata?>.Success(metadata));
+        mocks.DownloadUseCase
+            .Setup(x => x.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<DownloadResponse>.Success(new DownloadResponse(metadata, new MemoryStream(FileBytes))));
+        mocks.TextExtractor
+            .Setup(x => x.ExtractAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<UploadedFileTextExtraction>.Success(new UploadedFileTextExtraction(true, "hello world", "TextExtracted")));
+
+        var controller = CreateController(mocks);
+        var result = await controller.Preview(fileId, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var preview = Assert.IsType<FileTextPreviewResponse>(ok.Value);
+        Assert.Equal("notes.txt", preview.FileName);
+        Assert.Equal("text/plain", preview.ContentType);
+        Assert.Equal("hello world", preview.Text);
+    }
+
+    [Fact]
+    public async Task Preview_returns_415_for_unsupported_content_type()
+    {
+        var fileId = Guid.NewGuid();
+        var metadata = new FileMetadata(new FileDescriptor(fileId, "movie.mp4"), "video/mp4", 5, DateTimeOffset.UtcNow);
+        var mocks = CreateMocks();
+        mocks.MetadataRepository
+            .Setup(x => x.GetByFileIdAsync(fileId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<FileMetadata?>.Success(metadata));
+        mocks.DownloadUseCase
+            .Setup(x => x.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<DownloadResponse>.Success(new DownloadResponse(metadata, new MemoryStream(FileBytes))));
+        mocks.TextExtractor
+            .Setup(x => x.ExtractAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<UploadedFileTextExtraction>.Success(new UploadedFileTextExtraction(false, null, "UnsupportedType")));
+
+        var controller = CreateController(mocks);
+        var result = await controller.Preview(fileId, null, CancellationToken.None);
+
+        var unsupported = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status415UnsupportedMediaType, unsupported.StatusCode);
+    }
+
+    [Fact]
+    public async Task Preview_returns_404_when_file_not_found()
+    {
+        var fileId = Guid.NewGuid();
+        var mocks = CreateMocks();
+        mocks.MetadataRepository
+            .Setup(x => x.GetByFileIdAsync(fileId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<FileMetadata?>.Success(null));
+
+        var controller = CreateController(mocks);
+        var result = await controller.Preview(fileId, null, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        mocks.DownloadUseCase.Verify(x => x.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static JsonElement ParseValue(object value)
     {
         var json = JsonSerializer.Serialize(value);
@@ -343,7 +429,8 @@ public class FilesControllerTests
             mocks.VectorStore.Object,
             mocks.KnowledgeIndexer.Object,
             mocks.DuplicateDetection.Object,
-            mocks.IngestionJobs.Object);
+            mocks.IngestionJobs.Object,
+            mocks.TextExtractor.Object);
     }
 
     private static ControllerMocks CreateMocks()
@@ -358,7 +445,8 @@ public class FilesControllerTests
             VectorStore = new Mock<IVectorStore>(),
             KnowledgeIndexer = new Mock<IUploadedContentKnowledgeIndexer>(),
             DuplicateDetection = new Mock<IDuplicateDetectionService>(),
-            IngestionJobs = new Mock<IIngestionJobService>()
+            IngestionJobs = new Mock<IIngestionJobService>(),
+            TextExtractor = new Mock<IUploadedFileTextExtractor>()
         };
     }
 
@@ -400,5 +488,6 @@ public class FilesControllerTests
         public Mock<IUploadedContentKnowledgeIndexer> KnowledgeIndexer { get; set; } = null!;
         public Mock<IDuplicateDetectionService> DuplicateDetection { get; set; } = null!;
         public Mock<IIngestionJobService> IngestionJobs { get; set; } = null!;
+        public Mock<IUploadedFileTextExtractor> TextExtractor { get; set; } = null!;
     }
 }

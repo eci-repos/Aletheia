@@ -74,6 +74,28 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         return Result<FileMetadata>.Success(MapToMetadata(row));
     }
 
+    public async Task<Result<FileMetadata?>> GetByFileIdAsync(Guid fileId, string? version = null, CancellationToken cancellationToken = default)
+    {
+        var sql = $@"
+            SELECT {MetadataSelectColumns}
+            FROM file_metadata
+            WHERE file_id = @FileId AND (version = @Version OR (@Version IS NULL AND version IS NULL))
+            LIMIT 1";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        var row = await connection.QueryFirstOrDefaultAsync<MetadataRow>(sql, new
+        {
+            FileId = fileId,
+            Version = version
+        }).ConfigureAwait(false);
+
+        return row is null
+            ? Result<FileMetadata?>.Success(null)
+            : Result<FileMetadata?>.Success(MapToMetadata(row));
+    }
+
     public async Task<Result<FileMetadata>> SaveAsync(FileMetadata metadata, CancellationToken cancellationToken = default)
     {
         if (metadata is null)

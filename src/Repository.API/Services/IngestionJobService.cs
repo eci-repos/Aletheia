@@ -597,7 +597,7 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
             return;
         }
 
-        var request = new IngestionRequest(item.SourceId, extraction.Text, item.SourceName);
+        var request = new IngestionRequest(item.SourceId, extraction.Text, item.SourceName, extraction.Pages);
         state.Update("Chunks and embeddings", "Generating chunks and vector embeddings.", 30, force: true);
         var ragsResult = await RunWithHeartbeatAsync(
             state,

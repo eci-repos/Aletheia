@@ -73,6 +73,9 @@ public sealed class SemanticKernelCopilotService : ICopilotService
                     augmented,
                     result.Value.Content,
                     stopwatch.Elapsed);
+                result.Value.Citations = RetrievalAugmentedPromptBuilder.BuildCitations(
+                    augmented.RetrievalResults,
+                    augmented.TopK);
                 session.Messages.Add(new ChatMessage { Role = "user", Content = userMessage });
                 session.Messages.Add(result.Value);
                 session.LastActivity = DateTimeOffset.UtcNow;

@@ -26,6 +26,7 @@ public class FilesController : ControllerBase
     private readonly IUploadedContentKnowledgeIndexer _knowledgeIndexer;
     private readonly IDuplicateDetectionService _duplicateDetection;
     private readonly IIngestionJobService _ingestionJobs;
+    private readonly IUploadedFileTextExtractor _textExtractor;
 
     public FilesController(
         IUploadUseCase uploadUseCase,
@@ -36,7 +37,8 @@ public class FilesController : ControllerBase
         IVectorStore vectorStore,
         IUploadedContentKnowledgeIndexer knowledgeIndexer,
         IDuplicateDetectionService duplicateDetection,
-        IIngestionJobService ingestionJobs)
+        IIngestionJobService ingestionJobs,
+        IUploadedFileTextExtractor textExtractor)
     {
         _uploadUseCase = uploadUseCase ?? throw new ArgumentNullException(nameof(uploadUseCase));
         _downloadUseCase = downloadUseCase ?? throw new ArgumentNullException(nameof(downloadUseCase));
@@ -47,6 +49,7 @@ public class FilesController : ControllerBase
         _knowledgeIndexer = knowledgeIndexer ?? throw new ArgumentNullException(nameof(knowledgeIndexer));
         _duplicateDetection = duplicateDetection ?? throw new ArgumentNullException(nameof(duplicateDetection));
         _ingestionJobs = ingestionJobs ?? throw new ArgumentNullException(nameof(ingestionJobs));
+        _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
     }
 
     [HttpPost("upload")]
@@ -261,6 +264,66 @@ public class FilesController : ControllerBase
         }
 
         return File(result.Value!.Content, result.Value.Metadata.ContentType, result.Value.Metadata.Descriptor.FileName);
+    }
+
+    [HttpGet("{id:guid}/preview")]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(FileTextPreviewResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
+    public async Task<IActionResult> Preview(
+        Guid id,
+        [FromQuery] string? version,
+        CancellationToken cancellationToken)
+    {
+        // Resolve the current row by file id alone — the viewer only knows the source id.
+        var metadataResult = await _metadataRepository
+            .GetByFileIdAsync(id, version, cancellationToken)
+            .ConfigureAwait(false);
+        if (metadataResult.IsFailure || metadataResult.Value is null)
+        {
+            return NotFound(new { error = $"File {id} was not found." });
+        }
+
+        var metadata = metadataResult.Value;
+        var descriptor = new FileDescriptor(id, metadata.Descriptor.FileName, version);
+
+        var downloadResult = await _downloadUseCase
+            .DownloadAsync(new DownloadRequest(descriptor), cancellationToken)
+            .ConfigureAwait(false);
+        if (downloadResult.IsFailure || downloadResult.Value is null)
+        {
+            return NotFound(new { error = downloadResult.Error });
+        }
+
+        // PDF streams the raw blob so the browser can render it with PDF.js (text layer).
+        if (UploadedFileTextExtractor.IsPdf(descriptor.FileName, metadata.ContentType))
+        {
+            return File(downloadResult.Value.Content, "application/pdf", enableRangeProcessing: true);
+        }
+
+        // Text-like and Office types render the extracted text with page markers.
+        var extraction = await _textExtractor
+            .ExtractAsync(descriptor.FileName, metadata.ContentType, downloadResult.Value.Content, cancellationToken)
+            .ConfigureAwait(false);
+        if (extraction.IsFailure)
+        {
+            return BadRequest(new { error = extraction.Error });
+        }
+
+        if (!extraction.Value.IsSupported || extraction.Value.Text is null)
+        {
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new
+            {
+                error = $"Preview is not supported for {metadata.ContentType}."
+            });
+        }
+
+        return Ok(new FileTextPreviewResponse(
+            descriptor.FileName,
+            metadata.ContentType,
+            extraction.Value.Text,
+            extraction.Value.Pages));
     }
 
     [HttpDelete]

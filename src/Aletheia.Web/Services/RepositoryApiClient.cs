@@ -124,6 +124,33 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<FilePreviewClientResult?> PreviewAsync(Guid fileId, string? version, CancellationToken cancellationToken = default)
+    {
+        var url = $"/api/files/{fileId}/preview";
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            url += $"?version={Uri.EscapeDataString(version)}";
+        }
+
+        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+        if (string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            return new FilePreviewClientResult(string.Empty, contentType, stream, null, null);
+        }
+
+        var preview = await response.Content.ReadFromJsonAsync<FileTextPreviewClientResponse>(cancellationToken).ConfigureAwait(false);
+        return preview is null
+            ? null
+            : new FilePreviewClientResult(preview.FileName, preview.ContentType, null, preview.Text, preview.Pages);
+    }
+
     public async Task<bool> DeleteAsync(Guid fileId, string fileName, string? version, CancellationToken cancellationToken = default)
     {
         var url = $"/api/files?fileId={fileId}&fileName={Uri.EscapeDataString(fileName)}";
@@ -1209,6 +1236,23 @@ public sealed record BackgroundJobClientSnapshot(
     DateTimeOffset LastHeartbeatAt,
     DateTimeOffset? CompletedAt,
     string? Error);
+
+/// <summary>Preview payload: PDFs carry a raw stream (rendered via PDF.js); other types carry extracted text + page markers.</summary>
+public sealed record FilePreviewClientResult(
+    string FileName,
+    string ContentType,
+    Stream? PdfStream,
+    string? Text,
+    IReadOnlyList<TextPage>? Pages)
+{
+    public bool IsPdf => PdfStream is not null;
+}
+
+public sealed record FileTextPreviewClientResponse(
+    string FileName,
+    string ContentType,
+    string Text,
+    IReadOnlyList<TextPage>? Pages);
 
 
 

@@ -74,6 +74,7 @@ public static class RetrievalAugmentedPromptBuilder
                 group.OrderBy(result => result.Rank <= 0 ? int.MaxValue : result.Rank)
                     .ThenByDescending(result => result.Score)
                     .ToList()))
+            .OrderBy(group => group.Results.Min(result => result.Rank <= 0 ? int.MaxValue : result.Rank))
             .ToList();
         prompt.AppendLine(FormattableString.Invariant($"You are provided with context for {sourceGroups.Count} distinct document source(s)."));
         prompt.AppendLine("Preserve source identity. Facts from one source must never be used to describe another source.");
@@ -225,6 +226,60 @@ public static class RetrievalAugmentedPromptBuilder
 
         prompt.AppendLine("Write the document brief now. The opening paragraph must state the document's nature and purpose.");
         return prompt.ToString();
+    }
+
+    /// <summary>
+    /// Builds the citation-number → source-chunk mapping for the answer, using the exact same
+    /// ordering as <see cref="AppendRetrievedContext"/> (ranked, grouped by source, sequential
+    /// numbers). The UI uses it to turn the answer's [N] markers into document-viewer links.
+    /// </summary>
+    public static IReadOnlyList<ChatCitation> BuildCitations(
+        IReadOnlyList<SearchResult> results,
+        int maxResults = DefaultMaxResults)
+    {
+        if (results is null)
+        {
+            return Array.Empty<ChatCitation>();
+        }
+
+        var ranked = results
+            .Where(r => r is not null)
+            .OrderBy(r => r.Rank <= 0 ? int.MaxValue : r.Rank)
+            .ThenByDescending(r => r.Score)
+            .Take(maxResults)
+            .ToList();
+
+        var sourceGroups = ranked
+            .GroupBy(result => result.Chunk.SourceId)
+            .Select(group => group
+                .OrderBy(result => result.Rank <= 0 ? int.MaxValue : result.Rank)
+                .ThenByDescending(result => result.Score)
+                .ToList())
+            .OrderBy(group => group.Min(result => result.Rank <= 0 ? int.MaxValue : result.Rank))
+            .ToList();
+
+        var citations = new List<ChatCitation>();
+        var citationNumber = 1;
+        foreach (var group in sourceGroups)
+        {
+            foreach (var result in group)
+            {
+                citations.Add(new ChatCitation(
+                    citationNumber,
+                    result.Chunk.SourceId,
+                    result.Chunk.PageNumber,
+                    LeadingPhrase(result.Chunk.Content)));
+                citationNumber++;
+            }
+        }
+
+        return citations;
+    }
+
+    private static string LeadingPhrase(string content)
+    {
+        var trimmed = content.Trim();
+        return trimmed.Length <= 100 ? trimmed : trimmed[..100];
     }
 
     private static void AppendRetrievedContext(

@@ -45,8 +45,10 @@ public sealed class RagsService : IRagsService
             var deleteResult = await _vectorStore.DeleteBySourceAsync(request.SourceId, cancellationToken).ConfigureAwait(false);
             // Continue even if delete fails (first ingestion)
 
-            // Chunk content
-            var chunks = _chunkingPipeline.Chunk(request.SourceId, request.Content);
+            // Chunk content (page-aware when the extractor reported page boundaries)
+            var chunks = request.Pages is { Count: > 0 }
+                ? _chunkingPipeline.Chunk(request.SourceId, request.Content, request.Pages)
+                : _chunkingPipeline.Chunk(request.SourceId, request.Content);
 
             // Generate embeddings and store
             var items = new List<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)>();

@@ -1,0 +1,190 @@
+@page "/document/{id}"
+@using System.Text
+@inject RepositoryApiClient ApiClient
+@inject IJSRuntime JS
+
+<PageTitle>Document - Aletheia</PageTitle>
+
+<div class="document-viewer">
+    <div class="document-toolbar">
+        <div class="document-title">
+            <h1>@(_preview?.FileName ?? "Document")</h1>
+            @if (_preview is not null)
+            {
+                <span class="text-muted">@_preview.ContentType</span>
+            }
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="browse">Back to Browse</a>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="document-loading d-flex align-items-center gap-2 text-muted">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+            <span>Loading document…</span>
+        </div>
+    }
+    else if (_error is not null)
+    {
+        <div class="alert alert-warning">@_error</div>
+    }
+    else if (_preview is not null)
+    {
+        @if (_preview.IsPdf)
+        {
+            <div id="pdf-viewer" class="pdf-viewer"></div>
+        }
+        else
+        {
+            <div class="text-preview">
+                @if (_preview.Pages is { Count: > 0 })
+                {
+                    @foreach (var textPage in _preview.Pages)
+                    {
+                        <section class="text-page" id="page-@textPage.PageNumber">
+                            <h2 class="text-page-header">Page @textPage.PageNumber</h2>
+                            <p>@RenderPageText(textPage)</p>
+                        </section>
+                    }
+                }
+                else
+                {
+                    <pre class="text-preview-plain">@_preview.Text</pre>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public int? Page { get; set; }
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string? Chunk { get; set; }
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string? Version { get; set; }
+
+    private FilePreviewClientResult? _preview;
+    private bool _loading = true;
+    private string? _error;
+    private string? _highlightPhrase;
+    private bool _pdfRendered;
+    private bool _textScrolled;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _error = null;
+        _preview = null;
+        _highlightPhrase = null;
+        _pdfRendered = false;
+        _textScrolled = false;
+
+        try
+        {
+            _preview = await ApiClient.PreviewAsync(Id, Version);
+            if (_preview is null)
+            {
+                _error = "This document could not be previewed. It may not exist, or its type is not supported for in-app viewing.";
+            }
+            else
+            {
+                _highlightPhrase = Chunk;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The document could not be loaded. Please try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_preview is { IsPdf: true, PdfStream: not null } && !_pdfRendered)
+        {
+            _pdfRendered = true;
+            var pageNumber = Page ?? 1;
+            await JS.InvokeVoidAsync("renderPdf", "pdf-viewer", new DotNetStreamReference(_preview.PdfStream), pageNumber, _highlightPhrase);
+        }
+        else if (_preview is { IsPdf: false } && !_textScrolled)
+        {
+            _textScrolled = true;
+
+            // Scroll to the highlighted passage when a chunk phrase was supplied; fall back to
+            // the requested page (page-jump) when the text doesn't align between extraction and render.
+            if (!string.IsNullOrWhiteSpace(_highlightPhrase))
+            {
+                var found = await JS.InvokeAsync<bool>("scrollToDocumentElement", ".passage-highlight");
+                if (!found && Page is not null)
+                {
+                    await JS.InvokeAsync<bool>("scrollToDocumentElement", $"#page-{Page}");
+                }
+            }
+            else if (Page is not null)
+            {
+                await JS.InvokeAsync<bool>("scrollToDocumentElement", $"#page-{Page}");
+            }
+        }
+    }
+
+    private MarkupString RenderPageText(TextPage page)
+    {
+        if (_preview?.Text is null)
+        {
+            return new MarkupString(string.Empty);
+        }
+
+        var pageText = _preview.Text.Substring(page.StartOffset, page.Length);
+        if (string.IsNullOrWhiteSpace(_highlightPhrase))
+        {
+            return new MarkupString(EscapeHtml(pageText));
+        }
+
+        return new MarkupString(HighlightPhrase(pageText, _highlightPhrase));
+    }
+
+    private static string HighlightPhrase(string text, string phrase)
+    {
+        var result = new StringBuilder();
+        var index = 0;
+        while (true)
+        {
+            var idx = text.IndexOf(phrase, index, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+            {
+                result.Append(EscapeHtml(text.Substring(index)));
+                break;
+            }
+
+            result.Append(EscapeHtml(text.Substring(index, idx - index)));
+            result.Append("<mark class=\"passage-highlight\">");
+            result.Append(EscapeHtml(text.Substring(idx, phrase.Length)));
+            result.Append("</mark>");
+            index = idx + phrase.Length;
+        }
+
+        return result.ToString();
+    }
+
+    private static string EscapeHtml(string value)
+    {
+        return value
+            .Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal)
+            .Replace("\"", "&quot;", StringComparison.Ordinal)
+            .Replace("'", "&#39;", StringComparison.Ordinal);
+    }
+}

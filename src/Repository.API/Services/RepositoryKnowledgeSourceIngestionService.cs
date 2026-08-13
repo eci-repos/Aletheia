@@ -135,7 +135,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         }
 
         var ingestion = await _ragsService
-            .IngestAsync(new IngestionRequest(source.SourceId, extraction.Value.Text, source.SourceName), cancellationToken)
+            .IngestAsync(new IngestionRequest(source.SourceId, extraction.Value.Text, source.SourceName, extraction.Value.Pages), cancellationToken)
             .ConfigureAwait(false);
 
         if (ingestion.IsFailure)

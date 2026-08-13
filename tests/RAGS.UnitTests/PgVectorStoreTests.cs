@@ -35,9 +35,11 @@ public class PgVectorStoreTests : IAsyncLifetime
                     content TEXT NOT NULL,
                     embedding vector(128) NOT NULL,
                     chunk_index INT,
+                    page_number INT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS chunk_index INT;
+                ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS page_number INT;
                 CREATE INDEX IF NOT EXISTS idx_embeddings_embedding ON embeddings USING ivfflat (embedding vector_cosine_ops);";
 
             foreach (var batch in initSql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))

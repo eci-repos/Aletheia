@@ -68,6 +68,7 @@
     </script>
     <script src="_framework/blazor.webassembly.js?v=20260729-copilot29"></script>
     <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>
         window.downloadFileFromStream = async (fileName, contentStreamReference) => {
             const arrayBuffer = await contentStreamReference.arrayBuffer();
@@ -78,6 +79,107 @@
             anchor.download = fileName;
             anchor.click();
             URL.revokeObjectURL(url);
+        };
+
+        window.scrollToDocumentElement = (selector) => {
+            const el = document.querySelector(selector);
+            if (!el) return false;
+            el.scrollIntoView({ block: 'center', behavior: 'auto' });
+            return true;
+        };
+
+        window.renderPdf = async (containerId, streamRef, pageNumber, highlightText) => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '<div class="pdf-loading">Loading PDF…</div>';
+
+            const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+
+            try {
+                const arrayBuffer = await streamRef.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const targetPage = Math.min(Math.max(pageNumber || 1, 1), pdf.numPages);
+                const page = await pdf.getPage(targetPage);
+                const viewport = page.getViewport({ scale: 1.5 });
+
+                container.innerHTML = '';
+
+                const canvas = document.createElement('canvas');
+                canvas.className = 'pdf-canvas';
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                container.appendChild(canvas);
+                const ctx = canvas.getContext('2d');
+                await page.render({ canvasContext: ctx, viewport }).promise;
+
+                const textLayer = document.createElement('div');
+                textLayer.className = 'pdf-text-layer';
+                textLayer.style.width = `${viewport.width}px`;
+                textLayer.style.height = `${viewport.height}px`;
+                container.appendChild(textLayer);
+
+                const textContent = await page.getTextContent();
+                const spans = [];
+                let fullText = '';
+
+                textContent.items.forEach(item => {
+                    if (!item.str) return;
+                    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+                    const span = document.createElement('span');
+                    span.className = 'pdf-text-item';
+                    span.textContent = item.str;
+                    span.style.left = `${tx[4]}px`;
+                    span.style.top = `${tx[5]}px`;
+                    const fontSize = Math.hypot(tx[0], tx[1]);
+                    span.style.fontSize = `${fontSize}px`;
+                    span.style.transform = `scaleX(${fontSize ? tx[0] / fontSize : 1})`;
+                    textLayer.appendChild(span);
+                    spans.push(span);
+                    fullText += item.str;
+                });
+
+                if (highlightText) {
+                    const needle = highlightText.trim();
+                    let found = false;
+                    let searchFrom = 0;
+                    while (!found && needle) {
+                        const idx = fullText.indexOf(needle, searchFrom);
+                        if (idx < 0) break;
+                        let charCount = 0;
+                        const hitSpans = [];
+                        for (const span of spans) {
+                            const start = charCount;
+                            const end = charCount + span.textContent.length;
+                            if (end > idx && start < idx + needle.length) {
+                                hitSpans.push(span);
+                            }
+                            charCount = end;
+                        }
+                        if (hitSpans.length > 0) {
+                            hitSpans.forEach(s => s.classList.add('pdf-highlight'));
+                            found = true;
+                        } else {
+                            searchFrom = idx + 1;
+                        }
+                    }
+                    if (!found && spans.length > 0) {
+                        spans[0].classList.add('pdf-highlight');
+                    }
+                }
+
+                const firstHighlight = textLayer.querySelector('.pdf-highlight');
+                if (firstHighlight) {
+                    firstHighlight.scrollIntoView({ block: 'center', behavior: 'auto' });
+                }
+            } catch (err) {
+                container.innerHTML = `<div class="pdf-error">Could not render this PDF: ${escapeHtml(String(err && err.message || err))}</div>`;
+            }
         };
 
         window.initGraph = (containerId, nodes, edges, dotNetRef, preservePositions) => {

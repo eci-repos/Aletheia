@@ -7,6 +7,12 @@ public interface IMetadataRepository
 {
     Task<Result<FileMetadata>> GetAsync(FileDescriptor descriptor, CancellationToken cancellationToken = default);
 
+    /// <summary>Resolves the current (unversioned) row for a file by id alone, or success(null) when not found. Used by the preview endpoint, which only knows the file id.</summary>
+    Task<Result<FileMetadata?>> GetByFileIdAsync(Guid fileId, string? version = null, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result<FileMetadata?>.Success(null));
+    }
+
     Task<Result<FileMetadata>> SaveAsync(FileMetadata metadata, CancellationToken cancellationToken = default);
 
     Task<Result<PagedResult<FileMetadata>>> SearchAsync(SearchRequest request, CancellationToken cancellationToken = default);

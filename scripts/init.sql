@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
     source_id UUID NOT NULL,
     content TEXT NOT NULL,
     embedding vector(128) NOT NULL,
+    page_number INT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

@@ -1,5 +1,6 @@
 @page "/copilot"
 @using System.Text.Encodings.Web
+@using System.Text.RegularExpressions
 @implements IDisposable
 @inject RepositoryApiClient ApiClient
 @inject ActivityLogService ActivityLog
@@ -83,7 +84,7 @@
                                 <strong class="text-@(msg.Role == "user" ? "primary" : "success")">@(msg.Role == "user" ? "You" : "Copilot"):</strong>
                                 @if (msg.Role == "assistant")
                                 {
-                                    <div class="copilot-assistant-message">@RenderMarkdown(msg.Content)</div>
+                                    <div class="copilot-assistant-message">@RenderMarkdown(msg.Content, msg.Citations)</div>
                                     @if (msg.Stats is not null)
                                     {
                                         <div class="copilot-stats" title="@msg.Stats.ConfidenceBasis">
@@ -918,7 +919,7 @@
         return compact.Length <= maxLength ? compact : $"{compact[..maxLength]}...";
     }
 
-    private static MarkupString RenderMarkdown(string content)
+    private static MarkupString RenderMarkdown(string content, IReadOnlyList<ChatCitation> citations)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
@@ -931,6 +932,28 @@
             return new MarkupString($"<pre class=\"copilot-json\">{HtmlEncoder.Default.Encode(trimmed)}</pre>");
         }
 
-        return new MarkupString(MarkdownRenderer.ToHtml(content));
+        var html = MarkdownRenderer.ToHtml(content);
+        if (citations.Count > 0)
+        {
+            html = LinkCitations(html, citations);
+        }
+
+        return new MarkupString(html);
+    }
+
+    /// <summary>Turns the answer's bracketed citation markers ([1], [2], …) into links to the document viewer for the cited chunk/page.</summary>
+    private static string LinkCitations(string html, IReadOnlyList<ChatCitation> citations)
+    {
+        var byNumber = citations.ToDictionary(c => c.Number);
+        return Regex.Replace(html, @"\[(\d+)\]", match =>
+        {
+            if (!int.TryParse(match.Groups[1].Value, out var number) || !byNumber.TryGetValue(number, out var citation))
+            {
+                return match.Value;
+            }
+
+            var url = $"document/{citation.SourceId}?page={citation.PageNumber}&chunk={Uri.EscapeDataString(citation.LeadingPhrase)}";
+            return $"<a class=\"copilot-citation\" href=\"{url}\" title=\"View in document\">[{number}]</a>";
+        });
     }
 }

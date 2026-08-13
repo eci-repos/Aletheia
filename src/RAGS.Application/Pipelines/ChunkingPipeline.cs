@@ -9,6 +9,16 @@ public sealed class ChunkingPipeline
 
     public IReadOnlyList<Chunk> Chunk(Guid sourceId, string content, int? chunkSize = null, int? overlap = null)
     {
+        return Chunk(sourceId, content, pages: null, chunkSize, overlap);
+    }
+
+    public IReadOnlyList<Chunk> Chunk(
+        Guid sourceId,
+        string content,
+        IReadOnlyList<TextPage>? pages,
+        int? chunkSize = null,
+        int? overlap = null)
+    {
         if (sourceId == Guid.Empty)
         {
             throw new ArgumentException("Source ID is required.", nameof(sourceId));
@@ -40,10 +50,37 @@ public sealed class ChunkingPipeline
         {
             var length = Math.Min(size, content.Length - position);
             var chunkContent = content.Substring(position, length);
-            chunks.Add(new Chunk(Guid.NewGuid(), sourceId, chunkContent, index++));
+            var (pageNumber, offsetInPage) = ResolvePage(pages, position);
+            chunks.Add(new Chunk(Guid.NewGuid(), sourceId, chunkContent, index++, pageNumber, offsetInPage));
             position += size - over;
         }
 
         return chunks;
+    }
+
+    private static (int? PageNumber, int? OffsetInPage) ResolvePage(IReadOnlyList<TextPage>? pages, int position)
+    {
+        if (pages is null || pages.Count == 0)
+        {
+            return (null, null);
+        }
+
+        // The page whose range contains the chunk start; fall back to the last page that starts
+        // at or before the position (a chunk may straddle a page boundary — it is stamped with
+        // the page it starts on).
+        TextPage? page = null;
+        foreach (var candidate in pages)
+        {
+            if (candidate.StartOffset > position)
+            {
+                break;
+            }
+
+            page = candidate;
+        }
+
+        return page is null
+            ? (null, null)
+            : (page.PageNumber, position - page.StartOffset);
     }
 }

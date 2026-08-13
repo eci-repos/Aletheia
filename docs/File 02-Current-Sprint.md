@@ -1,10 +1,57 @@
-# Sprint 66 - Remove Redundant Metadata Nav Item
+# Sprint 67 - Source Verification: View the Exact Passage in the Document
 
 **Status:** Active (2026-08-13)
 
-Full authority: `docs/sprints/Sprint-66 - Remove Redundant Metadata Nav Item.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-67 - Source Verification View in Document.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 65 (Wiki Markdown and HTML View Tabs) is **complete, committed, and pushed** on `origin/master`.
+Sprint 66 (Remove Redundant Metadata Nav Item) is **complete, committed, and pushed** on `origin/master`.
+
+## Objective
+
+Give end-users an in-app document viewer with **page-accurate passage highlighting** so an answer can be verified against the source: a chunk carries a page locator born at extraction time, a preview endpoint streams the original blob inline, a `/document/{id}` viewer renders it (PDF.js for PDF, extracted text for other types), and Search Center / Copilot link results and citations straight to the exact passage.
+
+## Authorized Work (summary - see sprint file for details)
+
+1. **Chunk source locator:** nullable `PageNumber`/`OffsetInPage` on `Chunk`; page-aware `ChunkingPipeline`; PDF text extraction with page markers; `page_number` in the embeddings schema; populated via lightweight reembed.
+2. **Preview endpoint:** `GET /api/files/{id}/preview` streaming the original blob inline (PDF → raw bytes, text → extracted text + page markers, other → 415).
+3. **In-app document viewer:** `Pages/Document/View.razor` (`/document/{id}?page=&chunk=`) with a PDF.js renderer (text layer) and an extracted-text renderer.
+4. **Passage highlight + auto-scroll:** locate the chunk's leading phrase in the rendered text layer, highlight + scroll; page-jump fallback.
+5. **Wire-through:** Search Center result cards render "View in document (p. N)"; Copilot citations link to the viewer; `RepositoryApiClient` gains preview/viewer navigation.
+6. **Tests + docs:** locator/preview/viewer/wire-through tests; docs updated.
+
+## Acceptance Criteria
+
+- A chunk returned by Search Center / Copilot can be opened in `/document/{id}` and the exact passage is highlighted (or the page is jumped to) — no download required.
+- PDFs render in-browser with a text layer; non-PDF types render extracted text with page markers.
+- Web unit suite green; `dotnet build Aletheia.slnx` succeeds.
+
+## Out of Scope
+
+- Office → PDF conversion in v1 (Office documents get the extracted-text viewer with passage highlight instead).
+- Full-text search *inside* the viewer, annotation/notes, or bookmarks.
+- Version-diff highlighting across document versions.
+- Per-user viewing preferences (this is a global feature).
+
+---
+
+## Progress
+
+### Sprint 67 — source verification view in document (2026-08-13)
+
+**Implemented, committed, and pushed.** See the Sprint 67 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (chunk source locator):** `Chunk` gains nullable `PageNumber`/`OffsetInPage`; `ChunkingPipeline` gains a page-boundary overload (`TextPage` record); `UploadedFileTextExtractor` gains a page-aware PDF path (PdfPig); `page_number` added to the embeddings schema (idempotent migration `2026-08-13-embeddings-page-number.sql` + `init.sql` + `PgVectorSchema`); populated via the lightweight reembed flow.
+- **Item 2 (preview endpoint):** `GET /api/files/{id}/preview` (optional `?version=`) streams the original blob inline — PDF → raw bytes, text/docx → extracted text + page markers, unsupported → 415. `IMetadataRepository.GetByFileIdAsync` added (default no-op, PostgreSQL override).
+- **Item 3 (in-app document viewer):** `Pages/Document/View.razor` at `/document/{id}?page=&chunk=` — PDF.js renderer (text layer) for PDF, extracted-text renderer with page markers for other types.
+- **Item 4 (passage highlight + auto-scroll):** chunk leading phrase highlighted in the PDF.js text layer or the text preview; scroll-to-highlight with page-jump fallback — never a hard error.
+- **Item 5 (wire-through):** Search Center result cards render "View in document (p. N)"; Copilot `[N]` citations become viewer links via `ChatCitation`/`BuildCitations`; `RepositoryApiClient.PreviewAsync`.
+- **Item 6 (tests + docs):** RAGS 293 (+3) / Repository 134 (+4) / Web 76 (+8) / Foundation 55 green; `dotnet build Aletheia.slnx` succeeds (0 errors); docs updated; backlog item archived.
+
+**Residual manual (user-side):** hard-refresh `/search` and `/copilot` for a live visual check; optional Docker smoke pass (upload a PDF → search → open the passage in `/document/{id}`).
+
+---
+
+## Sprint 66 progress log (2026-08-13) — completed
 
 ## Objective
 

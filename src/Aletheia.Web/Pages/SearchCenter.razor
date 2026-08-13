@@ -116,6 +116,11 @@
                         }
                     </h6>
                     <p class="card-text">@result.Chunk.Content</p>
+                    <div class="mb-2">
+                        <a class="btn btn-sm btn-outline-primary" href="document/@result.Chunk.SourceId?page=@result.Chunk.PageNumber&chunk=@Uri.EscapeDataString(LeadingPhrase(result.Chunk.Content))">
+                            View in document@(result.Chunk.PageNumber is not null ? $" (p. {result.Chunk.PageNumber})" : "")
+                        </a>
+                    </div>
                     @if (result.Citations.Count > 0)
                     {
                         <div class="small mb-2">
@@ -327,6 +332,13 @@
     };
 
     private static bool UsesExpansion(string mode) => mode is "wrags" or "graphrag" or "lazygraphrag";
+
+    /// <summary>Leading phrase of a chunk used to locate the passage in the document viewer. Kept short so it aligns with the extracted text.</summary>
+    private static string LeadingPhrase(string content)
+    {
+        var trimmed = content.Trim();
+        return trimmed.Length <= 100 ? trimmed : trimmed[..100];
+    }
 
     private void SetMode(string mode)
     {

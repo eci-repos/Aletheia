@@ -45,6 +45,10 @@ Remove the **Metadata** side-menu item from `NavMenu.razor`. The page is a file-
 
 Per the project owner, Governance and Settings were already at the bottom of the side nav; added a divider + muted **Management** label above Governance in `NavMenu.razor` so the primary surfaces (Dashboard → Copilot) read as one group and the admin/management items sit clearly apart. Hidden when the sidebar is collapsed. Web 65 (+1, `NavMenuBindingTests.Nav_menu_groups_management_items_below_a_divider`); build 0 errors.
 
+### Post-Sprint 66 Dashboard card tints (2026-08-13)
+
+Per the project owner, the Dashboard action cards (Upload/Browse/Search Center/Wiki/Copilot) got very light pastel tints: each card carries a `dashboard-action-<name>` modifier class styled in the new `Dashboard.razor.css` — a light background wash, a 3px colored top border, and a darker shade on the card title (soft green/blue/amber/violet/teal). Text stays dark for contrast; buttons unchanged. Web 67 (+2, `DashboardBindingTests`); build 0 errors.
+
 ---
 
 ## Sprint 65 progress log (2026-08-13) — completed

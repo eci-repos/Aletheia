@@ -1,0 +1,54 @@
+.dashboard-action {
+    border: 1px solid #e5e7eb;
+    border-top-width: 3px;
+    transition: box-shadow 0.15s ease-in-out;
+}
+
+.dashboard-action:hover {
+    box-shadow: 0 2px 10px rgba(17, 24, 39, 0.1);
+}
+
+.dashboard-action-upload {
+    background-color: #f0fdf4;
+    border-top-color: #86efac;
+}
+
+.dashboard-action-upload .card-title {
+    color: #15803d;
+}
+
+.dashboard-action-browse {
+    background-color: #eff6ff;
+    border-top-color: #93c5fd;
+}
+
+.dashboard-action-browse .card-title {
+    color: #1d4ed8;
+}
+
+.dashboard-action-search {
+    background-color: #fffbeb;
+    border-top-color: #fcd34d;
+}
+
+.dashboard-action-search .card-title {
+    color: #b45309;
+}
+
+.dashboard-action-wiki {
+    background-color: #faf5ff;
+    border-top-color: #d8b4fe;
+}
+
+.dashboard-action-wiki .card-title {
+    color: #7e22ce;
+}
+
+.dashboard-action-copilot {
+    background-color: #f0fdfa;
+    border-top-color: #5eead4;
+}
+
+.dashboard-action-copilot .card-title {
+    color: #0f766e;
+}

@@ -34,7 +34,13 @@ Give wiki pages a tab control so non-technical users get a readable page: **View
 
 ### Sprint 65 — wiki markdown/HTML view tabs (2026-08-13)
 
-Promoted from `docs/backlog/Wiki-Markdown-HTML-Tabs.md`. Implementation status to be recorded here when the sprint completes.
+**Implemented, committed, and pushed.** See the Sprint 65 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (shared markdown renderer):** `MarkdownRenderer.ToHtml(string)` in `src/Aletheia.Web/Services/MarkdownRenderer.cs` — extraction of Copilot's former private `RenderMarkdown` helpers (headings/tables/lists/paragraphs/inline bold+code), all HTML-encoded before formatting; emitted classes renamed `copilot-table*` → `md-table*`. Copilot's `RenderMarkdown` keeps only its JSON `<pre class="copilot-json">` branch and delegates otherwise.
+- **Item 2 (Wiki View/Source tabs):** `Wiki.razor` shows a View/Source tab bar (default View); View renders the summary via `MarkdownRenderer.ToHtml` as a `MarkupString`, Source shows raw md in `<pre class="wiki-source-view">`; ephemeral `_viewMode` page state, no API/wire changes.
+- **Item 3 (tests):** Web 61 (+15) — `MarkdownRendererTests` (11) + `WikiViewTabsBindingTests` (4).
+
+**Verification:** Foundation 55 / Repository 130 / RAGS 290 / Web 61 green; `dotnet build Aletheia.slnx` succeeds (0 errors). Backlog item archived. No sprint currently active — next promotion will set it.
 
 ---
 

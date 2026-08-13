@@ -1,6 +1,6 @@
 # Sprint 65 - Wiki Markdown and HTML View Tabs
 
-**Status:** Active (2026-08-13)
+**Status:** Complete (2026-08-13)
 
 Full authority: this file. Sprint 64 (Theme-Aware Graph Retrieval) is **complete, committed, and pushed** (`9fd1355` is the backlog-item commit that preceded it; Sprint 64's implementation shipped in the `7d91bbf..` range).
 
@@ -51,3 +51,15 @@ Give wiki pages a tab control: **View** (markdown rendered to styled HTML — he
 - Markdig or full GFM support (links/images/fenced code blocks).
 - Persisting a per-user default tab or wiring the tab through the API/DTOs.
 - Editing surface changes (the editor textarea stays raw markdown).
+
+---
+
+## Implementation Status (2026-08-13)
+
+**Complete.** All deliverables implemented, tested, and pushed.
+
+- **Deliverable 1 — Shared markdown renderer:** new `src/Aletheia.Web/Services/MarkdownRenderer.cs` (static `ToHtml(string content)` returning an HTML string) — the former Copilot `RenderMarkdown` logic verbatim (headings `#`–`####`, pipe tables, `-`/`*` lists, paragraphs, inline `**bold**`/`` `code` ``), `HtmlEncoder`-escaped before inline formatting so raw HTML is never emitted as markup. Emitted classes renamed to neutral `md-table-wrap`/`md-table` (Copilot CSS updated). `Pages/Copilot/Index.razor` `RenderMarkdown` keeps only the JSON `<pre class="copilot-json">` branch and otherwise delegates to `MarkdownRenderer.ToHtml`; the private table/heading/list helpers and the `System.Text`/`System.Text.RegularExpressions` usings were removed.
+- **Deliverable 2 — Wiki View/Source tabs:** `Pages/Wiki.razor` replaces the `<p class="wiki-summary">` block with a `View` / `Source` tab bar (default View). View renders `@((MarkupString)MarkdownRenderer.ToHtml(_selectedPage.Summary))` in `<div class="wiki-rendered">`; Source shows the raw md auto-escaped in `<pre class="wiki-source-view">`. State is a private `_viewMode` field (`WikiViewMode` enum) + `SetView`/`ViewTabClass` helpers — ephemeral, no API/wire changes; the editor textarea stays raw markdown. CSS added to `Wiki.razor.css` (`wiki-view-tabs`, `wiki-rendered`, `wiki-source-view`, `md-table-wrap`, `md-table`).
+- **Deliverable 3 — Tests:** `tests/Aletheia.Web.UnitTests/MarkdownRendererTests.cs` (11 tests: empty/null/whitespace, heading levels 1–4, paragraphs, lists, tables, inline bold/code, HTML escaping of `<script>`, CRLF) + `WikiViewTabsBindingTests.cs` (4 source-assertion tests: tabs present, default View, Copilot delegates to the shared renderer, Copilot JSON branch preserved).
+- **Deliverable 4 — Docs:** this file, `docs/File 02-Current-Sprint.md`, `docs/File 03-openhands.md`, AGENTS.md, CLAUDE.md updated; backlog item moved to `docs/backlog/archive/` with its status header updated.
+- **Verification:** `dotnet build Aletheia.slnx` succeeds (0 errors; only the pre-existing Repository.API nullable warnings + AngleSharp NU1902). Aletheia.Web.UnitTests **61** (was 46, +15); Foundation 55 / Repository 130 / RAGS 290 unchanged.

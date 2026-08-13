@@ -148,7 +148,19 @@
                         }
                         else
                         {
-                            <p class="wiki-summary">@_selectedPage.Summary</p>
+                            <div class="wiki-view-tabs btn-group btn-group-sm" role="group" aria-label="Wiki page view">
+                                <button type="button" class="btn @ViewTabClass(WikiViewMode.View)" @onclick='() => SetView(WikiViewMode.View)'>View</button>
+                                <button type="button" class="btn @ViewTabClass(WikiViewMode.Source)" @onclick='() => SetView(WikiViewMode.Source)'>Source</button>
+                            </div>
+
+                            @if (_viewMode == WikiViewMode.Source)
+                            {
+                                <pre class="wiki-source-view">@_selectedPage.Summary</pre>
+                            }
+                            else
+                            {
+                                <div class="wiki-rendered">@((MarkupString)MarkdownRenderer.ToHtml(_selectedPage.Summary))</div>
+                            }
                         }
 
                         @if (_selectedPage.RelatedTopics.Count > 0)
@@ -262,6 +274,13 @@
     private string _editSummary = string.Empty;
     private string _editTopics = string.Empty;
     private string _editNote = string.Empty;
+    private WikiViewMode _viewMode = WikiViewMode.View;
+
+    private enum WikiViewMode
+    {
+        View,
+        Source
+    }
 
     private bool ShowInternalSearch { get; set; }
 
@@ -283,6 +302,10 @@
     }
 
     private string ModeButtonClass(string mode) => _mode == mode ? "btn-primary" : "btn-outline-primary";
+
+    private string ViewTabClass(WikiViewMode mode) => _viewMode == mode ? "btn-primary" : "btn-outline-primary";
+
+    private void SetView(WikiViewMode mode) => _viewMode = mode;
 
     private static string PageKindLabel(WikiPage page) => page.GeneratedFrom == "document-brief" ? "Document brief" : "Wiki page";
 

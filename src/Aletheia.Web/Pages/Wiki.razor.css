@@ -121,9 +121,32 @@
     background: #f8f9fa;
 }
 
-.wiki-summary {
+.wiki-view-tabs {
+    margin-bottom: 0.75rem;
+}
+
+.wiki-rendered {
+    overflow-wrap: anywhere;
+}
+
+.wiki-source-view {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    padding: 0.75rem;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #f8f9fa;
+    font-size: 0.875rem;
+}
+
+.md-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.md-table {
+    margin-bottom: 0.75rem;
+    vertical-align: top;
 }
 
 .wiki-editor {

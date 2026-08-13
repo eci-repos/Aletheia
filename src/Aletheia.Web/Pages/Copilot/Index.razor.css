@@ -112,12 +112,12 @@
     margin-bottom: 0;
 }
 
-.copilot-table-wrap {
+.md-table-wrap {
     max-width: 100%;
     overflow-x: auto;
 }
 
-.copilot-table {
+.md-table {
     margin-bottom: 0.75rem;
     vertical-align: top;
 }

@@ -1,6 +1,6 @@
 # Backlog: Wiki Markdown / HTML View Tabs
 
-**Status:** **Proposed** — not yet promoted to a sprint. No work authorized.
+**Status:** **ARCHIVED 2026-08-13** — all items implemented in Sprint 65; moved to `docs/backlog/archive/` so the active backlog reads empty. Original status: Proposed; promoted to Sprint 65 (2026-08-13) and implemented.
 **Created:** 2026-08-13
 **Source:** Design review with the project owner. Wiki pages are stored and returned as markdown in `WikiPage.Summary`, but the Wiki surface (`src/Aletheia.Web/Pages/Wiki.razor:151`) renders it as a plain `<p>` — so users literally see raw markdown syntax (e.g. `## Heading`, `- bullet`) as unformatted text. Users who don't read markdown find this hard to parse. The fix is a tab control: **View** (markdown rendered to styled HTML) and **Source** (raw markdown in a `<pre>`). RTF was considered and rejected — browsers cannot natively render RTF, so it would be a worse experience than the md.
 

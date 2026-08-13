@@ -1,6 +1,6 @@
 # Sprint 66 - Remove Redundant Metadata Nav Item
 
-**Status:** Active (2026-08-13)
+**Status:** Complete (2026-08-13)
 
 Full authority: this file. Sprint 65 (Wiki Markdown and HTML View Tabs) is **complete, committed, and pushed** (`121cfd6` on `origin/master`).
 
@@ -38,3 +38,14 @@ Remove the **Metadata** entry from `NavMenu.razor` so the nav surfaces only the 
 - Removing/renaming the `/metadata` route or `MetadataEditor.razor`.
 - Changing Browse's Edit action or the metadata editor.
 - The "Searching…" hang diagnostic (API availability).
+
+---
+
+## Implementation Status (2026-08-13)
+
+**Complete.** All deliverables implemented, tested, and pushed.
+
+- **Deliverable 1 — Remove the Metadata nav item:** the `NavLink href="metadata"` block was deleted from `src/Aletheia.Web/Layout/NavMenu.razor`. The `/metadata` page, its route, and Browse's ✎ Edit deep-link (`metadata?fileId=...&fileName=...&version=...`) are untouched.
+- **Deliverable 2 — Binding test:** new `tests/Aletheia.Web.UnitTests/NavMenuBindingTests.cs` (3 tests) — `NavMenu.razor` no longer contains `href="metadata"` / `>Metadata</span>`, `Browse.razor` still contains `metadata?fileId=` + the Edit action, and `MetadataEditor.razor` still declares `@page "/metadata"`.
+- **Deliverable 3 — Docs:** this file, `docs/File 02-Current-Sprint.md`, `docs/File 03-openhands.md`, AGENTS.md, CLAUDE.md updated; backlog item moved to `docs/backlog/archive/` with its status header updated.
+- **Verification:** `dotnet build Aletheia.slnx` succeeds (0 errors). Aletheia.Web.UnitTests **64** (was 61, +3); Foundation 55 / Repository 130 / RAGS 290 unchanged.

@@ -33,7 +33,13 @@ Remove the **Metadata** side-menu item from `NavMenu.razor`. The page is a file-
 
 ### Sprint 66 — remove redundant Metadata nav item (2026-08-13)
 
-Promoted from `docs/backlog/Remove-Redundant-Metadata-Nav-Item.md`. Implementation status to be recorded here when the sprint completes.
+**Implemented, committed, and pushed.** See the Sprint 66 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (remove nav item):** the `NavLink href="metadata"` block was deleted from `NavMenu.razor`; the `/metadata` page/route and Browse's ✎ Edit deep-link are untouched.
+- **Item 2 (binding test):** `NavMenuBindingTests` (3) — nav entry gone, Browse still deep-links to `metadata?fileId=`, page route intact.
+- **Item 3 (docs):** File 02/03, AGENTS, CLAUDE.md, sprint file updated; backlog item archived.
+
+**Verification:** Foundation 55 / Repository 130 / RAGS 290 / Web 64 green; `dotnet build Aletheia.slnx` succeeds (0 errors). No sprint currently active — next promotion will set it.
 
 ---
 

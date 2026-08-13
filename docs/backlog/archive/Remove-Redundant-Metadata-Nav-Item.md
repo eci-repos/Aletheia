@@ -1,6 +1,6 @@
 # Backlog: Remove Redundant Metadata Nav Item
 
-**Status:** **Proposed** — not yet promoted to a sprint. No work authorized.
+**Status:** **ARCHIVED 2026-08-13** — all items implemented in Sprint 66; moved to `docs/backlog/archive/` so the active backlog reads empty. Original status: Proposed; promoted to Sprint 66 (2026-08-13) and implemented.
 **Created:** 2026-08-13
 **Source:** Design review with the project owner. The **Metadata** side-menu item (`NavMenu.razor` → `/metadata`, `MetadataEditor.razor`) is a redundant entry point: the page is a file-picker that opens the metadata editor, and **Browse** already provides the same flow via its ✎ Edit action, which deep-links to `metadata?fileId=...&fileName=...&version=...`. The standalone nav item adds a second, weaker path to the same editor with no unique value.
 

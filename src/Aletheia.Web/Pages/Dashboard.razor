@@ -20,10 +20,10 @@
 @if (_recentFiles is not null)
 {
     <div class="dashboard-stats d-flex flex-wrap gap-2 mb-3">
-        <span class="badge text-bg-light border">@_documentCount documents in the repository</span>
+        <span class="badge bg-light text-dark border">@_documentCount documents in the repository</span>
         @if (_recentBriefs is { Count: > 0 })
         {
-            <span class="badge text-bg-light border">@_recentBriefs.Count recent document briefs</span>
+            <span class="badge bg-light text-dark border">@_recentBriefs.Count recent document briefs</span>
         }
     </div>
 

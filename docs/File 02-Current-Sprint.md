@@ -48,6 +48,8 @@ Give the Repository Browser a per-file **ingestion status** so a user can see at
 
 Per a project-owner review, the Ingestion column badge is now **three-state**: blue **Processing** (an active ingestion job — including the global re-embed/repair jobs — is still writing embeddings; new `IIngestionJobService.HasActiveIngestion(sourceId)` + `FileMetadata.IsProcessing`, stamped by `SearchController`), green **Ingested** (no active job, ≥1 embedding), amber **Not ingested** (no active job, 0 embeddings). Tooltips state the embeddings-only scope (graph/taxonomy/wiki-brief readiness is a documented follow-up). Repository 138 (+1) / Web 81 (+2) / RAGS 302 green; build 0 errors.
 
+**Post-fix (2026-08-14):** the badges were **invisible** — the vendored Bootstrap is v5.1.0, which has no `text-bg-*` utilities (5.2+), so `text-bg-success` etc. rendered white-on-white. Badges now use the app convention (`bg-success` / `bg-warning text-dark` / `bg-info text-dark` / `bg-light text-dark border` on Dashboard). Web 81 green; build 0 errors. User action: `docker compose up -d --build` + hard-refresh `/browse`.
+
 ---
 
 ## Sprint 68 progress log (2026-08-13) — completed

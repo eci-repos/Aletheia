@@ -77,6 +77,7 @@ Dependencies point inward: Blazor Web → REST Controllers → Abstractions → 
 - **In-memory chat state:** chat plans and execution jobs live in-memory (`InMemoryChatPlanRepository`, `InMemoryChatProgressStore`) — a container restart invalidates browser-restored plans; the client falls back to the plan preview and stops polling after 3 no-progress polls. `GET /api/copilot/plans/{id}/progress` returns 200 with `JobId == Guid.Empty` for a plan with no execution job yet; "plan not found" is a 404.
 - **DB schema:** `scripts/init.sql` is the fresh-install schema; incremental schema changes are idempotent migrations under `src/Repository.Infrastructure.PostgreSQL/Migrations/` (named `YYYY-MM-DD-*.sql`). Keep both in sync.
 - **Graph Explorer render contract:** `window.initGraph(containerId, nodes, edges, dotNetRef, preservePositions)` in `wwwroot/index.html`; `GraphExplorer.razor` owns a `DotNetObjectReference<GraphExplorer>` and exposes `[JSInvokable] OnGraphLayoutSettled()`.
+- **Bootstrap is v5.1.0 — never use `text-bg-*` utilities** (those are 5.2+; they apply no background here, and `.badge` defaults to white text, so a `badge text-bg-success` is invisible). Use the app convention: `badge bg-success`, `badge bg-warning text-dark`, `badge bg-info text-dark`, `badge bg-light text-dark border`.
 
 ## Documentation is mandatory
 

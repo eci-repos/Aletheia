@@ -16,9 +16,9 @@ public class BrowseBindingTests
         var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
 
         Assert.Contains("file.Ingested", source);
-        Assert.Contains("text-bg-success", source);
+        Assert.Contains("bg-success", source);
         Assert.Contains(">Ingested</span>", source);
-        Assert.Contains("text-bg-warning", source);
+        Assert.Contains("bg-warning text-dark", source);
         Assert.Contains(">Not ingested</span>", source);
     }
 
@@ -37,7 +37,7 @@ public class BrowseBindingTests
         var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
 
         Assert.Contains("file.IsProcessing", source);
-        Assert.Contains("text-bg-info", source);
+        Assert.Contains("bg-info text-dark", source);
         Assert.Contains(">Processing</span>", source);
     }
 

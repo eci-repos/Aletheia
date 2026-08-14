@@ -147,6 +147,16 @@ builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IInternalSea
 builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IDocumentBriefGenerator, Aletheia.RAGS.Application.DocumentBriefs.SemanticKernelDocumentBriefGenerator>();
 builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IDocumentBriefService, Aletheia.RAGS.Application.DocumentBriefs.DocumentBriefService>();
 
+// Sprint 70: normalized lexicon + grounded fact extraction — canonical concept registry, verified
+// document facts, and query-time concept expansion. The schema initializer is a safety net; fresh
+// installs get the tables from init.sql and existing deployments from the migration.
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.ILexiconRepository, Aletheia.RAGS.Infrastructure.PostgreSQL.Lexicon.PostgreSqlLexiconRepository>();
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.ILexiconProvider, Aletheia.RAGS.Application.Lexicon.LexiconProvider>();
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IFactProposer, Aletheia.RAGS.Application.Lexicon.SemanticKernelFactProposer>();
+builder.Services.AddSingleton<Aletheia.RAGS.Abstractions.Interfaces.IFactExtractionService, Aletheia.RAGS.Application.Lexicon.GroundedFactExtractionService>();
+builder.Services.AddSingleton<Aletheia.RAGS.Infrastructure.PostgreSQL.Lexicon.PostgreSqlLexiconSchema>();
+builder.Services.AddHostedService<Aletheia.RAGS.Infrastructure.PostgreSQL.Lexicon.PostgreSqlLexiconSchemaInitializer>();
+
 // GraphRAG + LazyGraphRAG services (registered below with intelligence wiring)
 // Collaboration
 builder.Services.AddSingleton<ICollaborationService, CollaborationService>();

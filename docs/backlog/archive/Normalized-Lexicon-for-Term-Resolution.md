@@ -1,6 +1,6 @@
 # Backlog: Normalized Lexicon for Term Resolution (Grounded Semantic Extraction)
 
-**Status:** **Proposed** — not yet promoted to a sprint. No work authorized.
+**Status:** **Implemented** — promoted to Sprint 70 (Normalized Lexicon / Grounded Semantic Extraction); all 4 items implemented 2026-08-14.
 **Created:** 2026-08-14
 **Source:** Project-owner review of a retrieval failure. Copilot missed the RFP due dates even though they were on the first page of the source ("Proposal Due Date: February 24, 2022, at 2:00 p.m. EST"). A second source phrased the same concept differently ("Bid due: August 26, 2026, 2:00 PM Pacific Time") and was missed too. Diagnosis: this is **not a bug** — it is the systematic limit of retrieval. Vector similarity + the whole-string ILIKE keyword fallback both fail on terse, varied-phrase facts. The fix generalizes the Sprint 69 "ground truth" instinct: give the platform a **canonical lexicon** that resolves terminology diversity across source documents — and, per project-owner direction (2026-08-14), make it **semantic** (understands paraphrase and novel terminology) **without losing fidelity to the source** (nothing stored that isn't verifiable in the text).
 

@@ -260,6 +260,44 @@ public class RagsServiceTests
         Assert.Equal("AI", vectorStore.LastKeywordQuery);
     }
 
+    [Fact]
+    public async Task RetrieveAsync_embeds_lexicon_expanded_query()
+    {
+        var vectorStore = new FakeVectorStore();
+        var recordingProvider = new RecordingEmbeddingProvider();
+        var lexiconProvider = new FakeLexiconProvider(new[]
+        {
+            new LexiconConcept
+            {
+                Key = "due_date",
+                Label = "Due date",
+                Aliases = new[] { "due date", "bid due", "proposal due date" }
+            }
+        });
+        var service = new RagsService(new ChunkingPipeline(), recordingProvider, vectorStore, lexiconProvider: lexiconProvider);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("submission due date", 3));
+
+        Assert.True(result.IsSuccess);
+        // The embedding query must carry the alias family so a varied phrasing retrieves documents
+        // that use any surface form ("Bid due", "Proposal Due Date").
+        Assert.Contains("bid due", recordingProvider.LastEmbeddedText);
+        Assert.Contains("proposal due date", recordingProvider.LastEmbeddedText);
+    }
+
+    [Fact]
+    public async Task RetrieveAsync_skips_lexicon_expansion_when_provider_absent()
+    {
+        var vectorStore = new FakeVectorStore();
+        var recordingProvider = new RecordingEmbeddingProvider();
+        var service = new RagsService(new ChunkingPipeline(), recordingProvider, vectorStore);
+
+        var result = await service.RetrieveAsync(new RetrievalRequest("submission due date", 3));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("submission due date", recordingProvider.LastEmbeddedText);
+    }
+
     private static SearchResult CreateKeywordResult(string content)
     {
         return new SearchResult(
@@ -347,5 +385,17 @@ public class RagsServiceTests
         {
             return Task.FromResult(Result<ReadOnlyMemory<float>>.Failure("embedding failed"));
         }
+    }
+
+    private sealed class FakeLexiconProvider : ILexiconProvider
+    {
+        private readonly IReadOnlyList<LexiconConcept> _concepts;
+
+        public FakeLexiconProvider(IReadOnlyList<LexiconConcept> concepts) => _concepts = concepts;
+
+        public Task<IReadOnlyList<LexiconConcept>> GetConceptsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_concepts);
+
+        public void Invalidate() { }
     }
 }

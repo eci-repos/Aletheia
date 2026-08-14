@@ -21,6 +21,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
     private readonly IIngestionDiagnostics? _diagnostics;
     private readonly Lazy<IIngestionJobService>? _ingestionJobs;
     private readonly IMetadataRepository? _metadataRepository;
+    private readonly IFactExtractionService? _factExtractionService;
     private readonly ILogger<RepositoryKnowledgeSourceIngestionService> _logger;
 
     public RepositoryKnowledgeSourceIngestionService(
@@ -33,7 +34,8 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         IIngestionDiagnostics? diagnostics = null,
         IMetadataRepository? metadataRepository = null,
         ILogger<RepositoryKnowledgeSourceIngestionService>? logger = null,
-        Lazy<IIngestionJobService>? ingestionJobs = null)
+        Lazy<IIngestionJobService>? ingestionJobs = null,
+        IFactExtractionService? factExtractionService = null)
     {
         _downloadUseCase = downloadUseCase ?? throw new ArgumentNullException(nameof(downloadUseCase));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -45,6 +47,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         _metadataRepository = metadataRepository;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RepositoryKnowledgeSourceIngestionService>.Instance;
         _ingestionJobs = ingestionJobs;
+        _factExtractionService = factExtractionService;
     }
 
     public async Task<Result<bool>> EnsureIngestedAsync(
@@ -112,6 +115,26 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         }
 
         _logger.LogInformation("Knowledge source {SourceName} text extracted ({TextLength} chars); running RAGS ingestion.", source.SourceName, extraction.Value.Text.Length);
+
+        // Sprint 70: grounded fact extraction — propose (LLM) → verify (fidelity gate) → normalize
+        // (lexicon) → persist. Best-effort enrichment: a failure never blocks ingestion.
+        if (_factExtractionService is not null)
+        {
+            try
+            {
+                var factResult = await _factExtractionService
+                    .ExtractAsync(source.SourceId, extraction.Value.Text, extraction.Value.Pages, cancellationToken)
+                    .ConfigureAwait(false);
+                if (factResult.IsFailure)
+                {
+                    _logger.LogWarning("Grounded fact extraction failed for {SourceName}: {Error}.", source.SourceName, factResult.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Grounded fact extraction failed for {SourceName}.", source.SourceName);
+            }
+        }
 
         // Sprint 56 replace semantics: clear prior knowledge-index rows and graph nodes for this
         // source so re-ingestion (document updates, repairs) replaces content instead of accumulating.

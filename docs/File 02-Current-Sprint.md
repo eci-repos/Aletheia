@@ -1,54 +1,50 @@
-# Sprint 69 - Ingestion Status in the Repository Browser
+# Sprint 70 - Normalized Lexicon (Grounded Semantic Extraction)
 
-**Status:** Active (2026-08-13)
+**Status:** Active (2026-08-14)
 
-Full authority: `docs/sprints/Sprint-69 - Ingestion Status in Repository Browser.md` (created 2026-08-13). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-70 - Normalized Lexicon (Grounded Semantic Extraction).md` (created 2026-08-14). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 68 (Query Expansion for Acronyms) is **complete, committed, and pushed** on `origin/master` (`3a77fe5`).
+Sprint 69 (Ingestion Status in the Repository Browser) is **complete, committed, and pushed** on `origin/master` (`debdfeb`).
 
 ## Objective
 
-Give the Repository Browser a per-file **ingestion status** so a user can see at a glance whether an uploaded document actually made it into retrieval (has embeddings) or silently failed. The ground-truth signal is durable: **a source with ≥1 embedding is ingested** — job status is in-memory and lost on container restart.
+Give the platform a **normalized lexicon** applied on both sides of retrieval. Copilot missed the RFP due dates even though they were on the first page of the source ("Proposal Due Date: February 24, 2022, at 2:00 p.m. EST"); a second source phrased the same concept differently ("Bid due: August 26, 2026, 2:00 PM Pacific Time") and was missed too. Diagnosis: **not a bug** — the systematic limit of retrieval. Vector similarity + the whole-string ILIKE keyword fallback both fail on terse, varied-phrase facts. The fix is a **canonical lexicon** that resolves terminology diversity — and, per project-owner direction, it is **semantic** (LLM understands paraphrase and novel terminology) **without losing fidelity to the source** (nothing stored that is not verifiable in the text).
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Chunk-count query:** `IVectorStore.GetChunkCountsAsync(IReadOnlyList<Guid> sourceIds)` (default no-op impl so fakes keep compiling) + `PgVectorStore` grouped `COUNT(*)` override.
-2. **API stamping:** `FileMetadata.ChunkCount` (int?) + computed `Ingested`; `SearchController` injects `IVectorStore` and stamps the current page's files (0 when missing from the map).
-3. **UI badge:** `Browse.razor` Ingestion column — green **Ingested** / amber **Not ingested** badges with a failure-mode tooltip.
-4. **Tests + docs:** `SearchControllerTests` (stamping, missing sources, failure) + `BrowseBindingTests` (column + badges); docs updated.
+1. **Lexicon data model + repository:** `LexiconConcept`/`DocumentFact`/`ProposedFact`/`UnmappedTerm` + `LexiconSeedData` defaults; `ILexiconRepository` → `PostgreSqlLexiconRepository`; tables `lexicon_concepts`/`lexicon_aliases`/`document_facts`/`lexicon_unmapped_terms` in `init.sql` + migration `2026-08-14-lexicon-and-facts.sql`; `PostgreSqlLexiconSchema` + hosted initializer.
+2. **Grounded fact extraction (propose + verify):** `IFactProposer` → `SemanticKernelFactProposer` (LLM propose with verbatim source span); `FactValueParser` + `FactVerifier` (fidelity gate: span exists + value parses); `GroundedFactExtractionService` (propose → verify → normalize → persist + unmapped-term recording); wired best-effort into `EnsureIngestedAsync`.
+3. **Query-time concept expansion:** `LexiconExpander` (alias-family expansion after `QueryExpander`); `ILexiconProvider` → `LexiconProvider` (cached, invalidatable) injected into `RagsService.RetrieveAsync` (optional ctor param).
+4. **Tests + docs:** RAGS 338 (+36) / Web 84 (+3) / Repository 138 / Foundation 55; build 0 errors; docs updated; backlog item archived.
 
 ## Acceptance Criteria
 
-- A file with embeddings shows a green **Ingested** badge; a file without shows an amber **Not ingested** badge with the failure-mode tooltip.
-- `SearchController` stamps the current page's files without a cross-module dependency; fakes compile against the default `GetChunkCountsAsync` impl.
-- Repository + Web unit suites green; `dotnet build Aletheia.slnx` succeeds.
+- A document whose text says "Bid due: August 26, 2026" yields a verified `due_date` fact (span exists, value parses) with page/offset; a proposal whose span is not in the source is dropped.
+- A query mentioning any due-date alias embeds the full alias family ("submission due date" → + "bid due", "proposal due date", "deadline", …); the keyword fallback keeps the original query.
+- Unmapped concept hints are recorded for the governance loop.
+- Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Per-file ingestion *error* surfacing (the Activity panel already shows job errors; the badge links the failure mode in a tooltip only).
-- Re-triggering ingestion from the badge (re-upload / repair job remain the manual path).
-- Showing ingestion status outside the Repository Browser (Search Center, Copilot, Dashboard).
+- Admin settings panel for the lexicon (browse/add aliases, review unmapped terms) — the governance *surface*; the loop's data collection is in this sprint.
+- Surfacing facts in Browse/Copilot/document viewer (the `document_facts` rows are queryable; UI is a follow-up).
+- Per-template concept scoping enforcement (the `template_scope` column exists; matching is global for now).
+- Unverified LLM extraction — the fidelity gate is mandatory.
 
 ---
 
 ## Progress
 
-### Sprint 69 — ingestion status in the repository browser (2026-08-13)
+### Sprint 70 — normalized lexicon (grounded semantic extraction) (2026-08-14)
 
-**Implemented.** See the Sprint 69 sprint file "Implementation Status" for full detail:
+**Implemented.** See the Sprint 70 sprint file "Implementation Status" for full detail:
 
-- **Item 1 (chunk-count query):** `IVectorStore.GetChunkCountsAsync` (default no-op impl — fakes keep compiling) + `PgVectorStore` grouped `COUNT(*)` override.
-- **Item 2 (API stamping):** `FileMetadata.ChunkCount`/`Ingested`; `SearchController` injects `IVectorStore` and stamps the current page's files (0 when missing from the map). No cross-module dependency.
-- **Item 3 (UI badge):** `Browse.razor` Ingestion column — green **Ingested** / amber **Not ingested** badges with a failure-mode tooltip.
-- **Item 4 (tests + docs):** Repository 137 (+3) — `SearchControllerTests`; Web 79 (+3) — `BrowseBindingTests`. RAGS 302 / Foundation 55 unchanged; build 0 errors.
+- **Item 1 (lexicon data model + repository):** `LexiconConcept`/`DocumentFact`/`ProposedFact`/`UnmappedTerm` + `LexiconSeedData` (5 seeded concepts: due_date, budget, page_limit, vendor, submission); `ILexiconRepository` → `PostgreSqlLexiconRepository` (Dapper; `SaveFactsAsync` replaces on re-ingest); tables in `init.sql` + migration `2026-08-14-lexicon-and-facts.sql` (idempotent, seeded); `PostgreSqlLexiconSchema` + hosted initializer registered in `Program.cs`.
+- **Item 2 (grounded fact extraction):** `SemanticKernelFactProposer` (LLM propose, span-quoting prompt, empty-on-failure), `FactValueParser` (date/currency/number/text), `FactVerifier` (span-existence + value-parse fidelity gate, page anchoring via `WhitespaceCollapser`), `GroundedFactExtractionService` (orchestration + unmapped-term recording); wired best-effort into `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` (never blocks ingestion).
+- **Item 3 (query-time concept expansion):** `LexiconExpander` (alias-family expansion, original query kept) + `LexiconProvider` (cached, invalidatable); `RagsService.RetrieveAsync` applies it after `QueryExpander` when an `ILexiconProvider` is present (optional ctor param — existing fakes compile).
+- **Item 4 (tests + docs):** RAGS 338 (+36) — `LexiconExpanderTests` (6), `FactValueParserTests` (8), `FactVerifierTests` (7), `GroundedFactExtractionServiceTests` (5), `RagsServiceTests` (+2 lexicon wiring); Web 84 (+3) — `LexiconBindingTests` (tables in migration + init, seed mirrors `LexiconSeedData`). Repository 138 / Foundation 55 unchanged; build 0 errors; docs updated; backlog item archived.
 
-**Residual manual (user-side):** hard-refresh `/browse`; the CMP 2026 – 3. RFP Analysis.docx row should now show an amber **Not ingested** badge, confirming the diagnosis that its ingestion job failed. Re-upload it (or run a repair job) to turn it green.
-
-### Post-Sprint 69 — "Processing" state for mid-ingestion sources (2026-08-14)
-
-Per a project-owner review, the Ingestion column badge is now **three-state**: blue **Processing** (an active ingestion job — including the global re-embed/repair jobs — is still writing embeddings; new `IIngestionJobService.HasActiveIngestion(sourceId)` + `FileMetadata.IsProcessing`, stamped by `SearchController`), green **Ingested** (no active job, ≥1 embedding), amber **Not ingested** (no active job, 0 embeddings). Tooltips state the embeddings-only scope (graph/taxonomy/wiki-brief readiness is a documented follow-up). Repository 138 (+1) / Web 81 (+2) / RAGS 302 green; build 0 errors.
-
-**Post-fix (2026-08-14):** the badges were **invisible** — the vendored Bootstrap is v5.1.0, which has no `text-bg-*` utilities (5.2+), so `text-bg-success` etc. rendered white-on-white. Badges now use the app convention (`bg-success` / `bg-warning text-dark` / `bg-info text-dark` / `bg-light text-dark border` on Dashboard). Web 81 green; build 0 errors. User action: `docker compose up -d --build` + hard-refresh `/browse`.
+**Residual manual (user-side):** `docker compose up -d --build` (fresh DB gets the tables + seed from init.sql; an existing deployment needs the migration `2026-08-14-lexicon-and-facts.sql` applied once, or the API's schema initializer self-heals at startup). Then re-upload the CMP 2026 RFP (or run a repair job) so grounded facts are extracted, and re-ask "What is the submission due date for the CMP 2026 RFP?" — the query now embeds the due-date alias family, so "Bid due" / "Proposal Due Date" documents should surface.
 
 ---
 

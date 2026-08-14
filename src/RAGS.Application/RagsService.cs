@@ -2,6 +2,7 @@ using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Models;
+using Aletheia.RAGS.Application.Lexicon;
 using Aletheia.RAGS.Application.Pipelines;
 using Microsoft.Extensions.Logging;
 
@@ -16,6 +17,7 @@ public sealed class RagsService : IRagsService
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IVectorStore _vectorStore;
     private readonly RetrievalOptions _retrievalOptions;
+    private readonly ILexiconProvider? _lexiconProvider;
     private readonly Microsoft.Extensions.Logging.ILogger<RagsService> _logger;
 
     public RagsService(
@@ -23,13 +25,15 @@ public sealed class RagsService : IRagsService
         IEmbeddingProvider embeddingProvider,
         IVectorStore vectorStore,
         Microsoft.Extensions.Options.IOptions<RetrievalOptions>? retrievalOptions = null,
-        Microsoft.Extensions.Logging.ILogger<RagsService>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<RagsService>? logger = null,
+        ILexiconProvider? lexiconProvider = null)
     {
         _chunkingPipeline = chunkingPipeline ?? throw new ArgumentNullException(nameof(chunkingPipeline));
         _embeddingProvider = embeddingProvider ?? throw new ArgumentNullException(nameof(embeddingProvider));
         _vectorStore = vectorStore ?? throw new ArgumentNullException(nameof(vectorStore));
         _retrievalOptions = retrievalOptions?.Value ?? new RetrievalOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RagsService>.Instance;
+        _lexiconProvider = lexiconProvider;
     }
 
     public async Task<Result> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
@@ -85,9 +89,17 @@ public sealed class RagsService : IRagsService
         }
 
         // Sprint 68: expand domain acronyms ("AI" → "AI Artificial Intelligence") before embedding so a
-        // short acronym retrieves documents that spell it out. The keyword fallback keeps the original
-        // query — it is a whole-string ILIKE match and would not match the expanded phrase.
+        // short acronym retrieves documents that spell it out. Sprint 70: then expand lexicon concepts
+        // into their alias family ("submission due date" → + "bid due", "proposal due date", "deadline",
+        // ...) so a varied phrasing retrieves documents that use any surface form. The keyword fallback
+        // keeps the original query — it is a whole-string ILIKE match and would not match the expanded phrase.
         var expandedQuery = QueryExpander.Expand(request.Query);
+        if (_lexiconProvider is not null)
+        {
+            var concepts = await _lexiconProvider.GetConceptsAsync(cancellationToken).ConfigureAwait(false);
+            expandedQuery = LexiconExpander.Expand(expandedQuery, concepts);
+        }
+
         _logger.LogInformation("RAGS retrieval started for query '{Query}' (expanded '{ExpandedQuery}', topK={TopK}, sourceId={SourceId}).", request.Query, expandedQuery, request.TopK, request.SourceId);
 
         var embeddingResult = await _embeddingProvider.GenerateAsync(expandedQuery, cancellationToken).ConfigureAwait(false);

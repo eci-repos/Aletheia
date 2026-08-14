@@ -245,3 +245,32 @@ The Copilot retrieval pipeline now includes a session-level **knowledge theme st
 
 ### Admin Settings page (`/settings`)
 - `Pages/Settings/Index.razor` renders **My Preferences** (own `copilot.requireApproval` toggle) for any authenticated user and a **Global Settings (Administrator)** card (`copilot.requireApproval.force` toggle) behind `AuthorizeView Roles="Administrator"`. Toggles load on init via `GET /api/settings/me` + `GET /api/settings` and save on change via `PUT`. The NavMenu **Settings** entry is admin-only (`.icon-settings`). Gating mirrors the API: the UI hides admin surfaces for non-admins; the API enforces the Administrator role.
+
+## Normalized Lexicon and Grounded Semantic Extraction (Sprint 70)
+
+**The foundational approach.** Retrieval is statistical, not semantic: top-K embedding similarity plus a whole-string ILIKE keyword fallback both fail on terse, varied-phrase facts. A document that says "Bid due: August 26, 2026" is invisible to a query that says "submission due date" — no matter how prominent the fact is. The fix is a **canonical lexicon** applied on **both sides** of retrieval, and it is **semantic** (an LLM understands paraphrase and novel terminology) **without losing fidelity to the source** (nothing is stored that is not verifiable in the text). The design principle that reconciles those two requirements is **grounded semantic extraction**:
+
+> **Propose → Verify → Normalize → Persist.** The LLM is the *recognition* layer (semantic, wide coverage); the source text is the *fidelity* gate; the lexicon is the *normalization* layer. No single layer carries the whole burden, and no layer is trusted alone.
+
+### The three layers
+
+1. **Recognition (LLM).** At ingestion, `SemanticKernelFactProposer` runs an LLM pass over the extracted text proposing candidate facts as `{concept_hint, value, source_span}` — the span quoted **verbatim** from the text. This is where semantic adaptation happens: paraphrase and novel terminology are understood without a curated alias. On any failure the proposer returns nothing — it never fabricates into the pipeline.
+2. **Fidelity (the source text — the crux).** `FactVerifier` is a mandatory gate. A proposal becomes a stored fact only when **(a)** the quoted source span actually exists in the extracted text (whitespace-tolerant match via `WhitespaceCollapser`, so spans match across line breaks) **and** **(b)** the value parses against the concept's value pattern (`FactValueParser`: `date`/`currency`/`number`/`text`). Anything else is **dropped, never stored**. Unverified LLM extraction is explicitly out of scope — the fidelity gate is what makes the semantic layer safe.
+3. **Normalization (the lexicon).** Verified facts map to canonical concepts via `LexiconConcept` — a concept registry, not a word list: canonical `Key`, `Label`, `Aliases` (the surface-form family), `ValuePattern`, optional `TemplateScope`. Seeded defaults live in `LexiconSeedData` (due_date, budget, page_limit, vendor, submission) mirrored by the SQL seed in `init.sql` + the migration `2026-08-14-lexicon-and-facts.sql`; `LexiconBindingTests` enforces the mirror. Concept hints that match no known key/alias are recorded as **unmapped terms** (`lexicon_unmapped_terms`) — the governance loop's data collection (the admin surface is a follow-up).
+
+### Two-sided application
+
+- **Ingestion side** — `GroundedFactExtractionService` orchestrates propose → verify → normalize → persist: verified facts normalize to the canonical concept, anchor to page/offset (reusing the Sprint 67 `TextPage` machinery), and persist as `document_facts` rows with **replace-on-reingest** semantics. Wired **best-effort** into `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` (try/catch — a fact-extraction failure never blocks ingestion).
+- **Query side** — `LexiconExpander` appends a matched concept's label + full alias family to the embedding query (word-boundary, longest-first, original query always kept), applied **after** `QueryExpander` (acronyms) in `RagsService.RetrieveAsync` when an `ILexiconProvider` is present. `ILexiconProvider` → `LexiconProvider` (cached, invalidatable; failed loads not cached) is an **optional ctor param** — existing fakes compile without it. The keyword fallback keeps the original query (Sprint 68 contract).
+
+### Why this design
+
+- **Semantic coverage without hallucination risk.** A pure alias-matching lexicon fixes only *known* concepts (a bounded dictionary, not semantic adaptation); a pure LLM extraction understands anything but risks storing facts not in the source. Grounded extraction gets both: the LLM proposes, the source text verifies, the lexicon normalizes.
+- **Durable, queryable ground truth.** `document_facts` rows (source_id, concept_key, normalized value, source span, page/offset) are deterministic and queryable — the same durable-ground-truth principle as Sprint 69's embeddings-based ingestion status.
+- **A growth mechanism.** Unmapped terms accumulate for admin review; new documents' vocabularies get absorbed rather than missed.
+
+### Documented follow-ups (out of scope for Sprint 70)
+
+- Admin settings panel for the lexicon (browse/add aliases, review unmapped terms) — the governance *surface*.
+- Surfacing facts in Browse/Copilot/document viewer (the `document_facts` rows are queryable; UI is a follow-up).
+- Per-template concept scoping enforcement (the `template_scope` column exists; matching is global for now).

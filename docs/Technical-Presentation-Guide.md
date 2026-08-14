@@ -194,6 +194,7 @@ For each supported document, RAGS can hold:
 | Taxonomy tags | Topic-oriented classification |
 | Ontology entities | Domain entities extracted from content |
 | Relationships | Entity-to-source and entity-to-entity context |
+| `document_facts` | Normalized, page-anchored facts (due dates, budgets, page limits, vendors) extracted with a fidelity gate |
 
 This creates the core value proposition:
 
@@ -203,6 +204,18 @@ This creates the core value proposition:
 - Citations connect answers back to chunks and source files.
 - Missing or unsupported ingestion is visible through status fields.
 - Existing documents can be hydrated into RAGS on first chat miss if metadata exists but vectors are absent.
+
+### Normalized Lexicon and Grounded Semantic Extraction (Sprint 70)
+
+Retrieval is statistical, not semantic: vector similarity plus a whole-string ILIKE keyword fallback both fail on terse, varied-phrase facts — a document that says "Bid due: August 26, 2026" is invisible to a query that says "submission due date". The fix is a **canonical lexicon** applied on both sides of retrieval, **semantic** (an LLM understands paraphrase and novel terminology) **without losing fidelity to the source** (nothing stored that is not verifiable in the text). The design principle is **grounded semantic extraction**:
+
+> **Propose → Verify → Normalize → Persist.** The LLM is the *recognition* layer; the source text is the *fidelity* gate; the lexicon is the *normalization* layer. No single layer carries the whole burden, and no layer is trusted alone.
+
+- **Ingestion side**: `SemanticKernelFactProposer` proposes `{concept, value, span}` with the span quoted verbatim; `FactVerifier` drops any proposal whose span does not exist in the extracted text (whitespace-tolerant) or whose value does not parse against the concept's value pattern; `GroundedFactExtractionService` normalizes verified facts to canonical `LexiconConcept`s, anchors them to page/offset, and persists `document_facts` rows (replace-on-reingest). Best-effort — a failure never blocks ingestion.
+- **Query side**: `LexiconExpander` appends a matched concept's label + full alias family to the embedding query (after acronym expansion), so "submission due date" retrieves documents that say "Bid due" or "Proposal Due Date"; the keyword fallback keeps the original query.
+- **Governance loop**: concept hints that match no known concept are recorded as unmapped terms for admin review (the growth mechanism; the admin surface is a follow-up).
+
+See `docs/Architecture.md` → "Normalized Lexicon and Grounded Semantic Extraction (Sprint 70)" for the full design.
 
 ## Copilot RAG-Augmented Chat
 
@@ -387,7 +400,7 @@ A strong demo for a technical audience:
 - Repository is the system of record; RAGS is the semantic memory of ingested documents.
 - Graph services add relationship memory beyond vector similarity.
 - Copilot is not a generic chat box; it is a retrieval-augmented interface over registered KB artifacts.
-- Source resolution, alias expansion, source-filtered retrieval, and citations are the trust path from question to answer.
+- Source resolution, lexicon/alias expansion, source-filtered retrieval, and citations are the trust path from question to answer.
 - The WebAssembly app is a thin client; business logic remains in API/application services.
 - The platform is provider-oriented: PostgreSQL, MinIO, Neo4j, pgvector, and Ollama are adapters behind interfaces.
 

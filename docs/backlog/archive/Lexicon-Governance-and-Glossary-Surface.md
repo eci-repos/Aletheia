@@ -1,6 +1,6 @@
 # Backlog: Lexicon Governance and Glossary Surface
 
-**Status:** **Proposed** — not yet promoted to a sprint. No work authorized.
+**Status:** **Implemented** — promoted to Sprint 71 (2026-08-14). All 5 items complete.
 **Created:** 2026-08-14
 **Source:** Project-owner direction following Sprint 70 (Normalized Lexicon / Grounded Semantic Extraction). Sprint 70 built the data-collection loop — `document_facts` rows are queryable and unmapped concept hints accumulate in `lexicon_unmapped_terms` — but explicitly deferred the governance *surface* and fact *surfacing*. This item closes the loop: a glossary/lexicon for a given document domain that **end users can view and download** and **admins can extend and manage**.
 

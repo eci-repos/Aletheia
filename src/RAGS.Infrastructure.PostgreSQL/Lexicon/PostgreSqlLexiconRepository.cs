@@ -118,6 +118,29 @@ ON CONFLICT (concept_key) DO UPDATE SET
         }
     }
 
+    public async Task<Result> DeleteConceptAsync(string key, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return Result.Failure("Concept key is required.");
+        }
+
+        try
+        {
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            // Aliases cascade (ON DELETE CASCADE); facts keep their concept_key as a denormalized label.
+            const string sql = "DELETE FROM lexicon_concepts WHERE concept_key = @Key;";
+            await connection.ExecuteAsync(sql, new { Key = key }).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"Lexicon concept deletion failed. {ex.Message}");
+        }
+    }
+
     public async Task<Result> SaveFactsAsync(Guid sourceId, IReadOnlyList<DocumentFact> facts, CancellationToken cancellationToken = default)
     {
         try
@@ -181,6 +204,27 @@ ORDER BY concept_key;";
         }
     }
 
+    public async Task<Result<IReadOnlyList<DocumentFact>>> GetAllFactsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            const string sql = @"
+SELECT source_id AS SourceId, concept_key AS ConceptKey, value AS Value, source_span AS SourceSpan,
+       page_number AS PageNumber, offset_in_page AS OffsetInPage, status AS Status
+FROM document_facts
+ORDER BY concept_key, source_id;";
+            var rows = await connection.QueryAsync<DocumentFact>(sql).ConfigureAwait(false);
+            return Result<IReadOnlyList<DocumentFact>>.Success(rows.ToList());
+        }
+        catch (Exception ex)
+        {
+            return Result<IReadOnlyList<DocumentFact>>.Failure($"Document fact load failed. {ex.Message}");
+        }
+    }
+
     public async Task<Result> RecordUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default)
     {
         try
@@ -209,8 +253,9 @@ ON CONFLICT (term, source_id) DO NOTHING;";
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             const string sql = @"
-SELECT term AS Term, source_id AS SourceId, created_at AS CreatedAt
+SELECT term AS Term, source_id AS SourceId, created_at AS CreatedAt, status AS Status, resolved_at AS ResolvedAt
 FROM lexicon_unmapped_terms
+WHERE status = 'pending'
 ORDER BY created_at DESC;";
             var rows = await connection.QueryAsync<UnmappedTerm>(sql).ConfigureAwait(false);
             return Result<IReadOnlyList<UnmappedTerm>>.Success(rows.ToList());
@@ -218,6 +263,31 @@ ORDER BY created_at DESC;";
         catch (Exception ex)
         {
             return Result<IReadOnlyList<UnmappedTerm>>.Failure($"Unmapped term load failed. {ex.Message}");
+        }
+    }
+
+    public async Task<Result> ResolveUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(term))
+        {
+            return Result.Failure("Term is required.");
+        }
+
+        try
+        {
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            const string sql = @"
+UPDATE lexicon_unmapped_terms
+SET status = 'resolved', resolved_at = now()
+WHERE term = @Term AND source_id = @SourceId;";
+            await connection.ExecuteAsync(sql, new { Term = term, SourceId = sourceId }).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"Unmapped term resolution failed. {ex.Message}");
         }
     }
 

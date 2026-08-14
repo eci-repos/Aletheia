@@ -1,43 +1,61 @@
-# Sprint 70 - Normalized Lexicon (Grounded Semantic Extraction)
+# Sprint 71 - Lexicon Governance and Glossary Surface
 
 **Status:** Active (2026-08-14)
 
-Full authority: `docs/sprints/Sprint-70 - Normalized Lexicon (Grounded Semantic Extraction).md` (created 2026-08-14). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-71 - Lexicon Governance and Glossary Surface.md` (created 2026-08-14). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 69 (Ingestion Status in the Repository Browser) is **complete, committed, and pushed** on `origin/master` (`debdfeb`).
+Sprint 70 (Normalized Lexicon / Grounded Semantic Extraction) is **complete, committed, and pushed** on `origin/master` (`229229d`).
 
 ## Objective
 
-Give the platform a **normalized lexicon** applied on both sides of retrieval. Copilot missed the RFP due dates even though they were on the first page of the source ("Proposal Due Date: February 24, 2022, at 2:00 p.m. EST"); a second source phrased the same concept differently ("Bid due: August 26, 2026, 2:00 PM Pacific Time") and was missed too. Diagnosis: **not a bug** — the systematic limit of retrieval. Vector similarity + the whole-string ILIKE keyword fallback both fail on terse, varied-phrase facts. The fix is a **canonical lexicon** that resolves terminology diversity — and, per project-owner direction, it is **semantic** (LLM understands paraphrase and novel terminology) **without losing fidelity to the source** (nothing stored that is not verifiable in the text).
+Close the governance loop Sprint 70 opened: a glossary/lexicon for a given document domain that **end users can view and download** and **admins can extend and manage**. Two surfaces, one sprint — the admin management surface (browse concepts + aliases, add/remove aliases, add concepts, review unmapped terms) is the growth mechanism; the end-user read-only glossary (per-domain concept list + verified facts, downloadable as CSV/JSON) is the surfacing. The connective tissue is **`template_scope` enforcement**: a concept with a template scope applies only to documents of that template; unscoped concepts stay global.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Lexicon data model + repository:** `LexiconConcept`/`DocumentFact`/`ProposedFact`/`UnmappedTerm` + `LexiconSeedData` defaults; `ILexiconRepository` → `PostgreSqlLexiconRepository`; tables `lexicon_concepts`/`lexicon_aliases`/`document_facts`/`lexicon_unmapped_terms` in `init.sql` + migration `2026-08-14-lexicon-and-facts.sql`; `PostgreSqlLexiconSchema` + hosted initializer.
-2. **Grounded fact extraction (propose + verify):** `IFactProposer` → `SemanticKernelFactProposer` (LLM propose with verbatim source span); `FactValueParser` + `FactVerifier` (fidelity gate: span exists + value parses); `GroundedFactExtractionService` (propose → verify → normalize → persist + unmapped-term recording); wired best-effort into `EnsureIngestedAsync`.
-3. **Query-time concept expansion:** `LexiconExpander` (alias-family expansion after `QueryExpander`); `ILexiconProvider` → `LexiconProvider` (cached, invalidatable) injected into `RagsService.RetrieveAsync` (optional ctor param).
-4. **Tests + docs:** RAGS 338 (+36) / Web 84 (+3) / Repository 138 / Foundation 55; build 0 errors; docs updated; backlog item archived.
+1. **Admin lexicon management API + repository methods:** `ILexiconRepository` gains `DeleteConceptAsync`/`ResolveUnmappedTermAsync`/`GetAllFactsAsync`; `lexicon_unmapped_terms` gains `status`/`resolved_at` (migration `2026-08-14-lexicon-unmapped-status.sql` + `init.sql` + `PostgreSqlLexiconSchema`); `LexiconController` (Repository.API) — concepts read/upsert/delete, unmapped list/resolve; admin writes invalidate `LexiconProvider`.
+2. **`template_scope` enforcement in concept matching:** `FactVerifier.Verify` + `IFactExtractionService.ExtractAsync` / `GroundedFactExtractionService` take an optional `templateName`; scoped concepts apply only to matching templates; `EnsureIngestedAsync` passes the canonical template name.
+3. **End-user glossary view:** `GET /api/lexicon/glossary?template=` (concepts + facts with source names via `IMetadataRepository`); `Pages/Glossary/Index.razor` at `/glossary` with domain filter + download; nav entry.
+4. **Download/export (CSV + JSON):** `GET /api/lexicon/glossary/export?format=csv|json&template=` — file download.
+5. **Tests + docs:** RAGS 343 (+5) / Repository 151 (+13) / Web 88 (+4) / Foundation 55; build 0 errors; docs updated; backlog item archived.
 
 ## Acceptance Criteria
 
-- A document whose text says "Bid due: August 26, 2026" yields a verified `due_date` fact (span exists, value parses) with page/offset; a proposal whose span is not in the source is dropped.
-- A query mentioning any due-date alias embeds the full alias family ("submission due date" → + "bid due", "proposal due date", "deadline", …); the keyword fallback keeps the original query.
-- Unmapped concept hints are recorded for the governance loop.
+- An admin can browse concepts + aliases, add/remove aliases, add/delete concepts, and review pending unmapped terms (confirm → alias, or dismiss) from `/lexicon`; edits take effect on the next read (cache invalidated) and never bypass the fidelity gate.
+- A concept with a `template_scope` only produces facts for documents of that template; unscoped concepts stay global.
+- An end user can view a per-domain glossary at `/glossary` (concept, aliases, verified facts with source + page) and download it as CSV or JSON.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Admin settings panel for the lexicon (browse/add aliases, review unmapped terms) — the governance *surface*; the loop's data collection is in this sprint.
-- Surfacing facts in Browse/Copilot/document viewer (the `document_facts` rows are queryable; UI is a follow-up).
-- Per-template concept scoping enforcement (the `template_scope` column exists; matching is global for now).
-- Unverified LLM extraction — the fidelity gate is mandatory.
+- Changing the fidelity gate or the propose → verify → normalize → persist pipeline (Sprint 70).
+- Per-user lexicons (global/app-level + per-domain only).
+- Machine translation / cross-language normalization.
+- Replacing the taxonomy/ontology entity machinery.
+- Editing `LexiconSeedData`/SQL-seed defaults from the UI (admin edits override at runtime; the seed stays the code-owned default).
 
 ---
 
 ## Progress
 
+### Sprint 71 — lexicon governance and glossary surface (2026-08-14)
+
+**Implemented.** See the Sprint 71 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (admin API + repository):** `ILexiconRepository` + `PostgreSqlLexiconRepository` gain `DeleteConceptAsync`, `ResolveUnmappedTermAsync`, `GetAllFactsAsync`; `GetUnmappedTermsAsync` returns pending only. `lexicon_unmapped_terms` gains `status`/`resolved_at` (migration `2026-08-14-lexicon-unmapped-status.sql` + `init.sql` + `PostgreSqlLexiconSchema`). `LexiconController` (Repository.API): `GET /api/lexicon/concepts?template=` (authenticated), `PUT`/`DELETE /api/lexicon/concepts` (admin), `GET /api/lexicon/unmapped` + `POST /api/lexicon/unmapped/resolve` (admin); admin writes call `_lexiconProvider.Invalidate()`. Admin UI: `Pages/Lexicon/Index.razor` at `/lexicon` (admin-gated, Management nav group) — browse/add/edit/delete concepts + dismiss unmapped terms.
+- **Item 2 (template_scope enforcement):** `FactVerifier.Verify` + `IFactExtractionService.ExtractAsync` / `GroundedFactExtractionService` take an optional `templateName`; `FactVerifier.IsApplicable(concept, templateName)` is the single source of truth (unscoped always applies). `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` passes the matched canonical template name. Out-of-scope hints behave like unknown hints (verifiable value stored as raw text + recorded unmapped).
+- **Item 3 (end-user glossary):** `GET /api/lexicon/glossary?template=` joins facts with source names via `IMetadataRepository`; `Pages/Glossary/Index.razor` at `/glossary` (concepts + aliases + verified facts with source/page, template filter, download buttons); nav entry after Copilot (`icon-glossary`).
+- **Item 4 (export):** `GET /api/lexicon/glossary/export?format=csv|json&template=` returns `File(...)` downloads; Web buttons via `RepositoryApiClient.ExportGlossaryAsync` → `DotNetStreamReference` + `downloadFileFromStream`.
+- **Item 5 (tests + docs):** RAGS 343 (+5) — `FactVerifierTests` template-scope cases (4) + `GroundedFactExtractionServiceTests` pass-through (1); Repository 151 (+13) — `LexiconControllerTests` (13: concepts read/filter, upsert/delete + invalidate, unmapped list/resolve, glossary join + scope filter, CSV/JSON export); Web 90 (+6) — `LexiconBindingTests` (unmapped status columns, glossary page, glossary nav entry, admin `/lexicon` page + gate, admin nav entry, client methods). Foundation 55 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build` (fresh DB gets the `status`/`resolved_at` columns from init.sql; an existing deployment needs the migration `2026-08-14-lexicon-unmapped-status.sql` applied once, or the API's schema initializer self-heals at startup). Then hard-refresh `/glossary` (and `/lexicon` for the admin surface) for a live visual check.
+
+---
+
+## Sprint 70 progress log (2026-08-14) — completed
+
 ### Sprint 70 — normalized lexicon (grounded semantic extraction) (2026-08-14)
 
-**Implemented.** See the Sprint 70 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`229229d`).** See the Sprint 70 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (lexicon data model + repository):** `LexiconConcept`/`DocumentFact`/`ProposedFact`/`UnmappedTerm` + `LexiconSeedData` (5 seeded concepts: due_date, budget, page_limit, vendor, submission); `ILexiconRepository` → `PostgreSqlLexiconRepository` (Dapper; `SaveFactsAsync` replaces on re-ingest); tables in `init.sql` + migration `2026-08-14-lexicon-and-facts.sql` (idempotent, seeded); `PostgreSqlLexiconSchema` + hosted initializer registered in `Program.cs`.
 - **Item 2 (grounded fact extraction):** `SemanticKernelFactProposer` (LLM propose, span-quoting prompt, empty-on-failure), `FactValueParser` (date/currency/number/text), `FactVerifier` (span-existence + value-parse fidelity gate, page anchoring via `WhitespaceCollapser`), `GroundedFactExtractionService` (orchestration + unmapped-term recording); wired best-effort into `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` (never blocks ingestion).

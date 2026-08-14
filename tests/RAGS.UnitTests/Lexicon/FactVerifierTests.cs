@@ -162,4 +162,90 @@ public class FactVerifierTests
         Assert.Equal("novel_concept", fact.ConceptKey);
         Assert.Equal("some value", fact.Value);
     }
+
+    // ---- Sprint 71: template_scope enforcement ----
+
+    private static readonly IReadOnlyList<LexiconConcept> ScopedConcepts = new[]
+    {
+        new LexiconConcept
+        {
+            Key = "due_date",
+            Label = "Due date",
+            ValuePattern = "date",
+            TemplateScope = "RFP",
+            Aliases = new[] { "due date", "proposal due date" }
+        },
+        new LexiconConcept
+        {
+            Key = "budget",
+            Label = "Budget",
+            ValuePattern = "currency",
+            Aliases = new[] { "budget" }
+        }
+    };
+
+    private static ProposedFact DueDateProposal() => new()
+    {
+        ConceptHint = "due_date",
+        Value = "February 24, 2022",
+        SourceSpan = "Proposal Due Date: February 24, 2022"
+    };
+
+    [Fact]
+    public void Verify_applies_scoped_concept_when_template_matches()
+    {
+        const string text = "Proposal Due Date: February 24, 2022";
+
+        var facts = FactVerifier.Verify(new[] { DueDateProposal() }, text, null, ScopedConcepts, "RFP");
+
+        var fact = Assert.Single(facts);
+        Assert.Equal("due_date", fact.ConceptKey);
+    }
+
+    [Fact]
+    public void Verify_treats_out_of_scope_concept_as_unmapped_text()
+    {
+        const string text = "Proposal Due Date: February 24, 2022";
+
+        // The scoped concept is excluded from matching, so the hint behaves like an unknown hint:
+        // the verifiable value is still stored, but as raw text under the raw hint (not normalized
+        // to the concept's date pattern). The hint is surfaced to the admin via the unmapped queue.
+        var facts = FactVerifier.Verify(new[] { DueDateProposal() }, text, null, ScopedConcepts, "Contract");
+
+        var fact = Assert.Single(facts);
+        Assert.Equal("due_date", fact.ConceptKey);
+        Assert.Equal("February 24, 2022", fact.Value);
+    }
+
+    [Fact]
+    public void Verify_treats_scoped_concept_as_unmapped_text_when_no_template()
+    {
+        const string text = "Proposal Due Date: February 24, 2022";
+
+        var facts = FactVerifier.Verify(new[] { DueDateProposal() }, text, null, ScopedConcepts);
+
+        var fact = Assert.Single(facts);
+        Assert.Equal("due_date", fact.ConceptKey);
+        Assert.Equal("February 24, 2022", fact.Value);
+    }
+
+    [Fact]
+    public void Verify_keeps_unscoped_concept_for_any_template()
+    {
+        const string text = "Budget: $1,000,000";
+        var proposals = new[]
+        {
+            new ProposedFact
+            {
+                ConceptHint = "budget",
+                Value = "$1,000,000",
+                SourceSpan = "Budget: $1,000,000"
+            }
+        };
+
+        var facts = FactVerifier.Verify(proposals, text, null, ScopedConcepts, "Contract");
+
+        var fact = Assert.Single(facts);
+        Assert.Equal("budget", fact.ConceptKey);
+    }
 }

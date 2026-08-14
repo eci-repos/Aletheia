@@ -1,0 +1,200 @@
+@page "/lexicon"
+@inject RepositoryApiClient ApiClient
+
+<PageTitle>Lexicon - Aletheia</PageTitle>
+
+<h1>Lexicon</h1>
+<p class="text-muted">
+    Administer the canonical lexicon: concepts, aliases, value patterns, and template scopes. Edits
+    take effect on the next retrieval read and never bypass the fidelity gate.
+</p>
+
+<AuthorizeView Roles="Administrator">
+    <Authorized>
+        @if (_loading)
+        {
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="ms-2">Loading lexicon…</span>
+        }
+        else
+        {
+            <div class="row">
+                <div class="col-lg-7">
+                    <h5 class="mb-3">Concepts</h5>
+                    @if (_concepts.Count == 0)
+                    {
+                        <div class="alert alert-info">No concepts yet.</div>
+                    }
+                    else
+                    {
+                        @foreach (var concept in _concepts)
+                        {
+                            <div class="card mb-2">
+                                <div class="card-body py-2">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <h6 class="card-title mb-1">
+                                                @concept.Label
+                                                <span class="badge bg-light text-dark border">@concept.Key</span>
+                                            </h6>
+                                            <div class="small text-muted">
+                                                Value pattern: @(concept.ValuePattern ?? "text")
+                                                @if (!string.IsNullOrWhiteSpace(concept.TemplateScope))
+                                                {
+                                                    <span>· Template: @concept.TemplateScope</span>
+                                                }
+                                            </div>
+                                            @if (concept.Aliases is { Count: > 0 })
+                                            {
+                                                <div class="small mt-1">
+                                                    @foreach (var alias in concept.Aliases)
+                                                    {
+                                                        <span class="badge bg-info text-dark me-1">@alias</span>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteConceptAsync(concept.Key)">Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="col-lg-5">
+                    <h5 class="mb-3">Add / edit concept</h5>
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <label class="form-label" for="concept-key">Key</label>
+                                <input id="concept-key" class="form-control form-control-sm" @bind="_draft.Key" />
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label" for="concept-label">Label</label>
+                                <input id="concept-label" class="form-control form-control-sm" @bind="_draft.Label" />
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label" for="concept-pattern">Value pattern</label>
+                                <select id="concept-pattern" class="form-select form-select-sm" @bind="_draft.ValuePattern">
+                                    <option value="text">text</option>
+                                    <option value="date">date</option>
+                                    <option value="currency">currency</option>
+                                    <option value="number">number</option>
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label" for="concept-scope">Template scope (optional)</label>
+                                <input id="concept-scope" class="form-control form-control-sm" @bind="_draft.TemplateScope" />
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label" for="concept-aliases">Aliases (comma-separated)</label>
+                                <input id="concept-aliases" class="form-control form-control-sm" @bind="_aliasesText" />
+                            </div>
+                            <button class="btn btn-sm btn-primary" disabled="@_saving" @onclick="SaveConceptAsync">
+                                @(_saving ? "Saving…" : "Save concept")
+                            </button>
+                            @if (!string.IsNullOrWhiteSpace(_message))
+                            {
+                                <div class="alert alert-@(_messageIsError ? "danger" : "success") mt-2 mb-0 py-1 small">@_message</div>
+                            }
+                        </div>
+                    </div>
+
+                    <h5 class="mt-4 mb-3">Unmapped terms</h5>
+                    @if (_unmapped.Count == 0)
+                    {
+                        <div class="alert alert-info">No pending unmapped terms.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group">
+                            @foreach (var term in _unmapped)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@term.Term</strong>
+                                        <div class="small text-muted">@term.SourceId</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResolveTermAsync(term.Term, term.SourceId)">Dismiss</button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <div class="alert alert-warning">Administrator access required to manage the lexicon.</div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private List<LexiconConcept> _concepts = new();
+    private List<UnmappedTerm> _unmapped = new();
+    private LexiconConcept _draft = new() { ValuePattern = "text" };
+    private string _aliasesText = string.Empty;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _concepts = (await ApiClient.GetLexiconConceptsAsync())?.ToList() ?? new List<LexiconConcept>();
+        _unmapped = (await ApiClient.GetUnmappedTermsAsync())?.ToList() ?? new List<UnmappedTerm>();
+        _loading = false;
+    }
+
+    private async Task SaveConceptAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draft.Key) || string.IsNullOrWhiteSpace(_draft.Label))
+        {
+            _message = "Key and label are required.";
+            _messageIsError = true;
+            return;
+        }
+
+        _saving = true;
+        _message = null;
+        _draft.Aliases = _aliasesText
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        var ok = await ApiClient.UpsertLexiconConceptAsync(_draft);
+        _saving = false;
+        if (ok)
+        {
+            _message = $"Saved '{_draft.Key}'.";
+            _messageIsError = false;
+            _draft = new LexiconConcept { ValuePattern = "text" };
+            _aliasesText = string.Empty;
+            await LoadAsync();
+        }
+        else
+        {
+            _message = "Save failed.";
+            _messageIsError = true;
+        }
+    }
+
+    private async Task DeleteConceptAsync(string key)
+    {
+        var ok = await ApiClient.DeleteLexiconConceptAsync(key);
+        if (ok)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task ResolveTermAsync(string term, Guid sourceId)
+    {
+        var ok = await ApiClient.ResolveUnmappedTermAsync(term, sourceId);
+        if (ok)
+        {
+            await LoadAsync();
+        }
+    }
+}

@@ -123,7 +123,7 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
             try
             {
                 var factResult = await _factExtractionService
-                    .ExtractAsync(source.SourceId, extraction.Value.Text, extraction.Value.Pages, cancellationToken)
+                    .ExtractAsync(source.SourceId, extraction.Value.Text, extraction.Value.Pages, canonicalName, cancellationToken)
                     .ConfigureAwait(false);
                 if (factResult.IsFailure)
                 {

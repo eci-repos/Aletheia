@@ -12,4 +12,9 @@ public sealed class UnmappedTerm
     public Guid SourceId { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    /// <summary><c>pending</c> (awaiting admin review) or <c>resolved</c> (confirmed as an alias or dismissed).</summary>
+    public string Status { get; set; } = "pending";
+
+    public DateTime? ResolvedAt { get; set; }
 }

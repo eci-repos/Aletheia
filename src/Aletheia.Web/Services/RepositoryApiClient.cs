@@ -1184,6 +1184,68 @@ public sealed class RepositoryApiClient
         var response = await _httpClient.PutAsJsonAsync("/api/settings", settings, cancellationToken).ConfigureAwait(false);
         return response.IsSuccessStatusCode;
     }
+
+    // ---- Sprint 71: lexicon governance + glossary surface ----
+
+    public async Task<IReadOnlyList<LexiconConcept>?> GetLexiconConceptsAsync(string? template = null, CancellationToken cancellationToken = default)
+    {
+        var url = "/api/lexicon/concepts";
+        if (!string.IsNullOrWhiteSpace(template))
+        {
+            url += $"?template={Uri.EscapeDataString(template)}";
+        }
+
+        return await _httpClient.GetFromJsonAsync<IReadOnlyList<LexiconConcept>>(url, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpsertLexiconConceptAsync(LexiconConcept concept, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PutAsJsonAsync("/api/lexicon/concepts", concept, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> DeleteLexiconConceptAsync(string key, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.DeleteAsync($"/api/lexicon/concepts/{Uri.EscapeDataString(key)}", cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<IReadOnlyList<UnmappedTerm>?> GetUnmappedTermsAsync(CancellationToken cancellationToken = default)
+        => await _httpClient.GetFromJsonAsync<IReadOnlyList<UnmappedTerm>>("/api/lexicon/unmapped", cancellationToken).ConfigureAwait(false);
+
+    public async Task<bool> ResolveUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsJsonAsync("/api/lexicon/unmapped/resolve", new { Term = term, SourceId = sourceId }, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<GlossaryClientResponse?> GetGlossaryAsync(string? template = null, CancellationToken cancellationToken = default)
+    {
+        var url = "/api/lexicon/glossary";
+        if (!string.IsNullOrWhiteSpace(template))
+        {
+            url += $"?template={Uri.EscapeDataString(template)}";
+        }
+
+        return await _httpClient.GetFromJsonAsync<GlossaryClientResponse>(url, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<Stream?> ExportGlossaryAsync(string format, string? template = null, CancellationToken cancellationToken = default)
+    {
+        var url = $"/api/lexicon/glossary/export?format={Uri.EscapeDataString(format)}";
+        if (!string.IsNullOrWhiteSpace(template))
+        {
+            url += $"&template={Uri.EscapeDataString(template)}";
+        }
+
+        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+    }
 }
 
 public sealed record RagsStatusClientSnapshot(
@@ -1206,6 +1268,21 @@ public sealed record RagsUploadJobClientSummary(
     string? SourceName,
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt);
+
+/// <summary>End-user glossary payload (mirrors the API's <c>GlossaryResponse</c>).</summary>
+public sealed record GlossaryClientResponse(
+    IReadOnlyList<LexiconConcept> Concepts,
+    IReadOnlyList<GlossaryFactClient> Facts);
+
+/// <summary>A verified fact surfaced in the glossary, joined with its source name.</summary>
+public sealed record GlossaryFactClient(
+    Guid SourceId,
+    string SourceName,
+    string ConceptKey,
+    string Value,
+    string SourceSpan,
+    int? PageNumber,
+    int? OffsetInPage);
 public sealed record UploadClientResult(
     bool Uploaded,
     bool RagsIngested,

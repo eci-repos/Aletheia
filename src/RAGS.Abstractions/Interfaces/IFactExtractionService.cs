@@ -14,5 +14,6 @@ public interface IFactExtractionService
         Guid sourceId,
         string text,
         IReadOnlyList<TextPage>? pages,
+        string? templateName = null,
         CancellationToken cancellationToken = default);
 }

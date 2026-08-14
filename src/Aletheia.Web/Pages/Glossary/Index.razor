@@ -1,0 +1,165 @@
+@page "/glossary"
+@inject RepositoryApiClient ApiClient
+@inject IJSRuntime JS
+
+<PageTitle>Glossary - Aletheia</PageTitle>
+
+<h1>Glossary</h1>
+<p class="text-muted">
+    The canonical lexicon for this repository: concepts, their aliases, and verified facts extracted
+    from the sources. Every fact is grounded — its value is verifiable in the source document.
+</p>
+
+@if (_glossary is null)
+{
+    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+    <span class="ms-2">Loading glossary…</span>
+}
+else
+{
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <label class="form-label mb-0" for="template-filter">Template</label>
+        <select id="template-filter" class="form-select form-select-sm w-auto" @bind="_template" @bind:after="LoadAsync">
+            <option value="">All templates</option>
+            @foreach (var scope in _templateScopes)
+            {
+                <option value="@scope">@scope</option>
+            }
+        </select>
+        <span class="ms-auto d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" disabled="@_exporting" @onclick="ExportCsvAsync">
+                @(_exporting ? "Exporting…" : "Download CSV")
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@_exporting" @onclick="ExportJsonAsync">
+                @(_exporting ? "Exporting…" : "Download JSON")
+            </button>
+        </span>
+    </div>
+
+    @if (_glossary.Concepts.Count == 0)
+    {
+        <div class="alert alert-info">No concepts in the lexicon yet.</div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-lg-5">
+                <h5 class="mb-3">Concepts</h5>
+                @foreach (var concept in _glossary.Concepts)
+                {
+                    <div class="card mb-2">
+                        <div class="card-body py-2">
+                            <h6 class="card-title mb-1">
+                                @concept.Label
+                                <span class="badge bg-light text-dark border">@concept.Key</span>
+                            </h6>
+                            @if (!string.IsNullOrWhiteSpace(concept.ValuePattern))
+                            {
+                                <div class="small text-muted">Value pattern: @concept.ValuePattern</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(concept.TemplateScope))
+                            {
+                                <div class="small text-muted">Template: @concept.TemplateScope</div>
+                            }
+                            @if (concept.Aliases is { Count: > 0 })
+                            {
+                                <div class="small mt-1">
+                                    @foreach (var alias in concept.Aliases)
+                                    {
+                                        <span class="badge bg-info text-dark me-1">@alias</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="col-lg-7">
+                <h5 class="mb-3">Verified facts</h5>
+                @if (_glossary.Facts.Count == 0)
+                {
+                    <div class="alert alert-info">No verified facts yet. Re-ingest a source to extract facts.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Concept</th>
+                                    <th>Value</th>
+                                    <th>Source</th>
+                                    <th>Page</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var fact in _glossary.Facts)
+                                {
+                                    <tr>
+                                        <td>@fact.ConceptKey</td>
+                                        <td>@fact.Value</td>
+                                        <td>@fact.SourceName</td>
+                                        <td>@(fact.PageNumber?.ToString() ?? "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private GlossaryClientResponse? _glossary;
+    private IReadOnlyList<string> _templateScopes = Array.Empty<string>();
+    private string _template = string.Empty;
+    private bool _exporting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load the full glossary once so the template filter lists every scope, then let the
+        // dropdown re-fetch server-side (the API filters concepts + facts consistently).
+        _glossary = await ApiClient.GetGlossaryAsync();
+        _templateScopes = _glossary?.Concepts
+            .Select(c => c.TemplateScope)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
+    }
+
+    private async Task LoadAsync()
+    {
+        _glossary = await ApiClient.GetGlossaryAsync(string.IsNullOrWhiteSpace(_template) ? null : _template);
+    }
+
+    private Task ExportCsvAsync() => ExportAsync("csv");
+
+    private Task ExportJsonAsync() => ExportAsync("json");
+
+    private async Task ExportAsync(string format)
+    {
+        if (_exporting)
+        {
+            return;
+        }
+
+        _exporting = true;
+        try
+        {
+            var stream = await ApiClient.ExportGlossaryAsync(format, string.IsNullOrWhiteSpace(_template) ? null : _template);
+            if (stream is not null)
+            {
+                var fileName = format == "csv" ? "lexicon-glossary.csv" : "lexicon-glossary.json";
+                using var streamRef = new DotNetStreamReference(stream);
+                await JS.InvokeVoidAsync("downloadFileFromStream", fileName, streamRef);
+            }
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+}

@@ -13,11 +13,20 @@ public interface ILexiconRepository
 
     Task<Result> UpsertConceptAsync(LexiconConcept concept, CancellationToken cancellationToken = default);
 
+    Task<Result> DeleteConceptAsync(string key, CancellationToken cancellationToken = default);
+
     Task<Result> SaveFactsAsync(Guid sourceId, IReadOnlyList<DocumentFact> facts, CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<DocumentFact>>> GetFactsAsync(Guid sourceId, CancellationToken cancellationToken = default);
 
+    /// <summary>All verified facts across sources — the end-user glossary surface.</summary>
+    Task<Result<IReadOnlyList<DocumentFact>>> GetAllFactsAsync(CancellationToken cancellationToken = default);
+
     Task<Result> RecordUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default);
 
+    /// <summary>Pending (unreviewed) unmapped terms for the admin governance surface.</summary>
     Task<Result<IReadOnlyList<UnmappedTerm>>> GetUnmappedTermsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Mark an unmapped term resolved (confirmed as an alias or dismissed) so it leaves the review queue.</summary>
+    Task<Result> ResolveUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default);
 }

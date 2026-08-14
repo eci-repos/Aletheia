@@ -15,7 +15,8 @@ public static class FactVerifier
         IReadOnlyList<ProposedFact> proposals,
         string text,
         IReadOnlyList<TextPage>? pages,
-        IReadOnlyList<LexiconConcept> concepts)
+        IReadOnlyList<LexiconConcept> concepts,
+        string? templateName = null)
     {
         var facts = new List<DocumentFact>();
         if (proposals is null || proposals.Count == 0 || string.IsNullOrWhiteSpace(text))
@@ -23,10 +24,14 @@ public static class FactVerifier
             return facts;
         }
 
-        var conceptsByKey = concepts
+        // Sprint 71: template_scope enforcement — a scoped concept applies only to documents of that
+        // template; unscoped concepts apply everywhere. A document with no template (Uncategorized)
+        // sees only the unscoped concepts.
+        var applicable = concepts.Where(c => IsApplicable(c, templateName)).ToList();
+        var conceptsByKey = applicable
             .Where(c => !string.IsNullOrWhiteSpace(c.Key))
             .ToDictionary(c => c.Key, c => c, StringComparer.OrdinalIgnoreCase);
-        var conceptsByAlias = concepts
+        var conceptsByAlias = applicable
             .SelectMany(c => (c.Aliases ?? Array.Empty<string>()).Select(a => (Alias: a, Concept: c)))
             .Where(x => !string.IsNullOrWhiteSpace(x.Alias))
             .ToDictionary(x => x.Alias, x => x.Concept, StringComparer.OrdinalIgnoreCase);
@@ -69,6 +74,23 @@ public static class FactVerifier
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Whether a concept applies to a document with the given canonical template name. Unscoped
+    /// concepts (no <c>TemplateScope</c>) apply everywhere; a scoped concept applies only when the
+    /// document's template matches its scope (case-insensitive). Shared by the verifier and the
+    /// unmapped-term recorder so both see the same concept set.
+    /// </summary>
+    public static bool IsApplicable(LexiconConcept concept, string? templateName)
+    {
+        if (string.IsNullOrWhiteSpace(concept.TemplateScope))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(templateName)
+            && string.Equals(concept.TemplateScope, templateName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static LexiconConcept? ResolveConcept(

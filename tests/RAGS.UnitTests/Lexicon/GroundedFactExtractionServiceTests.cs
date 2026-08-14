@@ -101,6 +101,43 @@ public class GroundedFactExtractionServiceTests
         Assert.Empty(repository.SavedFacts);
     }
 
+    [Fact]
+    public async Task ExtractAsync_applies_template_scope_to_concept_matching()
+    {
+        var scoped = new[]
+        {
+            new LexiconConcept
+            {
+                Key = "due_date",
+                Label = "Due date",
+                ValuePattern = "date",
+                TemplateScope = "RFP",
+                Aliases = new[] { "due date", "proposal due date" }
+            }
+        };
+        var repository = new FakeLexiconRepository(scoped);
+        var proposer = new FakeProposer(new[]
+        {
+            new ProposedFact
+            {
+                ConceptHint = "due_date",
+                Value = "February 24, 2022",
+                SourceSpan = "Proposal Due Date: February 24, 2022"
+            }
+        });
+        var service = new GroundedFactExtractionService(repository, proposer);
+
+        // The RFP-scoped concept does not apply to a Contract document: the verifiable value is
+        // still stored as raw text (fidelity gate passes) and the hint is surfaced as unmapped.
+        var result = await service.ExtractAsync(Guid.NewGuid(), "Proposal Due Date: February 24, 2022", null, "Contract");
+
+        Assert.True(result.IsSuccess);
+        var fact = Assert.Single(result.Value!);
+        Assert.Equal("due_date", fact.ConceptKey);
+        Assert.Equal("February 24, 2022", fact.Value);
+        Assert.Contains("due_date", repository.UnmappedTerms);
+    }
+
     private sealed class FakeLexiconRepository : ILexiconRepository
     {
         private readonly IReadOnlyList<LexiconConcept> _concepts;
@@ -127,6 +164,15 @@ public class GroundedFactExtractionServiceTests
 
         public Task<Result<IReadOnlyList<DocumentFact>>> GetFactsAsync(Guid sourceId, CancellationToken cancellationToken = default)
             => Task.FromResult(Result<IReadOnlyList<DocumentFact>>.Success(SavedFacts));
+
+        public Task<Result<IReadOnlyList<DocumentFact>>> GetAllFactsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Result<IReadOnlyList<DocumentFact>>.Success(SavedFacts));
+
+        public Task<Result> DeleteConceptAsync(string key, CancellationToken cancellationToken = default)
+            => Task.FromResult(Result.Success());
+
+        public Task<Result> ResolveUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Result.Success());
 
         public Task<Result> RecordUnmappedTermAsync(string term, Guid sourceId, CancellationToken cancellationToken = default)
         {

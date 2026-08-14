@@ -13,5 +13,6 @@ Fully-implemented backlog files are moved here from `docs/backlog/` so the activ
 | `Query-Expansion-for-Acronyms.md` | All 3 items implemented (Sprint 68) — archived 2026-08-13 |
 | `Ingestion-Status-in-Repository-Browser.md` | All 4 items implemented (Sprint 69) — archived 2026-08-13 |
 | `Normalized-Lexicon-for-Term-Resolution.md` | All 4 items implemented (Sprint 70) — archived 2026-08-14 |
+| `Lexicon-Governance-and-Glossary-Surface.md` | All 5 items implemented (Sprint 71) — archived 2026-08-14 |
 
 Keep the historical file contents untouched except for the status header: the promotion history (sprint, commit, date) is the record of how each item was delivered.

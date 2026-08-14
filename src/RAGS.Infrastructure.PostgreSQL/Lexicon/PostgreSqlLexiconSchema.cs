@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS lexicon_unmapped_terms (
     term text NOT NULL,
     source_id uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
+    status text NOT NULL DEFAULT 'pending',
+    resolved_at timestamptz NULL,
     PRIMARY KEY (term, source_id)
 );
 ";

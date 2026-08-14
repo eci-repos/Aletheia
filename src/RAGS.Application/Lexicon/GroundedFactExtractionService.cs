@@ -31,6 +31,7 @@ public sealed class GroundedFactExtractionService : IFactExtractionService
         Guid sourceId,
         string text,
         IReadOnlyList<TextPage>? pages,
+        string? templateName = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -42,14 +43,18 @@ public sealed class GroundedFactExtractionService : IFactExtractionService
             }
 
             var concepts = conceptsResult.Value ?? Array.Empty<LexiconConcept>();
-            var proposalsResult = await _proposer.ProposeAsync(text, concepts, cancellationToken).ConfigureAwait(false);
+            // Sprint 71: template_scope enforcement — scoped concepts apply only to documents of that
+            // template. The same filtered set feeds the verifier and the unmapped-term recorder so a
+            // scoped concept's aliases never suppress unmapped hints in a document of another template.
+            var applicable = concepts.Where(c => FactVerifier.IsApplicable(c, templateName)).ToList();
+            var proposalsResult = await _proposer.ProposeAsync(text, applicable, cancellationToken).ConfigureAwait(false);
             if (proposalsResult.IsFailure)
             {
                 return Result<IReadOnlyList<DocumentFact>>.Failure(proposalsResult.Error ?? "Fact proposal failed.");
             }
 
             var proposals = proposalsResult.Value ?? Array.Empty<ProposedFact>();
-            var facts = FactVerifier.Verify(proposals, text, pages, concepts);
+            var facts = FactVerifier.Verify(proposals, text, pages, applicable, templateName);
             foreach (var fact in facts)
             {
                 fact.SourceId = sourceId;
@@ -64,7 +69,7 @@ public sealed class GroundedFactExtractionService : IFactExtractionService
                 }
             }
 
-            await RecordUnmappedTermsAsync(sourceId, proposals, concepts, cancellationToken).ConfigureAwait(false);
+            await RecordUnmappedTermsAsync(sourceId, proposals, applicable, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Grounded fact extraction for {SourceId}: {Proposed} proposed, {Verified} verified.",

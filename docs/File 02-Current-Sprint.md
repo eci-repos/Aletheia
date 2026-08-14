@@ -51,6 +51,8 @@ Close the governance loop Sprint 70 opened: a glossary/lexicon for a given docum
 
 **Post-sprint (2026-08-14):** user-reported gaps fixed — (1) `/lexicon` admin page gains an **Edit** button per concept (pre-fills the form so a synonym can be added to an existing concept without clobbering its alias set — the upsert is full-replace) + a **New concept** reset; (2) `LexiconExpander` now matches **plural forms** of aliases ("end dates" → "end date"); (3) `due_date` seed gains the `end date` alias (`LexiconSeedData` + `init.sql` + migration). RAGS 345 / Web 91.
 
+**Operational incident (2026-08-14):** the Repository Browser flipped all three documents from **Ingested** to **Not ingested** after an API rebuild. Diagnosis: `embeddings` + `document_facts` were genuinely empty (metadata/wiki/taxonomy/ontology intact) — the signature of a re-ingestion that deleted old data but never wrote new data. Root cause: the ingestion job queue is **in-memory** and ingestion is **delete-then-insert**, so an API restart mid-job loses the queue and leaves the source empty. Recovered by running a RAGS repair (`POST /api/jobs/rags/repair`) — all 3 documents re-ingested (embeddings 46/53/39 chunks; facts restored incl. `due_date` ×4). **Follow-up:** proposed backlog item `docs/backlog/Ingestion-Guard-Rails-Durable-Jobs-and-Self-Healing.md` (durable job queue, write-new-then-swap ingestion, startup reconciliation sweep) — not yet authorized.
+
 ---
 
 ## Sprint 70 progress log (2026-08-14) — completed

@@ -49,6 +49,8 @@ Close the governance loop Sprint 70 opened: a glossary/lexicon for a given docum
 
 **Residual manual (user-side):** `docker compose up -d --build` (fresh DB gets the `status`/`resolved_at` columns from init.sql; an existing deployment needs the migration `2026-08-14-lexicon-unmapped-status.sql` applied once, or the API's schema initializer self-heals at startup). Then hard-refresh `/glossary` (and `/lexicon` for the admin surface) for a live visual check.
 
+**Post-sprint (2026-08-14):** user-reported gaps fixed — (1) `/lexicon` admin page gains an **Edit** button per concept (pre-fills the form so a synonym can be added to an existing concept without clobbering its alias set — the upsert is full-replace) + a **New concept** reset; (2) `LexiconExpander` now matches **plural forms** of aliases ("end dates" → "end date"); (3) `due_date` seed gains the `end date` alias (`LexiconSeedData` + `init.sql` + migration). RAGS 345 / Web 91.
+
 ---
 
 ## Sprint 70 progress log (2026-08-14) — completed

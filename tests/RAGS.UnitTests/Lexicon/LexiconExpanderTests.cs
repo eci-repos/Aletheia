@@ -11,7 +11,7 @@ public class LexiconExpanderTests
         {
             Key = "due_date",
             Label = "Due date",
-            Aliases = new[] { "due date", "bid due", "proposal due date", "submission due date", "deadline" }
+            Aliases = new[] { "due date", "bid due", "proposal due date", "submission due date", "deadline", "end date" }
         }
     };
 
@@ -60,11 +60,30 @@ public class LexiconExpanderTests
     }
 
     [Fact]
-    public void Expand_does_not_expand_inside_a_longer_word()
+    public void Expand_matches_plural_form_of_an_alias()
     {
-        // "deadline" is an alias; "deadlines" must not trigger a partial-word match.
+        // "deadline" is an alias; "deadlines" (its plural) must trigger expansion.
         var expanded = LexiconExpander.Expand("The deadlines are firm.", Concepts);
 
-        Assert.Equal("The deadlines are firm.", expanded);
+        Assert.Contains("deadline", expanded);
+    }
+
+    [Fact]
+    public void Expand_matches_plural_form_of_a_multi_word_alias()
+    {
+        // The user-reported case: "end dates" must map to the "end date" alias of due_date.
+        var expanded = LexiconExpander.Expand("list the end dates of RFPs", Concepts);
+
+        Assert.Contains("end date", expanded);
+        Assert.Contains("Due date", expanded);
+    }
+
+    [Fact]
+    public void Expand_does_not_expand_inside_a_longer_non_plural_word()
+    {
+        // "deadline" is an alias; "deadlined" is neither the alias nor its plural.
+        var expanded = LexiconExpander.Expand("The project was deadlined.", Concepts);
+
+        Assert.Equal("The project was deadlined.", expanded);
     }
 }

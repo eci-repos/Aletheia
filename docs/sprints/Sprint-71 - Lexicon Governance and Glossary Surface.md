@@ -91,3 +91,14 @@ The connective tissue is **`template_scope` enforcement**: a concept with a temp
 - Foundation 55 unchanged; `dotnet build Aletheia.slnx` succeeds (0 errors). Docs updated; backlog item archived.
 
 **Residual manual (user-side):** `docker compose up -d --build` (fresh DB gets the `status`/`resolved_at` columns from init.sql; an existing deployment needs the migration `2026-08-14-lexicon-unmapped-status.sql` applied once, or the API's schema initializer self-heals at startup). Then hard-refresh `/glossary` and `/lexicon` for a live visual check.
+
+---
+
+## Post-sprint (2026-08-14): admin edit flow + plural-tolerant expansion
+
+User-reported gaps after the sprint shipped:
+
+1. **"list the end dates of RFPs" did not map to `due_date`.** Two causes: "end date" was not an alias of `due_date` in the seed, and the `LexiconExpander` matched aliases with exact word boundaries — so even a seeded "end date" would not match the plural "end dates". Fixed: `due_date` gains the `end date` alias in `LexiconSeedData` + `init.sql` + the migration, and `LexiconExpander.BuildAliasRegex` now also matches each alias's plural form (append `s` to the last word unless it already ends in `s`), so "end dates" / "due dates" / "deadlines" all trigger expansion. RAGS 345 (+2: plural single-word + plural multi-word cases; the old "deadlines must not expand" test was inverted to the new intended behavior).
+2. **Admin could not add a synonym to an existing concept.** The `/lexicon` page was add-only: concept cards had only a Delete button, the form was always blank, and the upsert is full-replace of the alias set — so there was no way to target an existing concept without retyping (and clobbering) its aliases. Fixed: each concept card gains an **Edit** button that pre-fills the form (key, label, value pattern, template scope, aliases joined by comma) with an inline "replaces the current alias set" hint and a **New concept** reset button. Web 91 (+1 binding test).
+
+**Residual manual (user-side):** rebuild + hard-refresh `/lexicon`; to make "end dates" work on an existing deployment, either add `end date` as an alias to `due_date` via the new Edit flow (recommended — it also exercises the fix) or re-apply the seed. Then re-ask "list the end dates of RFPs".

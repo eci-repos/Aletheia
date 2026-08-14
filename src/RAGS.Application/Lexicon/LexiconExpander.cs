@@ -44,7 +44,26 @@ public static class LexiconExpander
     private static Regex BuildAliasRegex(IReadOnlyList<string> aliases)
     {
         // Longest-first alternation so "submission due date" wins over "due date" at the same position.
-        var pattern = string.Join("|", aliases.OrderByDescending(a => a.Length).Select(Regex.Escape));
+        // Each alias also matches its plural form ("end date" → "end dates") so a query asking for
+        // "end dates" still triggers the concept.
+        var variants = aliases
+            .SelectMany(a => new[] { a }.Concat(PluralVariants(a)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(v => v.Length)
+            .Select(Regex.Escape);
+        var pattern = string.Join("|", variants);
         return new Regex($@"\b({pattern})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    }
+
+    private static IEnumerable<string> PluralVariants(string alias)
+    {
+        var lastSpace = alias.LastIndexOf(' ');
+        var lastWord = lastSpace >= 0 ? alias[(lastSpace + 1)..] : alias;
+        if (lastWord.Length == 0 || lastWord.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+        {
+            yield break;
+        }
+
+        yield return lastSpace >= 0 ? $"{alias[..lastSpace]} {lastWord}s" : $"{alias}s";
     }
 }

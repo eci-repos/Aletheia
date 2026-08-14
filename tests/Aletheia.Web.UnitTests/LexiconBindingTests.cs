@@ -85,6 +85,16 @@ public class LexiconBindingTests
     }
 
     [Fact]
+    public void Lexicon_admin_page_supports_editing_an_existing_concept()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        Assert.Contains("EditConceptAsync(concept)", source);
+        Assert.Contains("EditConceptAsync", source);
+        Assert.Contains("_aliasesText = concept.Aliases", source);
+    }
+
+    [Fact]
     public void Nav_menu_has_admin_lexicon_entry()
     {
         var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/NavMenu.razor"));

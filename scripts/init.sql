@@ -203,7 +203,7 @@ INSERT INTO lexicon_aliases (concept_key, alias) VALUES
     ('due_date', 'due date'), ('due_date', 'bid due'), ('due_date', 'proposal due date'),
     ('due_date', 'submission due date'), ('due_date', 'deadline'), ('due_date', 'closing date'),
     ('due_date', 'submission deadline'), ('due_date', 'response due'), ('due_date', 'bid deadline'),
-    ('due_date', 'proposal deadline'),
+    ('due_date', 'proposal deadline'), ('due_date', 'end date'),
     ('budget', 'budget'), ('budget', 'total budget'), ('budget', 'funding amount'),
     ('budget', 'contract value'), ('budget', 'award amount'), ('budget', 'maximum amount'),
     ('budget', 'ceiling'),

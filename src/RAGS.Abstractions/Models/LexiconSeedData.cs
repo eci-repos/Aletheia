@@ -18,7 +18,8 @@ public static class LexiconSeedData
             Aliases = new[]
             {
                 "due date", "bid due", "proposal due date", "submission due date", "deadline",
-                "closing date", "submission deadline", "response due", "bid deadline", "proposal deadline"
+                "closing date", "submission deadline", "response due", "bid deadline", "proposal deadline",
+                "end date"
             }
         },
         new()

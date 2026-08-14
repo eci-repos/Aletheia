@@ -35,6 +35,12 @@ public interface IIngestionJobService
     IReadOnlyList<IngestionJobSnapshot> List(int take = 50);
 
     IngestionJobSnapshot? Get(Guid jobId);
+
+    /// <summary>True when an active (queued or running) ingestion job is still producing embeddings
+    /// for <paramref name="sourceId"/> — including global re-embed / RAGS-repair jobs that
+    /// reprocess every registered document. Used by the Repository Browser to show a source as
+    /// "Processing" while its embeddings are being (re)written (Sprint 69 post-sprint).</summary>
+    bool HasActiveIngestion(Guid sourceId);
 }
 
 public enum IngestionJobEngine
@@ -70,6 +76,16 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(2);
     private const int MaxJobs = 200;
+
+    /// <summary>Job kinds that (re)write a specific source's embeddings/chunks in the vector store.
+    /// Global jobs (re-embed, RAGS repair) are handled separately in <see cref="HasActiveIngestion"/>.</summary>
+    private static readonly HashSet<string> SourceIngestionKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "UploadIngestion",
+        "RagsIngestion",
+        "GraphRagIngestion",
+        "LazyGraphRagIngestion"
+    };
 
     private readonly Channel<IngestionJobWorkItem> _queue = Channel.CreateUnbounded<IngestionJobWorkItem>();
     private readonly ConcurrentDictionary<Guid, IngestionJobState> _jobs = new();
@@ -209,6 +225,30 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
         return _jobs.TryGetValue(jobId, out var state)
             ? state.ToSnapshot()
             : null;
+    }
+
+    public bool HasActiveIngestion(Guid sourceId)
+    {
+        foreach (var job in _jobs.Values)
+        {
+            if (!job.IsActive)
+            {
+                continue;
+            }
+
+            if (job.SourceId == sourceId && SourceIngestionKinds.Contains(job.Kind))
+            {
+                return true;
+            }
+
+            // Global re-embed / RAGS-repair jobs reprocess every registered document.
+            if (job.SourceId == Guid.Empty && job.Kind is "ReembedIngestion" or "RagsRepair")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

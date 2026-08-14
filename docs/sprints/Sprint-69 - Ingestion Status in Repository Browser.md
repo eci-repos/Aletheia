@@ -70,3 +70,17 @@ Give the Repository Browser a per-file **ingestion status** so a user can see at
 - RAGS 302 / Foundation 55 unchanged; `dotnet build Aletheia.slnx` succeeds (0 errors).
 
 **Residual manual (user-side):** hard-refresh `/browse`; the CMP 2026 – 3. RFP Analysis.docx row should now show an amber **Not ingested** badge, confirming the diagnosis that its ingestion job failed. Re-upload it (or run a repair job) to turn it green.
+
+---
+
+## Post-Sprint 69 refinement — "Processing" state for mid-ingestion sources (2026-08-14)
+
+Per a project-owner review, the binary badge (green **Ingested** / amber **Not ingested**) was misleading for a source whose ingestion job is **still running**: it turned green the moment the first embedding was written, so a mid-flight file with partial chunks read as "complete". The badge is now **three-state**, and the tooltips state their scope honestly:
+
+- **Processing** (blue `text-bg-info`): an active (queued or running) ingestion job is still producing embeddings for the source. Signal = `IIngestionJobService.HasActiveIngestion(sourceId)` (new interface member), which matches active **upload/rag/graph/lazy-graph content jobs** for the source **and** treats the **global** re-embed (`ReembedIngestion`) and RAGS-repair (`RagsRepair`) jobs as in-flight for every source (they reprocess all registered documents).
+- **Ingested** (green `text-bg-success`): no active job and ≥1 embedding — ground truth stays the durable embeddings table.
+- **Not ingested** (amber `text-bg-warning`): no active job and 0 embeddings.
+
+`SearchController` stamps `FileMetadata.IsProcessing` (bool) alongside `ChunkCount`; `Browse.razor` renders the three states. Tooltips now read "…embeddings ready (status reflects embeddings only)" / "…Status reflects embeddings only." — the badge verifies the **embeddings** half of "fully processed"; graph/taxonomy/wiki-brief resource readiness is **not** yet part of the check (documented follow-up, needs a per-source graph-node count).
+
+**Verification:** Repository 138 (+1 — `SearchControllerTests.Search_marks_processing_when_ingestion_job_active`) / Web 81 (+2 — `BrowseBindingTests` Processing badge + embeddings-only scope tooltip) / RAGS 302 (the two `IIngestionJobService` fakes updated for the new member). Build 0 errors.

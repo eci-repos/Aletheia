@@ -31,6 +31,24 @@ public class BrowseBindingTests
         Assert.Contains("chunk(s) embedded", source);
     }
 
+    [Fact]
+    public void Browse_renders_processing_badge_for_active_ingestion()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
+
+        Assert.Contains("file.IsProcessing", source);
+        Assert.Contains("text-bg-info", source);
+        Assert.Contains(">Processing</span>", source);
+    }
+
+    [Fact]
+    public void Browse_ingestion_badge_states_embeddings_only_scope()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
+
+        Assert.Contains("reflects embeddings only", source);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

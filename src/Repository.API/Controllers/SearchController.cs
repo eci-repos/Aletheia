@@ -1,5 +1,6 @@
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.Repository.Abstractions.Models;
+using Aletheia.Repository.API.Services;
 using Aletheia.Repository.Domain.UseCases;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,11 +14,13 @@ public class SearchController : ControllerBase
 {
     private readonly ISearchUseCase _searchUseCase;
     private readonly IVectorStore _vectorStore;
+    private readonly IIngestionJobService _ingestionJobs;
 
-    public SearchController(ISearchUseCase searchUseCase, IVectorStore vectorStore)
+    public SearchController(ISearchUseCase searchUseCase, IVectorStore vectorStore, IIngestionJobService ingestionJobs)
     {
         _searchUseCase = searchUseCase ?? throw new ArgumentNullException(nameof(searchUseCase));
         _vectorStore = vectorStore ?? throw new ArgumentNullException(nameof(vectorStore));
+        _ingestionJobs = ingestionJobs ?? throw new ArgumentNullException(nameof(ingestionJobs));
     }
 
     [HttpGet]
@@ -61,6 +64,10 @@ public class SearchController : ControllerBase
         foreach (var file in files)
         {
             file.ChunkCount = counts.Value.TryGetValue(file.Descriptor.FileId, out var count) ? count : 0;
+            // Sprint 69 post-sprint: an active ingestion job means the source is mid-flight
+            // (partial embeddings possible) — surface it as "Processing" rather than a premature
+            // green "Ingested". Ground truth for the terminal states stays the embeddings.
+            file.IsProcessing = _ingestionJobs.HasActiveIngestion(file.Descriptor.FileId);
         }
     }
 }

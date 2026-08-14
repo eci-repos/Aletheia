@@ -184,6 +184,11 @@ public sealed class WikiControllerInternalSearchGateTests
             return null;
         }
 
+        public bool HasActiveIngestion(Guid sourceId)
+        {
+            return false;
+        }
+
         private static IngestionJobSnapshot CreateJob(Guid sourceId, string kind)
         {
             var now = DateTimeOffset.UtcNow;

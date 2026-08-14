@@ -69,6 +69,11 @@ public sealed class FileMetadata
     /// <summary>True when the source has at least one embedding — i.e. ingestion completed and the document is retrievable.</summary>
     public bool Ingested => ChunkCount is > 0;
 
+    /// <summary>True while an active ingestion job is still producing embeddings for this source
+    /// (Sprint 69 post-sprint — the Repository Browser "Processing" state, so a mid-ingestion file
+    /// with partial chunks is not shown as a premature "Ingested"). Populated by the search path.</summary>
+    public bool IsProcessing { get; set; }
+
     private static IReadOnlyList<string>? NormalizeThemes(IReadOnlyList<string>? theme)
     {
         if (theme is null || theme.Count == 0)

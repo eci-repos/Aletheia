@@ -112,6 +112,11 @@ public sealed class JobsControllerTests
             return jobId == _job.JobId ? _job : null;
         }
 
+        public bool HasActiveIngestion(Guid sourceId)
+        {
+            return false;
+        }
+
         private static IngestionJobSnapshot CreateJob(Guid sourceId, string kind)
         {
             var now = DateTimeOffset.UtcNow;

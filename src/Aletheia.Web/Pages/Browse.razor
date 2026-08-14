@@ -50,13 +50,17 @@ else if (_results is not null)
                         <td>@file.SizeBytes bytes</td>
                         <td>@file.UploadedAt.ToString("g")</td>
                         <td>
-                            @if (file.Ingested)
+                            @if (file.IsProcessing)
                             {
-                                <span class="badge text-bg-success ingestion-badge" title="@file.ChunkCount chunk(s) embedded — retrievable">Ingested</span>
+                                <span class="badge text-bg-info ingestion-badge" title="@(file.ChunkCount > 0 ? $"{file.ChunkCount} chunk(s) embedded so far — the ingestion job is still running" : "Ingestion job in progress — no embeddings written yet")">Processing</span>
+                            }
+                            else if (file.Ingested)
+                            {
+                                <span class="badge text-bg-success ingestion-badge" title="@file.ChunkCount chunk(s) embedded — embeddings ready (status reflects embeddings only)">Ingested</span>
                             }
                             else
                             {
-                                <span class="badge text-bg-warning ingestion-badge" title="No embeddings found — the ingestion job may have failed or not completed">Not ingested</span>
+                                <span class="badge text-bg-warning ingestion-badge" title="No embeddings found — the ingestion job may have failed or not completed. Status reflects embeddings only.">Not ingested</span>
                             }
                         </td>
                         <td>

@@ -44,6 +44,10 @@ Give the Repository Browser a per-file **ingestion status** so a user can see at
 
 **Residual manual (user-side):** hard-refresh `/browse`; the CMP 2026 – 3. RFP Analysis.docx row should now show an amber **Not ingested** badge, confirming the diagnosis that its ingestion job failed. Re-upload it (or run a repair job) to turn it green.
 
+### Post-Sprint 69 — "Processing" state for mid-ingestion sources (2026-08-14)
+
+Per a project-owner review, the Ingestion column badge is now **three-state**: blue **Processing** (an active ingestion job — including the global re-embed/repair jobs — is still writing embeddings; new `IIngestionJobService.HasActiveIngestion(sourceId)` + `FileMetadata.IsProcessing`, stamped by `SearchController`), green **Ingested** (no active job, ≥1 embedding), amber **Not ingested** (no active job, 0 embeddings). Tooltips state the embeddings-only scope (graph/taxonomy/wiki-brief readiness is a documented follow-up). Repository 138 (+1) / Web 81 (+2) / RAGS 302 green; build 0 errors.
+
 ---
 
 ## Sprint 68 progress log (2026-08-13) — completed

@@ -129,3 +129,20 @@ code {
 .list-group-item h6 {
     margin-bottom: .15rem;
 }
+
+/* Sprint 74: a list/table that scrolls inside its own panel instead of growing the page.
+   A short list keeps its natural height (max-height, not height); a long one scrolls
+   internally. Put .list-scroll on a list's container, .table-scroll on a
+   table-responsive wrapper. Exceptions: Search Center results and the Document viewer
+   use whole-page scroll by design. */
+.list-scroll {
+    max-height: 70vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.table-scroll {
+    max-height: 70vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}

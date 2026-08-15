@@ -27,114 +27,136 @@
                     }
                     else
                     {
-                        @foreach (var concept in _concepts)
-                        {
-                            <div class="card mb-2">
-                                <div class="card-body py-2">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <h6 class="card-title mb-1">
-                                                @concept.Label
-                                                <span class="badge bg-light text-dark border">@concept.Key</span>
-                                            </h6>
-                                            <div class="small text-muted">
-                                                Value pattern: @(concept.ValuePattern ?? "text")
-                                                @if (!string.IsNullOrWhiteSpace(concept.TemplateScope))
-                                                {
-                                                    <span>· Template: @concept.TemplateScope</span>
-                                                }
-                                            </div>
-                                            @if (concept.Aliases is { Count: > 0 })
-                                            {
-                                                <div class="small mt-1">
-                                                    @foreach (var alias in concept.Aliases)
+                        <div class="list-scroll">
+                            @foreach (var concept in _concepts)
+                            {
+                                <div class="card mb-2">
+                                    <div class="card-body py-2">
+                                        <div class="d-flex justify-content-between align-items-start">
+                                            <div>
+                                                <h6 class="card-title mb-1">
+                                                    @concept.Label
+                                                    <span class="badge bg-light text-dark border">@concept.Key</span>
+                                                </h6>
+                                                <div class="small text-muted">
+                                                    Value pattern: @(concept.ValuePattern ?? "text")
+                                                    @if (!string.IsNullOrWhiteSpace(concept.TemplateScope))
                                                     {
-                                                        <span class="badge bg-info text-dark me-1">@alias</span>
+                                                        <span>· Template: @concept.TemplateScope</span>
                                                     }
                                                 </div>
-                                            }
-                                        </div>
-                                        <div class="d-flex gap-1">
-                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => EditConceptAsync(concept)">Edit</button>
-                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteConceptAsync(concept.Key)">Delete</button>
+                                                @if (concept.Aliases is { Count: > 0 })
+                                                {
+                                                    <div class="small mt-1">
+                                                        @foreach (var alias in concept.Aliases)
+                                                        {
+                                                            <span class="badge bg-info text-dark me-1">@alias</span>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                            <div class="d-flex gap-1">
+                                                <button class="btn btn-sm btn-outline-primary" @onclick="() => EditConceptAsync(concept)">Edit</button>
+                                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteConceptAsync(concept.Key)">Delete</button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        }
+                            }
+                        </div>
                     }
                 </div>
                 <div class="col-lg-5">
-                    <h5 class="mb-3">@(_editingKey is null ? "Add concept" : $"Edit concept: {_editingKey}")</h5>
-                    <div class="card">
-                        <div class="card-body">
-                            @if (_editingKey is not null)
-                            {
-                                <div class="alert alert-info py-1 small">
-                                    Editing an existing concept — the alias list below replaces the current set, so keep the
-                                    existing aliases and add the new one.
-                                </div>
-                            }
-                            <div class="mb-2">
-                                <label class="form-label" for="concept-key">Key</label>
-                                <input id="concept-key" class="form-control form-control-sm" @bind="_draft.Key" />
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label" for="concept-label">Label</label>
-                                <input id="concept-label" class="form-control form-control-sm" @bind="_draft.Label" />
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label" for="concept-pattern">Value pattern</label>
-                                <select id="concept-pattern" class="form-select form-select-sm" @bind="_draft.ValuePattern">
-                                    <option value="text">text</option>
-                                    <option value="date">date</option>
-                                    <option value="currency">currency</option>
-                                    <option value="number">number</option>
-                                </select>
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label" for="concept-scope">Template scope (optional)</label>
-                                <input id="concept-scope" class="form-control form-control-sm" @bind="_draft.TemplateScope" />
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label" for="concept-aliases">Aliases (comma-separated)</label>
-                                <input id="concept-aliases" class="form-control form-control-sm" @bind="_aliasesText" />
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary" disabled="@_saving" @onclick="SaveConceptAsync">
-                                    @(_saving ? "Saving…" : "Save concept")
-                                </button>
+                    <ul class="nav nav-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button type="button" class="nav-link @(_activeTab == LexiconTab.AddConcept ? "active" : "")" @onclick="() => ActivateTab(LexiconTab.AddConcept)">
+                                @(_editingKey is null ? "Add concept" : "Edit concept")
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button type="button" class="nav-link @(_activeTab == LexiconTab.Unmapped ? "active" : "")" @onclick="() => ActivateTab(LexiconTab.Unmapped)">
+                                Unmapped terms@(_unmapped.Count > 0 ? $" ({_unmapped.Count})" : "")
+                            </button>
+                        </li>
+                    </ul>
+
+                    @if (_activeTab == LexiconTab.AddConcept)
+                    {
+                        <h5 class="mb-3">@(_editingKey is null ? "Add concept" : $"Edit concept: {_editingKey}")</h5>
+                        <div class="card">
+                            <div class="card-body">
                                 @if (_editingKey is not null)
                                 {
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetFormAsync">New concept</button>
+                                    <div class="alert alert-info py-1 small">
+                                        Editing an existing concept — the alias list below replaces the current set, so keep the
+                                        existing aliases and add the new one.
+                                    </div>
+                                }
+                                <div class="mb-2">
+                                    <label class="form-label" for="concept-key">Key</label>
+                                    <input id="concept-key" class="form-control form-control-sm" @bind="_draft.Key" />
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" for="concept-label">Label</label>
+                                    <input id="concept-label" class="form-control form-control-sm" @bind="_draft.Label" />
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" for="concept-pattern">Value pattern</label>
+                                    <select id="concept-pattern" class="form-select form-select-sm" @bind="_draft.ValuePattern">
+                                        <option value="text">text</option>
+                                        <option value="date">date</option>
+                                        <option value="currency">currency</option>
+                                        <option value="number">number</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" for="concept-scope">Template scope (optional)</label>
+                                    <input id="concept-scope" class="form-control form-control-sm" @bind="_draft.TemplateScope" />
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" for="concept-aliases">Aliases (comma-separated)</label>
+                                    <input id="concept-aliases" class="form-control form-control-sm" @bind="_aliasesText" />
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary" disabled="@_saving" @onclick="SaveConceptAsync">
+                                        @(_saving ? "Saving…" : "Save concept")
+                                    </button>
+                                    @if (_editingKey is not null)
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="ResetFormAsync">New concept</button>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(_message))
+                                {
+                                    <div class="alert alert-@(_messageIsError ? "danger" : "success") mt-2 mb-0 py-1 small">@_message</div>
                                 }
                             </div>
-                            @if (!string.IsNullOrWhiteSpace(_message))
-                            {
-                                <div class="alert alert-@(_messageIsError ? "danger" : "success") mt-2 mb-0 py-1 small">@_message</div>
-                            }
                         </div>
-                    </div>
-
-                    <h5 class="mt-4 mb-3">Unmapped terms</h5>
-                    @if (_unmapped.Count == 0)
-                    {
-                        <div class="alert alert-info">No pending unmapped terms.</div>
                     }
                     else
                     {
-                        <ul class="list-group">
-                            @foreach (var term in _unmapped)
-                            {
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <strong>@term.Term</strong>
-                                        <div class="small text-muted">@term.SourceId</div>
-                                    </div>
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResolveTermAsync(term.Term, term.SourceId)">Dismiss</button>
-                                </li>
-                            }
-                        </ul>
+                        <h5 class="mb-3">Unmapped terms</h5>
+                        @if (_unmapped.Count == 0)
+                        {
+                            <div class="alert alert-info">No pending unmapped terms.</div>
+                        }
+                        else
+                        {
+                            <div class="list-scroll">
+                                <ul class="list-group">
+                                    @foreach (var term in _unmapped)
+                                    {
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <strong>@term.Term</strong>
+                                                <div class="small text-muted">@term.SourceId</div>
+                                            </div>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResolveTermAsync(term.Term, term.SourceId)">Dismiss</button>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
                     }
                 </div>
             </div>
@@ -146,6 +168,8 @@
 </AuthorizeView>
 
 @code {
+    private enum LexiconTab { AddConcept, Unmapped }
+
     private List<LexiconConcept> _concepts = new();
     private List<UnmappedTerm> _unmapped = new();
     private LexiconConcept _draft = new() { ValuePattern = "text" };
@@ -155,8 +179,11 @@
     private bool _saving;
     private string? _message;
     private bool _messageIsError;
+    private LexiconTab _activeTab = LexiconTab.Unmapped;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private void ActivateTab(LexiconTab tab) => _activeTab = tab;
 
     private async Task LoadAsync()
     {
@@ -169,6 +196,7 @@
     private void EditConceptAsync(LexiconConcept concept)
     {
         _editingKey = concept.Key;
+        _activeTab = LexiconTab.AddConcept;
         _draft = new LexiconConcept
         {
             Key = concept.Key,

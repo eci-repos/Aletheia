@@ -1,49 +1,62 @@
-# Sprint 73 - Ingestion Guard-Rails and Summaries Readability
+# Sprint 74 - UI List Scrolling and Collapsible Forms
 
 **Status:** Active (2026-08-15)
 
-Full authority: `docs/sprints/Sprint-73 - Ingestion Guard-Rails and Summaries Readability.md` (created 2026-08-15). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-74 - UI List Scrolling and Collapsible Forms.md` (created 2026-08-15). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 72 (Search UX Clarity — Semantic vs Summaries) is **complete, committed, and pushed** on `origin/master` (`0950dad`).
+Sprint 73 (Ingestion Guard-Rails and Summaries Readability) is **complete, committed, and pushed** on `origin/master` (`1cdb2d8`).
 
 ## Objective
 
-Two problems, one sprint:
+One coherent Web-only UI pass (no API/backend changes, no schema migration):
 
-1. **Ingestion becomes resilient.** An interrupted re-ingestion must never leave a source with zero embeddings, and anything already zeroed self-heals at startup. The user's framing: "ingestion once done is done and the status should not change just because the app was refreshed." Root cause: `RagsService.IngestAsync` **deletes** existing embeddings *before* chunking/embedding/writing the new ones, and the job queue is in-memory — an API rebuild mid-job leaves the source with zero embeddings and nothing ever re-checks it.
-2. **Summaries results read like a product, not a debug dump.** The new Summaries mode returns the right summaries, but (a) the cards are unreadable — raw content with internal scaffolding (`Community Summary: {name}` prefix, a `Structured GraphRAG Context` dump, a `Chunk 0 from source {guid}` footer) — and (b) **"View in document" does nothing**: community summaries carry a *synthetic* `SourceId` (`StableGuid("community-source", …)`) so the document page can't load it, and even for entity summaries the `chunk=` leading phrase is synthesized text that can't be found in the document, so the highlight silently fails.
+1. **Lists scroll inside their panel.** A list/table that outgrows the viewport scrolls within its own container instead of stretching the surrounding panel and the page — applied to every "list beside other content" surface: `/lexicon` Concepts + Unmapped terms, `/glossary` Concepts + Verified facts, `/wiki` index sidebar, `/governance` Roles / Audit / PII matches / Policies, `/taxonomy` Categories, `/ontology` Entities + Relationships.
+2. **The `/lexicon` "Add concept" form is collapsed by default.** The right column becomes an **Add concept / Unmapped terms** tab control; the form expands only when the admin clicks the tab (or **Edit** on a concept). No permanently-open form.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Write-new-then-swap ingestion:** `IVectorStore.ReplaceSourceAsync` (default delete-then-store impl so fakes keep compiling; `PgVectorStore` override = delete + insert in one transaction); `RagsService.IngestAsync` chunks + embeds first, then atomically replaces.
-2. **`last_ingested_at` marker:** `file_metadata` column (`init.sql` + idempotent migration `2026-08-15-last-ingested-at.sql`); `FileMetadata.LastIngestedAt`; `IMetadataRepository.SetLastIngestedAtAsync`; stamped on **completion** (success or no-text), never on failure.
-3. **Startup reconciliation sweep:** `GetSourcesMissingIngestionAsync` (zero embeddings AND `last_ingested_at IS NULL`); `IngestionJobService.EnqueueRagsRepairForSources` + `RagsRepairSources` work-item kind; `IngestionReconciliationService` `BackgroundService` (runs once after a short delay) registered in `Program.cs`.
-4. **Summaries readability:** `SummaryResultFormatter` (Web) — `IsSummary` (`summary-*`), `Body` (strips prefix + `Structured GraphRAG Context` dump), `ShowViewInDocument` (false for summaries). `SearchCenter.razor` — "Summaries" badge, markdown-rendered body via `MarkdownRenderer.ToHtml`, **Sources** list, "View in document" hidden on summary cards, `Chunk N from source <guid>` footer dropped. Backend untouched.
-5. **Tests + docs:** RAGS + Repository + Web suites green; build 0 errors; docs updated; backlog item archived (item 1 durable queue explicitly deferred).
+1. **Scrollable-list utilities:** `.list-scroll` / `.table-scroll` (`max-height: 70vh; overflow-y: auto; overscroll-behavior: contain;`) in `wwwroot/css/app.css`.
+2. **`/lexicon` tab control + collapsible Add concept:** `nav-tabs` control (Add concept / Unmapped terms), form collapsed by default (default tab = Unmapped terms), `EditConceptAsync` auto-switches to the form tab, Concepts + Unmapped lists scrollable.
+3. **Apply to similar pages:** Glossary (Concepts + facts table), Wiki (`.wiki-index` sidebar max-height), Governance (Roles/Audit/PII/Policies), Taxonomy (Categories), Ontology (Entities + Relationships).
+4. **Tests + docs:** Web binding tests (Lexicon tab/collapse + `ListScrollBindingTests`); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived.
 
 ## Acceptance Criteria
 
-- An interrupted re-ingestion leaves the previous embeddings intact (write-new-then-swap); a source is never left with zero embeddings by a partial ingest.
-- On API startup, documents with zero embeddings and no `last_ingested_at` are auto-queued for repair and re-ingested — the "Not ingested" flip becomes self-correcting.
-- A completed ingestion stamps `last_ingested_at`; a failed one stays NULL so the sweep retries it.
-- Summaries search results render a "Summaries" badge, a readable markdown body, a Sources list, and **no** dead "View in document" button; Semantic results keep the working "View in document" link.
+- On `/lexicon`, the Add concept form is **not** visible on page load; the admin expands it via the **Add concept** tab or by clicking **Edit** on a concept (which pre-fills the form). Unmapped terms live in their own tab.
+- A long Concepts / Unmapped / Glossary / Governance / Taxonomy / Ontology / Wiki-index list scrolls inside its panel; a short list keeps its natural height (no wasted empty scroll area).
+- No API, backend, or schema changes — Web-only.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- **Durable job queue (backlog item 1)** — explicitly deferred. The in-memory queue stays; the write-new-then-swap + reconciliation sweep make the *data* survive an interruption even though the *job* does not.
-- Job stage tracking + resume (backlog item 4).
-- Changing the ingestion pipeline's fidelity guarantees (Sprint 70) — the guard-rails make ingestion *resilient*, not *different*.
-- Changing how summaries are produced (GraphRAG ingest-time vs LazyGraphRAG query-time behavior is untouched).
-- Making the job queue distributed or multi-host.
+- Bootstrap collapse/tab JS widgets (tab/collapse behavior is Blazor state — conditional render, testable without JS interop).
+- Re-architecting pages that already constrain their own scroll regions (Copilot, Graph Explorer).
+- Making paginated or bounded lists scroll (Browse, Metadata picker, Dashboard, Upload).
+- Turning Search Center results or the Document viewer into internal scroll regions (whole-page scroll is their reading model).
+- Any backend, controller, or schema change.
 
 ---
 
 ## Progress
 
+### Sprint 74 — UI list scrolling + collapsible forms (2026-08-15)
+
+**Implemented.** See the Sprint 74 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (utilities):** `.list-scroll` / `.table-scroll` (`max-height: 70vh; overflow-y: auto; overscroll-behavior: contain;`) in `wwwroot/css/app.css` — one convention for "this list scrolls inside its panel"; `.table-scroll` composes with Bootstrap `table-responsive`.
+- **Item 2 (`/lexicon` tabs + collapse):** right column is a `nav-tabs` control (Add concept / Unmapped terms); default tab = Unmapped terms → the form is collapsed on load; `EditConceptAsync` sets `_activeTab = LexiconTab.AddConcept` (tab label flips to "Edit concept" while editing); Concepts + Unmapped lists wrapped in `.list-scroll`.
+- **Item 3 (similar pages):** Glossary — Concepts cards in `.list-scroll`, facts table wrapper `table-responsive table-scroll`; Wiki — `.wiki-index` gains `max-height: calc(100vh - 16rem); overflow-y: auto;`; Governance — Roles/PII/Policies in `.list-scroll`, Audit table `table-responsive table-scroll`; Taxonomy — Categories in `.list-scroll`; Ontology — Entities in `.list-scroll`, Relationships table `table-responsive table-scroll`.
+- **Item 4 (tests + docs):** Web 125 (+10) — `LexiconBindingTests` (+4: tab control, collapsed-by-default, Edit switches to the form tab, lists use `.list-scroll`) + new `ListScrollBindingTests` (+6: `app.css` utilities defined, Glossary/Governance/Taxonomy/Ontology use them, Wiki scoped CSS scrolls `.wiki-index`). Foundation 55 / Repository 157 / RAGS 361 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/lexicon` (tabs; Add concept collapsed by default; long lists scroll in place) and the other surfaces (`/glossary`, `/wiki`, `/governance`, `/taxonomy`, `/ontology`) for a live visual check. No schema migration — Web-only.
+
+---
+
+## Sprint 73 progress log (2026-08-15) — completed
+
 ### Sprint 73 — ingestion guard-rails + summaries readability (2026-08-15)
 
-**Implemented.** See the Sprint 73 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`1cdb2d8`).** See the Sprint 73 sprint file "Implementation Status" for full detail:
 
 - **A1 (write-new-then-swap):** `IVectorStore.ReplaceSourceAsync` with a default delete-then-store implementation; `PgVectorStore` overrides it with a single transaction (DELETE by source, then the batch INSERT with `ON CONFLICT` upsert; commit, rollback on error; empty batch → `DeleteBySourceAsync`).
 - **A2 (reorder):** `RagsService.IngestAsync` chunks + embeds first, then calls `ReplaceSourceAsync` — the old `DeleteBySourceAsync` → `StoreBatchAsync` sequence is gone.

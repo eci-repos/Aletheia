@@ -16,15 +16,17 @@
                 }
                 else
                 {
-                    <ul class="list-group list-group-flush">
-                        @foreach (var role in _roles)
-                        {
-                            <li class="list-group-item">
-                                <strong>@role.Name</strong>
-                                <div class="small text-muted">Permissions: @string.Join(", ", role.Permissions)</div>
-                            </li>
-                        }
-                    </ul>
+                    <div class="list-scroll">
+                        <ul class="list-group list-group-flush">
+                            @foreach (var role in _roles)
+                            {
+                                <li class="list-group-item">
+                                    <strong>@role.Name</strong>
+                                    <div class="small text-muted">Permissions: @string.Join(", ", role.Permissions)</div>
+                                </li>
+                            }
+                        </ul>
+                    </div>
                 }
             </div>
         </div>
@@ -41,7 +43,7 @@
                 }
                 else
                 {
-                    <div class="table-responsive">
+                    <div class="table-responsive table-scroll">
                         <table class="table table-sm">
                             <thead><tr><th>Action</th><th>User</th><th>Resource</th></tr></thead>
                             <tbody>
@@ -76,14 +78,16 @@
                         @if (_piiResult.PiiDetected)
                         {
                             <div class="alert alert-danger">PII Detected!</div>
-                            <ul class="list-group list-group-flush">
-                                @foreach (var match in _piiResult.Matches)
-                                {
-                                    <li class="list-group-item">
-                                        <span class="badge bg-danger">@match.PiiType</span> at position @match.StartIndex–@match.EndIndex
-                                    </li>
-                                }
-                            </ul>
+                            <div class="list-scroll">
+                                <ul class="list-group list-group-flush">
+                                    @foreach (var match in _piiResult.Matches)
+                                    {
+                                        <li class="list-group-item">
+                                            <span class="badge bg-danger">@match.PiiType</span> at position @match.StartIndex–@match.EndIndex
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
                         }
                         else
                         {
@@ -106,15 +110,17 @@
                 }
                 else
                 {
-                    <ul class="list-group list-group-flush">
-                        @foreach (var policy in _policies)
-                        {
-                            <li class="list-group-item">
-                                <div><strong>@policy.Name</strong></div>
-                                <div class="small text-muted">Type: @policy.ResourceType | Action: @policy.ActionOnExpiry</div>
-                            </li>
-                        }
-                    </ul>
+                    <div class="list-scroll">
+                        <ul class="list-group list-group-flush">
+                            @foreach (var policy in _policies)
+                            {
+                                <li class="list-group-item">
+                                    <div><strong>@policy.Name</strong></div>
+                                    <div class="small text-muted">Type: @policy.ResourceType | Action: @policy.ActionOnExpiry</div>
+                                </li>
+                            }
+                        </ul>
+                    </div>
                 }
             </div>
         </div>

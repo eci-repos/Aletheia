@@ -95,6 +95,45 @@ public class LexiconBindingTests
     }
 
     [Fact]
+    public void Lexicon_page_uses_tab_control_for_add_concept_and_unmapped_terms()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        Assert.Contains("nav-tabs", source);
+        Assert.Contains("LexiconTab.AddConcept", source);
+        Assert.Contains("LexiconTab.Unmapped", source);
+        Assert.Contains("Add concept", source);
+        Assert.Contains("Unmapped terms", source);
+    }
+
+    [Fact]
+    public void Lexicon_add_concept_form_is_collapsed_by_default()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        // Default active tab is Unmapped terms, so the Add/Edit form is hidden on load.
+        Assert.Contains("private LexiconTab _activeTab = LexiconTab.Unmapped;", source);
+    }
+
+    [Fact]
+    public void Lexicon_edit_switches_to_the_form_tab()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        // EditConceptAsync activates the Add concept tab so the pre-filled form expands.
+        Assert.Contains("_activeTab = LexiconTab.AddConcept;", source);
+    }
+
+    [Fact]
+    public void Lexicon_lists_scroll_within_their_panel()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        // Concepts + Unmapped terms lists both use the shared scrollable-list utility.
+        Assert.Contains("class=\"list-scroll\"", source);
+    }
+
+    [Fact]
     public void Nav_menu_has_admin_lexicon_entry()
     {
         var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/NavMenu.razor"));

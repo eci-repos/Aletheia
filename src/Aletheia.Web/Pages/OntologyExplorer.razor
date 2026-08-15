@@ -20,14 +20,16 @@ else
     <div class="row">
         <div class="col-md-4">
             <h5>Entities</h5>
-            <div class="list-group">
-                @foreach (var entity in _entities)
-                {
-                    <button class="list-group-item list-group-item-action @(_selectedEntity == entity ? "active" : "")"
-                            @onclick="() => SelectEntity(entity)">
-                        @entity
-                    </button>
-                }
+            <div class="list-scroll">
+                <div class="list-group">
+                    @foreach (var entity in _entities)
+                    {
+                        <button class="list-group-item list-group-item-action @(_selectedEntity == entity ? "active" : "")"
+                                @onclick="() => SelectEntity(entity)">
+                            @entity
+                        </button>
+                    }
+                </div>
             </div>
         </div>
         <div class="col-md-8">
@@ -44,23 +46,25 @@ else
                 }
                 else
                 {
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Target</th>
-                                <th>Relationship Type</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var relationship in _relationships)
-                            {
+                    <div class="table-responsive table-scroll">
+                        <table class="table table-sm">
+                            <thead>
                                 <tr>
-                                    <td>@relationship.Key</td>
-                                    <td>@relationship.Value</td>
+                                    <th>Target</th>
+                                    <th>Relationship Type</th>
                                 </tr>
-                            }
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                @foreach (var relationship in _relationships)
+                                {
+                                    <tr>
+                                        <td>@relationship.Key</td>
+                                        <td>@relationship.Value</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
                 }
             }
             else

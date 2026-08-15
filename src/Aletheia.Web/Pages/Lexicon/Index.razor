@@ -80,6 +80,11 @@
                         </li>
                     </ul>
 
+                    @if (!string.IsNullOrWhiteSpace(_message))
+                    {
+                        <div class="alert alert-@(_messageIsError ? "danger" : "success") mb-3 py-1 small">@_message</div>
+                    }
+
                     @if (_activeTab == LexiconTab.AddConcept)
                     {
                         <h5 class="mb-3">@(_editingKey is null ? "Add concept" : $"Edit concept: {_editingKey}")</h5>
@@ -126,10 +131,6 @@
                                         <button class="btn btn-sm btn-outline-secondary" @onclick="ResetFormAsync">New concept</button>
                                     }
                                 </div>
-                                @if (!string.IsNullOrWhiteSpace(_message))
-                                {
-                                    <div class="alert alert-@(_messageIsError ? "danger" : "success") mt-2 mb-0 py-1 small">@_message</div>
-                                }
                             </div>
                         </div>
                     }
@@ -151,7 +152,10 @@
                                                 <strong>@term.Term</strong>
                                                 <div class="small text-muted">@term.SourceId</div>
                                             </div>
-                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResolveTermAsync(term.Term, term.SourceId)">Dismiss</button>
+                                            <div class="d-flex gap-1">
+                                                <button class="btn btn-sm btn-outline-primary" title="Create a concept for this term" @onclick="() => PromoteTermAsync(term)">Promote</button>
+                                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResolveTermAsync(term.Term, term.SourceId)">Dismiss</button>
+                                            </div>
                                         </li>
                                     }
                                 </ul>
@@ -264,5 +268,32 @@
         {
             await LoadAsync();
         }
+    }
+
+    /// <summary>
+    /// Promote an unmapped term into a canonical concept in one step: upsert a concept
+    /// (key = label = the term, most permissive value pattern), then clear the pending
+    /// record. The admin can refine value pattern/scope/aliases afterwards via Edit.
+    /// </summary>
+    private async Task PromoteTermAsync(UnmappedTerm term)
+    {
+        var concept = new LexiconConcept
+        {
+            Key = term.Term,
+            Label = term.Term,
+            ValuePattern = "text"
+        };
+
+        if (!await ApiClient.UpsertLexiconConceptAsync(concept))
+        {
+            _message = $"Failed to promote '{term.Term}'.";
+            _messageIsError = true;
+            return;
+        }
+
+        await ApiClient.ResolveUnmappedTermAsync(term.Term, term.SourceId);
+        await LoadAsync();
+        _message = $"Promoted '{term.Term}' to the lexicon.";
+        _messageIsError = false;
     }
 }

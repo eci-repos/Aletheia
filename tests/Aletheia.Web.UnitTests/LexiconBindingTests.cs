@@ -134,6 +134,30 @@ public class LexiconBindingTests
     }
 
     [Fact]
+    public void Lexicon_unmapped_terms_have_a_promote_button()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        // Each pending unmapped term can be promoted into a concept in one click (Promote)
+        // or dismissed (Dismiss) — both actions sit on the same row.
+        Assert.Contains("PromoteTermAsync(term)", source);
+        Assert.Contains(">Promote</button>", source);
+        Assert.Contains(">Dismiss</button>", source);
+    }
+
+    [Fact]
+    public void Lexicon_promote_upserts_a_concept_and_resolves_the_term()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Lexicon/Index.razor"));
+
+        // Promote creates the concept (key = label = term, text value pattern) then clears
+        // the pending record — the term graduates from unmapped to canonical.
+        Assert.Contains("private async Task PromoteTermAsync(UnmappedTerm term)", source);
+        Assert.Contains("UpsertLexiconConceptAsync(concept)", source);
+        Assert.Contains("ResolveUnmappedTermAsync(term.Term, term.SourceId)", source);
+    }
+
+    [Fact]
     public void Nav_menu_has_admin_lexicon_entry()
     {
         var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/NavMenu.razor"));

@@ -50,6 +50,8 @@ One coherent Web-only UI pass (no API/backend changes, no schema migration):
 
 **Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/lexicon` (tabs; Add concept collapsed by default; long lists scroll in place) and the other surfaces (`/glossary`, `/wiki`, `/governance`, `/taxonomy`, `/ontology`) for a live visual check. No schema migration — Web-only.
 
+- **Post-sprint (2026-08-15): one-click Promote in Unmapped terms.** Each pending unmapped term row gains a **Promote** button next to **Dismiss**: upserts a concept (`Key`/`Label` = the term, `ValuePattern = "text"`) and resolves the pending record in one action — the term graduates from unmapped to canonical; refine value pattern/scope/aliases afterwards via **Edit**. `_message` alert moved above the tab content so Promote/Dismiss feedback shows on both tabs. Web 127 (+2). The Concepts list on `/lexicon` **and** `/glossary` was already scrollable from Items 2 + 3 — confirmed, no change.
+
 ---
 
 ## Sprint 73 progress log (2026-08-15) — completed

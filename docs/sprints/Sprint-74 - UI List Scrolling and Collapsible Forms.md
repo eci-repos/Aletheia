@@ -80,3 +80,10 @@ One coherent Web-only UI pass (no API/backend changes, no schema migration):
 - Foundation 55 / Repository 157 / RAGS 361 unchanged; `dotnet build Aletheia.slnx` succeeds (0 errors). Docs updated; backlog item archived.
 
 **Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/lexicon` (tabs; Add concept collapsed by default; long lists scroll in place) and the other surfaces (`/glossary`, `/wiki`, `/governance`, `/taxonomy`, `/ontology`) for a live visual check. No schema migration — Web-only.
+
+### Post-sprint (2026-08-15): one-click Promote in Unmapped terms
+
+- Each pending unmapped term row in `/lexicon` gains a **Promote** button next to **Dismiss**: it upserts a concept (`Key` = `Label` = the term, `ValuePattern = "text"`) and resolves the pending record in a single action — the term graduates from unmapped to canonical; refine value pattern/scope/aliases afterwards via **Edit** on the concept card.
+- The `_message` alert moved above the tab content so Promote/Dismiss feedback shows on both tabs (previously it only rendered inside the Add-concept form).
+- The Concepts list on `/lexicon` **and** `/glossary` was already scrollable from Items 2 + 3 (`.list-scroll` wraps both) — confirmed, no further change needed.
+- Web 127 (+2): `Lexicon_unmapped_terms_have_a_promote_button` + `Lexicon_promote_upserts_a_concept_and_resolves_the_term` (`LexiconBindingTests`). Build 0 errors.

@@ -12,15 +12,25 @@
 <h1>Search Center</h1>
 
 <div class="mb-3">
-    <div class="btn-group" role="group">
-        <button type="button" class="btn @(_mode == "semantic" ? "btn-primary" : "btn-outline-primary")" @onclick="SetSemanticMode">Semantic</button>
-        @if (ShowInternalSearch)
-        {
-            <button type="button" class="btn @(_mode == "wrags" ? "btn-primary" : "btn-outline-primary")" @onclick="SetWragsMode">WRAGS</button>
-            <button type="button" class="btn @(_mode == "graphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetGraphRagMode">GraphRAG</button>
-            <button type="button" class="btn @(_mode == "lazygraphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetLazyGraphRagMode">LazyGraphRAG</button>
-        }
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="btn-group" role="group">
+            <button type="button" class="btn @(_mode == "semantic" ? "btn-primary" : "btn-outline-primary")" @onclick="SetSemanticMode">Semantic</button>
+            <button type="button" class="btn @(_mode == "summaries" ? "btn-primary" : "btn-outline-primary")" @onclick="SetSummariesMode">Summaries</button>
+            @if (ShowInternalSearch)
+            {
+                <button type="button" class="btn @(_mode == "wrags" ? "btn-primary" : "btn-outline-primary")" @onclick="SetWragsMode">WRAGS</button>
+                <button type="button" class="btn @(_mode == "graphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetGraphRagMode">GraphRAG</button>
+                <button type="button" class="btn @(_mode == "lazygraphrag" ? "btn-primary" : "btn-outline-primary")" @onclick="SetLazyGraphRagMode">LazyGraphRAG</button>
+            }
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="@ModeInfoTitle" aria-label="@ModeInfoTitle" @onclick="ToggleModeInfo">&#9432;</button>
     </div>
+    @if (_showModeInfo)
+    {
+        <div class="alert alert-light small mb-0 mt-2 border">
+            <strong>@ModeLabel:</strong> @ModeInfoDetail
+        </div>
+    }
 </div>
 
 <div class="mb-3">
@@ -169,6 +179,52 @@
     </div>
 }
 
+@if (ShowInternalSearch)
+{
+    <AuthorizeView Roles="Administrator">
+        <h3>Graph summaries</h3>
+        <p class="text-muted small">Summary coverage across the knowledge graph. Summaries are generated from the connections between your documents — pre-built during GraphRAG ingestion, or on demand when you run a Summaries search. Re-cluster rebuilds the community structure.</p>
+        <div class="mb-2">
+            <button class="btn btn-outline-primary" @onclick="LoadSummariesStatusAsync">Refresh status</button>
+            <button class="btn btn-outline-secondary" @onclick="ReclusterAsync" disabled="@_reclustering">
+                @(_reclustering ? "Re-clustering..." : "Re-cluster communities")
+            </button>
+        </div>
+        @if (_summariesStatus is not null)
+        {
+            <div class="alert alert-secondary small mb-2">
+                <strong>Graph:</strong> @_summariesStatus.NodeCount nodes · @_summariesStatus.EntityCount entities ·
+                @_summariesStatus.CommunityCount communities · @_summariesStatus.SummarizedCommunityCount summarized
+                (@(_summariesStatus.CommunityCount > 0 ? Math.Round(100.0 * _summariesStatus.SummarizedCommunityCount / _summariesStatus.CommunityCount) : 0)%) ·
+                @_summariesStatus.SourceCount sources
+            </div>
+            @if (_summariesStatus.Sources.Count > 0)
+            {
+                <table class="table table-sm">
+                    <thead>
+                        <tr><th>Source</th><th>Entities</th><th>Communities</th><th>Summarized</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var source in _summariesStatus.Sources)
+                        {
+                            <tr>
+                                <td>@source.SourceName</td>
+                                <td>@source.EntityCount</td>
+                                <td>@source.CommunityCount</td>
+                                <td>@source.SummarizedCommunityCount</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+        @if (!string.IsNullOrEmpty(_summariesStatusMessage))
+        {
+            <div class="alert @(_summariesStatusSuccess ? "alert-success" : "alert-warning") mt-2">@_summariesStatusMessage</div>
+        }
+    </AuthorizeView>
+}
+
 <hr />
 
 @if (ShowInternalSearch)
@@ -247,6 +303,12 @@
     private List<SearchResult>? _results;
     private RagsStatusClientSnapshot? _status;
     private bool _statusChecked;
+    private bool _showModeInfo;
+
+    private SummariesStatusSnapshot? _summariesStatus;
+    private bool _reclustering;
+    private string _summariesStatusMessage = string.Empty;
+    private bool _summariesStatusSuccess;
 
     private string _ingestContent = string.Empty;
     private bool _ingesting;
@@ -287,6 +349,11 @@
 
         _availableThemes = (await ApiClient.GetKnowledgeThemesAsync()).ToList();
 
+        if (ShowInternalSearch)
+        {
+            await LoadSummariesStatusAsync();
+        }
+
         var query = ReadQueryParam("q");
         if (!string.IsNullOrWhiteSpace(query))
         {
@@ -318,6 +385,7 @@
     }
 
     private void SetSemanticMode() => SetMode("semantic");
+    private void SetSummariesMode() => SetMode("summaries");
     private void SetWragsMode() => SetMode("wrags");
     private void SetGraphRagMode() => SetMode("graphrag");
     private void SetLazyGraphRagMode() => SetMode("lazygraphrag");
@@ -325,6 +393,7 @@
     private string ModeLabel => _mode switch
     {
         "semantic" => "Semantic",
+        "summaries" => "Summaries",
         "wrags" => "WRAGS",
         "graphrag" => "GraphRAG",
         "lazygraphrag" => "LazyGraphRAG",
@@ -332,6 +401,28 @@
     };
 
     private static bool UsesExpansion(string mode) => mode is "wrags" or "graphrag" or "lazygraphrag";
+
+    private void ToggleModeInfo() => _showModeInfo = !_showModeInfo;
+
+    private string ModeInfoTitle => _mode switch
+    {
+        "semantic" => "What does Semantic search do?",
+        "summaries" => "What are Summaries?",
+        "wrags" => "What is WRAGS search?",
+        "graphrag" => "What is GraphRAG search?",
+        "lazygraphrag" => "What is LazyGraphRAG search?",
+        _ => "Search mode help"
+    };
+
+    private string ModeInfoDetail => _mode switch
+    {
+        "semantic" => "Semantic search matches by meaning across document chunks. It finds the exact passages most relevant to your question, even when the wording differs.",
+        "summaries" => "Summaries are generated from the connections between your documents. They give higher-level answers synthesized across many documents. On large knowledge bases they may take time to appear.",
+        "wrags" => "WRAGS reads durable wiki pages as retrieval context.",
+        "graphrag" => "GraphRAG reads pre-built graph summaries and expanded graph context.",
+        "lazygraphrag" => "LazyGraphRAG runs budgeted query-time graph traversal, building summaries on demand.",
+        _ => string.Empty
+    };
 
     /// <summary>Leading phrase of a chunk used to locate the passage in the document viewer. Kept short so it aligns with the extracted text.</summary>
     private static string LeadingPhrase(string content)
@@ -342,7 +433,9 @@
 
     private void SetMode(string mode)
     {
-        if (!ShowInternalSearch && mode != "semantic")
+        // Semantic and Summaries are user-facing modes, always available. WRAGS/GraphRAG/LazyGraphRAG
+        // are internal operator modes gated behind ShowInternalSearch.
+        if (!ShowInternalSearch && mode is not ("semantic" or "summaries"))
         {
             return;
         }
@@ -383,6 +476,13 @@
                 ActivityLog.Trace(activityId, "Search Center", "LazyGraphRAG search", "Running budgeted query-time graph traversal.");
                 // Sprint 64: the shared theme scope filters graph retrieval too (themes -> source ids server-side).
                 var results = await ApiClient.LazyGraphRagRetrieveAsync(_query, _topK, _expansionHops, _selectedThemes.ToList());
+                _results = results?.ToList() ?? new List<SearchResult>();
+            }
+            else if (_mode == "summaries")
+            {
+                ActivityLog.Trace(activityId, "Search Center", "Summaries search", "Reading graph summaries (GraphRAG-first, LazyGraphRAG-fallback).");
+                // User-facing summaries mode: the server resolves GraphRAG-first, LazyGraphRAG-fallback.
+                var results = await ApiClient.SummariesRetrieveAsync(_query, _topK, _selectedThemes.ToList());
                 _results = results?.ToList() ?? new List<SearchResult>();
             }
             else
@@ -560,6 +660,42 @@
         finally
         {
             _reevaluating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSummariesStatusAsync()
+    {
+        _summariesStatus = await ApiClient.GetSummariesStatusAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReclusterAsync()
+    {
+        if (_reclustering)
+        {
+            return;
+        }
+
+        _reclustering = true;
+        _summariesStatusMessage = string.Empty;
+        try
+        {
+            var ok = await ApiClient.DetectClustersAsync();
+            _summariesStatusSuccess = ok;
+            _summariesStatusMessage = ok
+                ? "Community re-clustering queued. Summaries regenerate on demand during Summaries search."
+                : "Re-clustering failed. Check the API logs.";
+            await LoadSummariesStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            _summariesStatusSuccess = false;
+            _summariesStatusMessage = $"Re-clustering failed: {ex.Message}";
+        }
+        finally
+        {
+            _reclustering = false;
             await InvokeAsync(StateHasChanged);
         }
     }

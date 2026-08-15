@@ -49,6 +49,33 @@ public class BrowseBindingTests
         Assert.Contains("reflects embeddings only", source);
     }
 
+    [Fact]
+    public void Browse_search_states_it_is_a_metadata_filter()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
+
+        Assert.Contains("Searches file metadata", source);
+        Assert.Contains("not document content", source);
+    }
+
+    [Fact]
+    public void Browse_search_has_info_icon()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
+
+        Assert.Contains("ToggleSearchInfo", source);
+        Assert.Contains("How does Browse search work?", source);
+    }
+
+    [Fact]
+    public void Browse_search_info_points_to_search_center_for_content_search()
+    {
+        var source = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Browse.razor"));
+
+        Assert.Contains("Search Center", source);
+        Assert.Contains("matches by meaning across document chunks", source);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

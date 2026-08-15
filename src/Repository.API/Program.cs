@@ -197,6 +197,10 @@ builder.Services.AddSingleton<IWragsWikiService, Aletheia.RAGS.Application.Wiki.
 builder.Services.AddSingleton<IGraphRagService, Aletheia.RAGS.Application.GraphRAG.GraphRagService>();
 builder.Services.AddSingleton<ILazyGraphRagService, Aletheia.RAGS.Application.LazyGraphRAG.LazyGraphRagService>();
 
+// User-facing "Summaries" search: GraphRAG-first, LazyGraphRAG-fallback, plus summary coverage status.
+builder.Services.AddSingleton<ISummariesRetrievalService, Aletheia.RAGS.Application.GraphRAG.SummariesRetrievalService>();
+builder.Services.AddSingleton<ISummariesStatusService, Aletheia.RAGS.Application.GraphRAG.SummariesStatusService>();
+
 // LazyGraphRAG discovery services (Sprint-15)
 builder.Services.AddSingleton<ICorpusDiscoveryIndex, Aletheia.RAGS.Application.LazyGraphRAG.CorpusDiscoveryIndex>();
 // Sprint 63: persisted LazyGraphRAG corpus index — write-through/load-on-start so the corpus

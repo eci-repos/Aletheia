@@ -7,12 +7,23 @@
 
 <h1>Repository Browser</h1>
 
-<div class="input-group mb-3">
+<div class="input-group mb-1">
     <input type="text" class="form-control" placeholder="Search files..." @bind="_query" @bind:event="oninput" />
     <button class="btn btn-outline-primary" @onclick="StartSearchAsync" disabled="@_isLoading">
         @(_isLoading ? "Searching..." : "Search")
     </button>
 </div>
+<div class="d-flex align-items-center gap-1 mb-3">
+    <span class="text-muted small">Searches file metadata (file name) — not document content.</span>
+    <button type="button" class="btn btn-sm btn-link p-0" title="How does Browse search work?" aria-label="How does Browse search work?" @onclick="ToggleSearchInfo">&#9432;</button>
+</div>
+@if (_showSearchInfo)
+{
+    <div class="alert alert-light small mb-3 border">
+        <strong>Browse search</strong> filters the file list by <em>file name</em> (case-insensitive substring match on the uploaded file's name). It does not search document contents, tags, or metadata fields.
+        To search the meaning of your documents, use <a href="search">Search Center</a> — it matches by meaning across document chunks, and its <strong>Summaries</strong> mode answers from the higher-level connections between documents.
+    </div>
+}
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {
@@ -110,8 +121,11 @@ else if (_results is not null)
     private string? _error;
     private bool _isLoading;
     private bool _isDeleting;
+    private bool _showSearchInfo;
     private int _pageNumber = 1;
     private const int PageSize = 10;
+
+    private void ToggleSearchInfo() => _showSearchInfo = !_showSearchInfo;
 
     protected override async Task OnInitializedAsync()
     {

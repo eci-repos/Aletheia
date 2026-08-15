@@ -348,6 +348,45 @@ public sealed class RepositoryApiClient
         return await response.Content.ReadFromJsonAsync<IReadOnlyList<SearchResult>>(cancellationToken).ConfigureAwait(false);
     }
 
+    // Summaries (user-facing graph summary search — GraphRAG-first, LazyGraphRAG-fallback server-side)
+    public async Task<IReadOnlyList<SearchResult>?> SummariesRetrieveAsync(string query, int topK = 5, IReadOnlyList<string>? themes = null, CancellationToken cancellationToken = default)
+    {
+        var url = $"/api/summaries/retrieve?query={Uri.EscapeDataString(query)}&topK={topK}";
+        if (themes is { Count: > 0 })
+        {
+            url += $"&themes={Uri.EscapeDataString(string.Join(",", themes))}";
+        }
+
+        var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(await BuildApiFailureAsync(
+                response,
+                "Summaries retrieval",
+                "GET /api/summaries/retrieve",
+                cancellationToken).ConfigureAwait(false));
+        }
+
+        return await response.Content.ReadFromJsonAsync<IReadOnlyList<SearchResult>>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<SummariesStatusSnapshot?> GetSummariesStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync("/api/summaries/status", cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<SummariesStatusSnapshot>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> DetectClustersAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsync("/api/communities/detect", null, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
     // WRAGS Wiki
     public async Task<IReadOnlyList<WikiPage>?> SearchWikiAsync(WikiSearchRequest request, CancellationToken cancellationToken = default)
     {

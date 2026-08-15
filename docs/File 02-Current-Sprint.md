@@ -1,45 +1,64 @@
-# Sprint 71 - Lexicon Governance and Glossary Surface
+# Sprint 72 - Search UX Clarity (Semantic vs Summaries)
 
-**Status:** Active (2026-08-14)
+**Status:** Active (2026-08-15)
 
-Full authority: `docs/sprints/Sprint-71 - Lexicon Governance and Glossary Surface.md` (created 2026-08-14). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-72 - Search UX Clarity (Semantic vs Summaries).md` (created 2026-08-15). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 70 (Normalized Lexicon / Grounded Semantic Extraction) is **complete, committed, and pushed** on `origin/master` (`229229d`).
+Sprint 71 (Lexicon Governance and Glossary Surface) is **complete, committed, and pushed** on `origin/master` (`1d5b06c`).
 
 ## Objective
 
-Close the governance loop Sprint 70 opened: a glossary/lexicon for a given document domain that **end users can view and download** and **admins can extend and manage**. Two surfaces, one sprint — the admin management surface (browse concepts + aliases, add/remove aliases, add concepts, review unmapped terms) is the growth mechanism; the end-user read-only glossary (per-domain concept list + verified facts, downloadable as CSV/JSON) is the surfacing. The connective tissue is **`template_scope` enforcement**: a concept with a template scope applies only to documents of that template; unscoped concepts stay global.
+Make the search surfaces self-explanatory without adding a new surface or changing how summaries are produced. Three clarity gaps from the 2026-08-15 product/UX review: (1) the Browse "Search files..." box does not say what it searches; (2) the GraphRAG/LazyGraphRAG summary search is invisible to end users (mode buttons gated behind `FeatureFlags:ShowInternalSearch`, default false); (3) when summaries get created and how they are managed is opaque, which matters on large KBs where summaries are load-bearing.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Admin lexicon management API + repository methods:** `ILexiconRepository` gains `DeleteConceptAsync`/`ResolveUnmappedTermAsync`/`GetAllFactsAsync`; `lexicon_unmapped_terms` gains `status`/`resolved_at` (migration `2026-08-14-lexicon-unmapped-status.sql` + `init.sql` + `PostgreSqlLexiconSchema`); `LexiconController` (Repository.API) — concepts read/upsert/delete, unmapped list/resolve; admin writes invalidate `LexiconProvider`.
-2. **`template_scope` enforcement in concept matching:** `FactVerifier.Verify` + `IFactExtractionService.ExtractAsync` / `GroundedFactExtractionService` take an optional `templateName`; scoped concepts apply only to matching templates; `EnsureIngestedAsync` passes the canonical template name.
-3. **End-user glossary view:** `GET /api/lexicon/glossary?template=` (concepts + facts with source names via `IMetadataRepository`); `Pages/Glossary/Index.razor` at `/glossary` with domain filter + download; nav entry.
-4. **Download/export (CSV + JSON):** `GET /api/lexicon/glossary/export?format=csv|json&template=` — file download.
-5. **Tests + docs:** RAGS 343 (+5) / Repository 151 (+13) / Web 88 (+4) / Foundation 55; build 0 errors; docs updated; backlog item archived.
+1. **Summaries retrieval service:** `ISummariesRetrievalService` + `SummariesRetrievalService` (RAGS.Application/GraphRAG) — GraphRAG-first, LazyGraphRAG-fallback; `sourceIds` theme scope forwarded.
+2. **Summaries status service + snapshot:** `ISummariesStatusService` + `SummariesStatusService` + `SummariesStatusSnapshot`/`SourceSummaryStatus` — graph-level + per-source summary coverage counts (via `IGraphProvider` nodes/edges, `has_member` edges, non-empty `summary` property).
+3. **SummariesController (Repository.API):** `[Route("api/summaries")]` — `GET retrieve` (user-facing, **not** gated by `ShowInternalSearch`, themes→sourceIds) + `GET status` (Administrator). Both services registered as singletons.
+4. **Search Center Semantic/Summaries modes:** always-visible mode buttons (WRAGS/GraphRAG/LazyGraphRAG stay behind `ShowInternalSearch`); per-mode info icon; admin **Graph summaries** status block with coverage counts + **Re-cluster communities** button.
+5. **Browse search caption + info icon:** "Searches file metadata (file name) — not document content." + info icon pointing to Search Center.
+6. **Tests + docs:** RAGS 359 (+14) / Web 100 (+9) / Repository 151 / Foundation 55; build 0 errors; docs updated; backlog item archived.
 
 ## Acceptance Criteria
 
-- An admin can browse concepts + aliases, add/remove aliases, add/delete concepts, and review pending unmapped terms (confirm → alias, or dismiss) from `/lexicon`; edits take effect on the next read (cache invalidated) and never bypass the fidelity gate.
-- A concept with a `template_scope` only produces facts for documents of that template; unscoped concepts stay global.
-- An end user can view a per-domain glossary at `/glossary` (concept, aliases, verified facts with source + page) and download it as CSV or JSON.
+- The Browse search box states it is a metadata (file name) filter, with an info icon explaining the fields and pointing to Search Center for content search.
+- A normal user can choose **Semantic** or **Summaries** in Search Center without `ShowInternalSearch`; "Graph" / "LazyGraph" never appear in user-facing copy.
+- The Summaries mode returns pre-built graph summaries when they exist and falls back to query-time traversal otherwise; theme scope is forwarded.
+- An admin sees graph-summary coverage in Search Center and can re-cluster communities.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Changing the fidelity gate or the propose → verify → normalize → persist pipeline (Sprint 70).
-- Per-user lexicons (global/app-level + per-domain only).
-- Machine translation / cross-language normalization.
-- Replacing the taxonomy/ontology entity machinery.
-- Editing `LexiconSeedData`/SQL-seed defaults from the UI (admin edits override at runtime; the seed stays the code-owned default).
+- A new dedicated surface for browsing summaries (the Search Center mode toggle is the surface).
+- Renaming the internal GraphRAG/LazyGraphRAG services, controllers, or API routes (internal code/docs may keep the terms; only user-facing copy changes).
+- Changing how summaries are produced (GraphRAG ingest-time vs LazyGraphRAG query-time behavior is untouched).
+- Per-document summary status in the Repository Browser (the Sprint 69 Ingestion column pattern) — documented follow-up; this sprint ships the admin graph-level status block instead.
+- Making summary generation distributed or multi-host.
 
 ---
 
 ## Progress
 
+### Sprint 72 — search UX clarity (semantic vs summaries) (2026-08-15)
+
+**Implemented.** See the Sprint 72 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (summaries retrieval):** `ISummariesRetrievalService` + `SummariesRetrievalService` (`RAGS.Application/GraphRAG`) — calls `IGraphRagService.RetrieveAsync`; returns its results when present, otherwise falls back to `ILazyGraphRagService.RetrieveAsync` (empty or failure). `GraphRagService.RetrieveAsync` already has an internal fallback chain, so the service-level fallback triggers only on empty/failure.
+- **Item 2 (summaries status):** `ISummariesStatusService` + `SummariesStatusService` + `SummariesStatusSnapshot`/`SourceSummaryStatus` — reads all graph nodes/edges via `IGraphProvider`, classifies Source/Entity/Community/Chunk nodes, aggregates per-source via `has_member` edges, counts summarized communities via a non-empty `summary` property (persisted during GraphRAG ingest).
+- **Item 3 (SummariesController):** `[Route("api/summaries")]`, `[Authorize]` — `GET retrieve` (query, topK, themes; **not** gated by `ShowInternalSearch` — user-facing mode; resolves themes→sourceIds via `IKnowledgeThemeService`) + `GET status` (`[Authorize(Roles = RoleDefinitions.Administrator)]`). Both services registered as singletons in `Program.cs`.
+- **Item 4 (Search Center modes):** always-visible **Semantic** / **Summaries** buttons (`SetMode` allows `"semantic" or "summaries"` when internal search is off); WRAGS/GraphRAG/LazyGraphRAG stay behind `@if (ShowInternalSearch)`. Per-mode info icon (`&#9432;`, `ModeInfoTitle`/`ModeInfoDetail`/`ToggleModeInfo`). Summaries mode calls `RepositoryApiClient.SummariesRetrieveAsync` (themes forwarded). Admin **Graph summaries** block (`<AuthorizeView Roles="Administrator">`) — coverage counts from `GetSummariesStatusAsync` + **Re-cluster communities** button (`DetectClustersAsync` → `POST /api/communities/detect`).
+- **Item 5 (Browse caption):** caption under the search box — "Searches file metadata (file name) — not document content." — + info icon (`ToggleSearchInfo`/`_showSearchInfo`) explaining the metadata fields and pointing to Search Center ("matches by meaning across document chunks"; **Summaries** mode answers from the higher-level connections between documents).
+- **Item 6 (tests + docs):** RAGS 359 (+14) — `SummariesRetrievalServiceTests` (4), `SummariesStatusServiceTests` (4), `SummariesControllerTests` (6: retrieve OK/fail/themes, status OK, status admin-only, retrieve not admin-only); Web 100 (+9) — `SearchCenterBindingTests` (6) + `BrowseBindingTests` (3). Repository 151 / Foundation 55 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/search` (Semantic/Summaries toggle + admin Graph summaries block) and `/browse` (search caption + info icon) for a live visual check. No schema migration — this sprint is API + Web only.
+
+---
+
+## Sprint 71 progress log (2026-08-14) — completed
+
 ### Sprint 71 — lexicon governance and glossary surface (2026-08-14)
 
-**Implemented.** See the Sprint 71 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`1d5b06c`).** See the Sprint 71 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (admin API + repository):** `ILexiconRepository` + `PostgreSqlLexiconRepository` gain `DeleteConceptAsync`, `ResolveUnmappedTermAsync`, `GetAllFactsAsync`; `GetUnmappedTermsAsync` returns pending only. `lexicon_unmapped_terms` gains `status`/`resolved_at` (migration `2026-08-14-lexicon-unmapped-status.sql` + `init.sql` + `PostgreSqlLexiconSchema`). `LexiconController` (Repository.API): `GET /api/lexicon/concepts?template=` (authenticated), `PUT`/`DELETE /api/lexicon/concepts` (admin), `GET /api/lexicon/unmapped` + `POST /api/lexicon/unmapped/resolve` (admin); admin writes call `_lexiconProvider.Invalidate()`. Admin UI: `Pages/Lexicon/Index.razor` at `/lexicon` (admin-gated, Management nav group) — browse/add/edit/delete concepts + dismiss unmapped terms.
 - **Item 2 (template_scope enforcement):** `FactVerifier.Verify` + `IFactExtractionService.ExtractAsync` / `GroundedFactExtractionService` take an optional `templateName`; `FactVerifier.IsApplicable(concept, templateName)` is the single source of truth (unscoped always applies). `RepositoryKnowledgeSourceIngestionService.EnsureIngestedAsync` passes the matched canonical template name. Out-of-scope hints behave like unknown hints (verifiable value stored as raw text + recorded unmapped).

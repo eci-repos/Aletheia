@@ -49,6 +49,38 @@ public class IngestionReconciliationServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_does_not_enqueue_when_query_fails()
+    {
+        // A query failure (e.g. the last_ingested_at migration not yet applied) must not read as
+        // "nothing to do" — the sweep must stay quiet but never enqueue a repair it cannot justify.
+        var metadataRepository = new Mock<IMetadataRepository>();
+        var queryCalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        metadataRepository
+            .Setup(x => x.GetSourcesMissingIngestionAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                queryCalled.TrySetResult();
+                return Task.FromResult(Result<IReadOnlyList<Guid>>.Failure("column last_ingested_at does not exist"));
+            });
+
+        var ingestionJobs = new Mock<IIngestionJobService>();
+
+        var service = new IngestionReconciliationService(
+            metadataRepository.Object,
+            ingestionJobs.Object,
+            NullLogger<IngestionReconciliationService>.Instance,
+            startupDelay: TimeSpan.Zero);
+
+        await service.StartAsync(CancellationToken.None);
+        await queryCalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        ingestionJobs.Verify(
+            x => x.EnqueueRagsRepairForSources(It.IsAny<IReadOnlyList<Guid>>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_does_not_enqueue_when_nothing_missing()
     {
         var metadataRepository = new Mock<IMetadataRepository>();

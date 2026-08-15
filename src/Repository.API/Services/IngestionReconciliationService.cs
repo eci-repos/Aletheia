@@ -45,7 +45,15 @@ public sealed class IngestionReconciliationService : BackgroundService
         try
         {
             var result = await _metadataRepository.GetSourcesMissingIngestionAsync(stoppingToken).ConfigureAwait(false);
-            if (result.IsFailure || result.Value is null || result.Value.Count == 0)
+            if (result.IsFailure)
+            {
+                // A query failure must not read as "nothing to do" — the sweep would silently
+                // never self-heal (e.g. the last_ingested_at migration not yet applied).
+                _logger.LogError("Ingestion reconciliation sweep could not query for sources missing ingestion: {Error}", result.Error);
+                return;
+            }
+
+            if (result.Value is null || result.Value.Count == 0)
             {
                 _logger.LogInformation("Ingestion reconciliation: no registered documents missing ingestion.");
                 return;

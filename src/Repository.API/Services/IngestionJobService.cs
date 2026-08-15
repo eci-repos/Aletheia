@@ -28,6 +28,10 @@ public interface IIngestionJobService
 
     IngestionJobSnapshot EnqueueRagsRepair(string? query = null);
 
+    /// <summary>Enqueues a targeted RAGS repair for a fixed set of source ids (Sprint 73 — the
+    /// startup reconciliation sweep enqueues exactly the sources that never completed ingestion).</summary>
+    IngestionJobSnapshot EnqueueRagsRepairForSources(IReadOnlyList<Guid> sourceIds);
+
     IngestionJobSnapshot EnqueueReembed();
 
     IngestionJobSnapshot EnqueueDocumentBriefs(Guid? sourceId = null, string? sourceName = null);
@@ -160,6 +164,14 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
     public IngestionJobSnapshot EnqueueRagsRepair(string? query = null)
     {
         var item = IngestionJobWorkItem.ForRagsRepair(query);
+        return Enqueue(item);
+    }
+
+    /// <summary>Enqueues a targeted RAGS repair for a fixed set of source ids (Sprint 73 — the
+    /// startup reconciliation sweep enqueues exactly the sources that never completed ingestion).</summary>
+    public IngestionJobSnapshot EnqueueRagsRepairForSources(IReadOnlyList<Guid> sourceIds)
+    {
+        var item = IngestionJobWorkItem.ForRagsRepairSources(sourceIds);
         return Enqueue(item);
     }
 
@@ -314,6 +326,12 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
             return;
         }
 
+        if (item.Engine == IngestionJobEngine.RagsRepair && item.SourceIds is { Count: > 0 })
+        {
+            await RunRagsRepairSourcesJobAsync(item, state, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (item.Engine == IngestionJobEngine.RagsRepair)
         {
             await RunRagsRepairJobAsync(item, state, cancellationToken).ConfigureAwait(false);
@@ -401,6 +419,93 @@ internal sealed class IngestionJobService : BackgroundService, IIngestionJobServ
             ? $"RAGS index repair completed for {sources.Count} registered document(s)."
             : $"RAGS index repair completed for {sources.Count - failed.Count} of {sources.Count} registered document(s); {failed.Count} failed.";
         state.Succeed("Repaired", detail);
+    }
+
+    private async Task RunRagsRepairSourcesJobAsync(
+        IngestionJobWorkItem item,
+        IngestionJobState state,
+        CancellationToken cancellationToken)
+    {
+        var sourceIds = item.SourceIds ?? Array.Empty<Guid>();
+        state.Update("Resolve sources", $"Resolving {sourceIds.Count} source(s) for targeted RAGS repair.", 5, force: true);
+        var sourcesResult = await LoadSourcesByIdsAsync(sourceIds, cancellationToken).ConfigureAwait(false);
+        if (sourcesResult.IsFailure || sourcesResult.Value is null)
+        {
+            state.Fail("Resolve sources", sourcesResult.Error ?? "Unable to resolve repair sources.");
+            return;
+        }
+
+        var sources = sourcesResult.Value;
+        if (sources.Count == 0)
+        {
+            state.Succeed("No sources found", "No registered Repository documents matched the targeted repair scope.");
+            return;
+        }
+
+        var failed = new List<string>();
+        for (var i = 0; i < sources.Count; i++)
+        {
+            var source = sources[i];
+            state.UpdateUnits(
+                "RAGS index repair",
+                $"Rehydrating searchable chunks for {source.SourceName} ({i + 1}/{sources.Count}).",
+                i,
+                sources.Count);
+
+            var result = await RunWithHeartbeatAsync(
+                state,
+                "RAGS index repair",
+                $"Still rebuilding searchable chunks for {source.SourceName}.",
+                async ct =>
+                {
+                    var hydrated = await _knowledgeSourceIngestionService.EnsureIngestedAsync(source, ct).ConfigureAwait(false);
+                    return hydrated.IsFailure
+                        ? Result.Failure(hydrated.Error ?? $"RAGS repair failed for {source.SourceName}.")
+                        : Result.Success();
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            if (result.IsFailure)
+            {
+                failed.Add($"{source.SourceName}: {result.Error}");
+            }
+
+            state.UpdateUnits(
+                "RAGS index repair",
+                $"Completed {i + 1} of {sources.Count} registered document(s).",
+                i + 1,
+                sources.Count);
+        }
+
+        if (failed.Count == sources.Count)
+        {
+            state.Fail("RAGS index repair", $"RAGS repair failed for all {sources.Count} document(s): {string.Join("; ", failed.Take(3))}");
+            return;
+        }
+
+        var detail = failed.Count == 0
+            ? $"RAGS repair completed for {sources.Count} registered document(s)."
+            : $"RAGS repair completed for {sources.Count - failed.Count} of {sources.Count} registered document(s); {failed.Count} failed.";
+        state.Succeed("Repaired", detail);
+    }
+
+    private async Task<Result<IReadOnlyList<KnowledgeSource>>> LoadSourcesByIdsAsync(
+        IReadOnlyList<Guid> sourceIds,
+        CancellationToken cancellationToken)
+    {
+        var sources = new List<KnowledgeSource>();
+        foreach (var sourceId in sourceIds)
+        {
+            var result = await _metadataRepository
+                .GetByFileIdAsync(sourceId, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (result.IsSuccess && result.Value is not null)
+            {
+                sources.Add(new KnowledgeSource(sourceId, result.Value.Descriptor.FileName, result.Value.UploadedAt));
+            }
+        }
+
+        return Result<IReadOnlyList<KnowledgeSource>>.Success(sources);
     }
 
     private async Task RunReembedJobAsync(
@@ -978,7 +1083,8 @@ internal sealed record IngestionJobWorkItem(
     string? RepairQuery,
     string? ContentType,
     string? TempFilePath,
-    long SizeBytes)
+    long SizeBytes,
+    IReadOnlyList<Guid>? SourceIds = null)
 {
     public static IngestionJobWorkItem ForUploadedFile(
         Guid sourceId,
@@ -1082,6 +1188,33 @@ internal sealed record IngestionJobWorkItem(
             null,
             null,
             normalizedQuery?.Length ?? 0);
+    }
+
+    public static IngestionJobWorkItem ForRagsRepairSources(IReadOnlyList<Guid> sourceIds)
+    {
+        var ids = sourceIds?.Distinct().ToList() ?? new List<Guid>();
+        var title = ids.Count == 1
+            ? $"RAGS repair: {ids[0]:N}"
+            : $"RAGS repair: {ids.Count} sources";
+        if (title.Length > 72)
+        {
+            title = title[..72];
+        }
+
+        return new IngestionJobWorkItem(
+            Guid.NewGuid(),
+            "RagsRepairSources",
+            title,
+            Guid.Empty,
+            null,
+            IngestionJobEngine.RagsRepair,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0,
+            ids);
     }
 
     public static IngestionJobWorkItem ForReembed()

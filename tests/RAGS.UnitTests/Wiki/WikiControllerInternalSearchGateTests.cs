@@ -163,6 +163,11 @@ public sealed class WikiControllerInternalSearchGateTests
             return CreateJob(Guid.Empty, "RagsRepair");
         }
 
+        public IngestionJobSnapshot EnqueueRagsRepairForSources(IReadOnlyList<Guid> sourceIds)
+        {
+            return CreateJob(Guid.Empty, "RagsRepairSources");
+        }
+
         public IngestionJobSnapshot EnqueueDocumentBriefs(Guid? sourceId = null, string? sourceName = null)
         {
             DocumentBriefsCalls++;

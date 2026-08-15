@@ -45,16 +45,14 @@ public sealed class RagsService : IRagsService
 
         try
         {
-            // Delete existing embeddings for this source
-            var deleteResult = await _vectorStore.DeleteBySourceAsync(request.SourceId, cancellationToken).ConfigureAwait(false);
-            // Continue even if delete fails (first ingestion)
-
             // Chunk content (page-aware when the extractor reported page boundaries)
             var chunks = request.Pages is { Count: > 0 }
                 ? _chunkingPipeline.Chunk(request.SourceId, request.Content, request.Pages)
                 : _chunkingPipeline.Chunk(request.SourceId, request.Content);
 
-            // Generate embeddings and store
+            // Generate embeddings first, then swap the source's rows in one atomic replace
+            // (write-new-then-swap). An interrupted ingestion leaves the OLD embeddings intact —
+            // never zero, so the Repository Browser's "Ingested" status stays truthful.
             var items = new List<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)>();
             foreach (var chunk in chunks)
             {
@@ -67,7 +65,7 @@ public sealed class RagsService : IRagsService
                 items.Add((chunk.Id, embeddingResult.Value, chunk));
             }
 
-            var storeResult = await _vectorStore.StoreBatchAsync(items, cancellationToken).ConfigureAwait(false);
+            var storeResult = await _vectorStore.ReplaceSourceAsync(request.SourceId, items, cancellationToken).ConfigureAwait(false);
             if (storeResult.IsFailure)
             {
                 return Result.Failure(storeResult.Error ?? IngestionFailedMessage);

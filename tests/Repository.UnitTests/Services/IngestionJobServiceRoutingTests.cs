@@ -2,6 +2,7 @@ using Aletheia.Foundation.Shared;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
 using Aletheia.Repository.Abstractions.Interfaces;
+using Aletheia.Repository.Abstractions.Models;
 using Aletheia.Repository.API.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -117,6 +118,61 @@ public class IngestionJobServiceRoutingTests
             {
                 File.Delete(tempPath);
             }
+        }
+    }
+
+    [Fact]
+    public async Task RagsRepairForSources_runs_ingestion_for_each_targeted_source()
+    {
+        var sourceId = Guid.NewGuid();
+        const string sourceName = "CMP 2026 RFP.pdf";
+
+        var metadataRepository = new Mock<IMetadataRepository>();
+        metadataRepository
+            .Setup(x => x.GetByFileIdAsync(sourceId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<FileMetadata?>.Success(
+                new FileMetadata(new FileDescriptor(sourceId, sourceName), "application/pdf", 100, DateTimeOffset.UtcNow)));
+
+        var knowledgeSourceIngestion = new Mock<IKnowledgeSourceIngestionService>();
+        knowledgeSourceIngestion
+            .Setup(x => x.EnsureIngestedAsync(It.IsAny<KnowledgeSource>(), It.IsAny<CancellationToken>(), It.IsAny<KnowledgeIndexMode>()))
+            .ReturnsAsync(Result<bool>.Success(true));
+
+        var service = new IngestionJobService(
+            Mock.Of<IUploadedFileTextExtractor>(),
+            Mock.Of<IRagsService>(),
+            Mock.Of<IGraphRagService>(),
+            Mock.Of<ILazyGraphRagService>(),
+            Mock.Of<IWragsWikiService>(),
+            Mock.Of<IUploadedContentKnowledgeIndexer>(),
+            metadataRepository.Object,
+            knowledgeSourceIngestion.Object,
+            Mock.Of<IDocumentBriefService>(),
+            NullLogger<IngestionJobService>.Instance);
+
+        var enqueued = service.EnqueueRagsRepairForSources(new[] { sourceId });
+
+        await service.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitForTerminalAsync(service, enqueued.JobId, TimeSpan.FromSeconds(10));
+
+            var job = service.Get(enqueued.JobId);
+            Assert.NotNull(job);
+            Assert.Equal("Succeeded", job!.Status);
+            Assert.Equal("RagsRepairSources", job.Kind);
+
+            // The targeted repair ran EnsureIngestedAsync for exactly the enqueued source.
+            knowledgeSourceIngestion.Verify(
+                x => x.EnsureIngestedAsync(
+                    It.Is<KnowledgeSource>(s => s.SourceId == sourceId && s.SourceName == sourceName),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<KnowledgeIndexMode>()),
+                Times.Once);
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
         }
     }
 

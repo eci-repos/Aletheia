@@ -74,6 +74,11 @@ public sealed class FileMetadata
     /// with partial chunks is not shown as a premature "Ingested"). Populated by the search path.</summary>
     public bool IsProcessing { get; set; }
 
+    /// <summary>When the source last completed a RAGS ingestion pass (Sprint 73). Null means "never
+    /// successfully ingested" — a startup reconciliation sweep treats null + zero embeddings as a
+    /// repair candidate. Set on completion (success or no-text), not on failure.</summary>
+    public DateTimeOffset? LastIngestedAt { get; set; }
+
     private static IReadOnlyList<string>? NormalizeThemes(IReadOnlyList<string>? theme)
     {
         if (theme is null || theme.Count == 0)

@@ -13,6 +13,21 @@ public interface IVectorStore
 
     Task<Result> DeleteBySourceAsync(Guid sourceId, CancellationToken cancellationToken = default);
 
+    /// <summary>Atomically replaces a source's embeddings with a freshly chunked/embedded batch
+    /// (write-new-then-swap). Default implementation is delete-then-store for stores that cannot do it
+    /// atomically; stores may override with a single transaction so an interrupted ingestion leaves
+    /// either the old or the new embeddings, never zero. An empty batch clears the source's rows.</summary>
+    async Task<Result> ReplaceSourceAsync(Guid sourceId, IEnumerable<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)> items, CancellationToken cancellationToken = default)
+    {
+        var deleteResult = await DeleteBySourceAsync(sourceId, cancellationToken).ConfigureAwait(false);
+        if (deleteResult.IsFailure)
+        {
+            return deleteResult;
+        }
+
+        return await StoreBatchAsync(items, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Lexical fallback search over chunk content and file names. Not supported by default; stores may override.</summary>
     Task<Result<IReadOnlyList<SearchResult>>> SearchKeywordAsync(string query, int topK, CancellationToken cancellationToken = default)
         => Task.FromResult(Result<IReadOnlyList<SearchResult>>.Failure("Keyword search is not supported by this store."));

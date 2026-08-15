@@ -115,6 +115,10 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h6 class="card-subtitle mb-2 text-muted">
+                        @if (SummaryResultFormatter.IsSummary(result))
+                        {
+                            <span class="badge bg-info text-dark me-1">Summaries</span>
+                        }
                         @if (result.Rank > 0)
                         {
                             <span>Rank @result.Rank · </span>
@@ -125,17 +129,30 @@
                             <span> · @result.RetrievalStrategy</span>
                         }
                     </h6>
-                    <p class="card-text">@result.Chunk.Content</p>
-                    <div class="mb-2">
-                        <a class="btn btn-sm btn-outline-primary" href="document/@result.Chunk.SourceId?page=@result.Chunk.PageNumber&chunk=@Uri.EscapeDataString(LeadingPhrase(result.Chunk.Content))">
-                            View in document@(result.Chunk.PageNumber is not null ? $" (p. {result.Chunk.PageNumber})" : "")
-                        </a>
-                    </div>
-                    @if (result.Citations.Count > 0)
+                    @if (SummaryResultFormatter.IsSummary(result))
                     {
-                        <div class="small mb-2">
-                            <strong>Citations:</strong> @string.Join(", ", result.Citations)
+                        <div class="card-text summary-body">@((MarkupString)MarkdownRenderer.ToHtml(SummaryResultFormatter.Body(result.Chunk.Content)))</div>
+                        @if (result.Citations.Count > 0)
+                        {
+                            <div class="small mb-2">
+                                <strong>Sources:</strong> @string.Join(", ", result.Citations)
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="card-text">@result.Chunk.Content</p>
+                        <div class="mb-2">
+                            <a class="btn btn-sm btn-outline-primary" href="document/@result.Chunk.SourceId?page=@result.Chunk.PageNumber&chunk=@Uri.EscapeDataString(LeadingPhrase(result.Chunk.Content))">
+                                View in document@(result.Chunk.PageNumber is not null ? $" (p. {result.Chunk.PageNumber})" : "")
+                            </a>
                         </div>
+                        @if (result.Citations.Count > 0)
+                        {
+                            <div class="small mb-2">
+                                <strong>Citations:</strong> @string.Join(", ", result.Citations)
+                            </div>
+                        }
                     }
                     @if (result.RankingSignals.Count > 0 && result.RankingSignals.TryGetValue("final", out var finalScore))
                     {
@@ -160,7 +177,10 @@
                             }
                         </div>
                     }
-                    <small class="text-muted">Chunk @result.Chunk.Index from source @result.Chunk.SourceId</small>
+                    @if (!SummaryResultFormatter.IsSummary(result))
+                    {
+                        <small class="text-muted">Chunk @result.Chunk.Index from source @result.Chunk.SourceId</small>
+                    }
                 </div>
             </div>
         }

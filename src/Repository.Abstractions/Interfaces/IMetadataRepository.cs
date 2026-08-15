@@ -53,4 +53,17 @@ public interface IMetadataRepository
     {
         return Task.FromResult(Result<IReadOnlyList<FileThemeRow>>.Success(new List<FileThemeRow>()));
     }
+
+    /// <summary>Stamps when a source last completed a RAGS ingestion pass (Sprint 73). No-op when not supported.</summary>
+    Task<Result> SetLastIngestedAtAsync(Guid fileId, DateTimeOffset timestamp, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Success());
+    }
+
+    /// <summary>Returns file ids that have never completed a RAGS ingestion pass AND have zero embeddings
+    /// (Sprint 73 — startup reconciliation sweep candidates). Empty when not supported.</summary>
+    Task<Result<IReadOnlyList<Guid>>> GetSourcesMissingIngestionAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result<IReadOnlyList<Guid>>.Success(new List<Guid>()));
+    }
 }

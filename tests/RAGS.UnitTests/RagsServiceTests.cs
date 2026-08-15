@@ -25,7 +25,25 @@ public class RagsServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_deletes_existing_embeddings_before_storing()
+    public async Task IngestAsync_replaces_source_embeddings_atomically()
+    {
+        var vectorStore = new FakeVectorStore();
+        var service = CreateService(vectorStore);
+        var sourceId = Guid.NewGuid();
+
+        var result = await service.IngestAsync(new IngestionRequest(sourceId, new string('a', 3000)));
+
+        Assert.True(result.IsSuccess);
+        // Sprint 73: ingestion is write-new-then-swap — the source's rows are replaced in one
+        // atomic call, never delete-then-store, so an interrupted re-ingest leaves the OLD
+        // embeddings intact (the Repository Browser's "Ingested" status stays truthful).
+        Assert.Contains(sourceId, vectorStore.ReplacedSources);
+        Assert.DoesNotContain(sourceId, vectorStore.DeletedSources);
+        Assert.True(vectorStore.StoredItems.Count > 0);
+    }
+
+    [Fact]
+    public async Task IngestAsync_replaces_existing_embeddings_on_reingest()
     {
         var vectorStore = new FakeVectorStore();
         var service = CreateService(vectorStore);
@@ -34,7 +52,8 @@ public class RagsServiceTests
         await service.IngestAsync(new IngestionRequest(sourceId, new string('a', 3000)));
         await service.IngestAsync(new IngestionRequest(sourceId, new string('b', 3000)));
 
-        Assert.Contains(sourceId, vectorStore.DeletedSources);
+        Assert.Equal(2, vectorStore.ReplacedSources.Count);
+        Assert.All(vectorStore.ReplacedSources, s => Assert.Equal(sourceId, s));
     }
 
     [Fact]
@@ -315,6 +334,7 @@ public class RagsServiceTests
     {
         public List<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)> StoredItems { get; } = new();
         public List<Guid> DeletedSources { get; } = new();
+        public List<Guid> ReplacedSources { get; } = new();
         public Func<int, IReadOnlyList<SearchResult>>? SearchOverride { get; set; }
         public IReadOnlyList<SearchResult>? KeywordResults { get; set; }
         public bool KeywordSearchSupported { get; set; } = true;
@@ -350,6 +370,20 @@ public class RagsServiceTests
         {
             DeletedSources.Add(sourceId);
             StoredItems.RemoveAll(i => i.Chunk.SourceId == sourceId);
+            return Task.FromResult(Result.Success());
+        }
+
+        public Task<Result> ReplaceSourceAsync(
+            Guid sourceId,
+            IEnumerable<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)> items,
+            CancellationToken cancellationToken = default)
+        {
+            ReplacedSources.Add(sourceId);
+            StoredItems.RemoveAll(i => i.Chunk.SourceId == sourceId);
+            foreach (var item in items)
+            {
+                StoredItems.Add(item);
+            }
             return Task.FromResult(Result.Success());
         }
 

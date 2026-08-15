@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     last_modified_at TIMESTAMPTZ,
     last_modified_by_id TEXT,
     last_modified_by_type TEXT,
-    last_modified_by_name TEXT
+    last_modified_by_name TEXT,
+    last_ingested_at TIMESTAMPTZ
 );
 
 -- Allow only one NULL version per file, while allowing multiple named versions

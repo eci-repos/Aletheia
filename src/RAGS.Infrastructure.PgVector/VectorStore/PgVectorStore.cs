@@ -336,6 +336,72 @@ public sealed class PgVectorStore : ISourceFilteredVectorStore
         }
     }
 
+    public async Task<Result> ReplaceSourceAsync(
+        Guid sourceId,
+        IEnumerable<(Guid ChunkId, ReadOnlyMemory<float> Vector, Chunk Chunk)> items,
+        CancellationToken cancellationToken = default)
+    {
+        var itemList = items?.ToList() ?? throw new ArgumentNullException(nameof(items));
+        if (itemList.Count == 0)
+        {
+            // Nothing to write — clear the source's rows so a re-ingest of an empty source leaves no stale embeddings.
+            return await DeleteBySourceAsync(sourceId, cancellationToken).ConfigureAwait(false);
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            // Delete old rows and insert the new batch in ONE transaction so an interruption
+            // leaves either the old or the new embeddings, never zero (write-new-then-swap).
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    "DELETE FROM embeddings WHERE source_id = @SourceId",
+                    new { SourceId = sourceId },
+                    transaction: transaction,
+                    commandTimeout: _commandTimeoutSeconds,
+                    cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
+
+            const string sql = @"
+                INSERT INTO embeddings (chunk_id, source_id, content, embedding, page_number)
+                VALUES (@ChunkId, @SourceId, @Content, @Embedding::vector, @PageNumber)
+                ON CONFLICT (chunk_id)
+                DO UPDATE SET
+                    source_id = EXCLUDED.source_id,
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding,
+                    page_number = EXCLUDED.page_number";
+
+            foreach (var (chunkId, vector, chunk) in itemList)
+            {
+                var parameters = new
+                {
+                    ChunkId = chunkId,
+                    chunk.SourceId,
+                    chunk.Content,
+                    chunk.PageNumber,
+                    Embedding = VectorToString(vector)
+                };
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(sql, parameters, transaction: transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken))
+                    .ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return Result.Failure($"{StoreFailedMessage} {ex.Message}");
+        }
+    }
+
     public async Task<Result<IReadOnlyList<SearchResult>>> SearchBySourceAsync(
         ReadOnlyMemory<float> vector,
         int topK,

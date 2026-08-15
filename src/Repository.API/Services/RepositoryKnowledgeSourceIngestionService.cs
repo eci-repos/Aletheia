@@ -111,6 +111,9 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         if (!extraction.Value.IsSupported || string.IsNullOrWhiteSpace(extraction.Value.Text))
         {
             _logger.LogInformation("Knowledge source {SourceName} has no extractable text; marking as not ingestable.", source.SourceName);
+            // Sprint 73: a checked-and-non-ingestable source is stamped so the startup reconciliation
+            // sweep does not retry it forever — only never-checked sources (null) are candidates.
+            await StampLastIngestedAsync(source.SourceId, cancellationToken).ConfigureAwait(false);
             return Result<bool>.Success(false);
         }
 
@@ -190,6 +193,10 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
 
         _logger.LogInformation("Knowledge source hydration completed for {SourceName}.", source.SourceName);
 
+        // Sprint 73: stamp completion so the startup reconciliation sweep knows this source was
+        // checked. Set on success only — a failed ingest stays null and remains a repair candidate.
+        await StampLastIngestedAsync(source.SourceId, cancellationToken).ConfigureAwait(false);
+
         // Sprint 55: keep the user-facing Wiki fresh with a document brief once a registered
         // document is ingested. Sprint 59: briefs are gated on Canonical status (uncategorized
         // documents have no template sections to structure a brief). The lazy reference avoids a
@@ -207,6 +214,29 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         }
 
         return Result<bool>.Success(true);
+    }
+
+    private async Task StampLastIngestedAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        if (_metadataRepository is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _metadataRepository
+                .SetLastIngestedAtAsync(fileId, DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+            if (result.IsFailure)
+            {
+                _logger.LogWarning("Unable to stamp last_ingested_at for {SourceId}: {Error}.", fileId, result.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to stamp last_ingested_at for {SourceId}.", fileId);
+        }
     }
 
     private async Task PersistTemplateAsync(

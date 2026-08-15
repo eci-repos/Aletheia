@@ -124,6 +124,96 @@ public sealed class RepositoryKnowledgeSourceIngestionServiceTests
             Times.Never);
     }
 
+    [Fact]
+    public async Task EnsureIngestedAsync_stamps_last_ingested_at_on_success()
+    {
+        var sourceId = Guid.NewGuid();
+        var source = new KnowledgeSource(sourceId, "CMP 2026 - 3. RFP Analysis.docx", DateTimeOffset.UtcNow);
+
+        var metadataRepository = new Mock<IMetadataRepository>();
+        metadataRepository
+            .Setup(x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+        metadataRepository
+            .Setup(x => x.SetLastIngestedAtAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+
+        var service = CreateService(metadataRepository.Object);
+
+        var result = await service.EnsureIngestedAsync(source);
+
+        Assert.True(result.IsSuccess);
+        // Sprint 73: a completed ingestion is stamped so the startup reconciliation sweep knows
+        // this source was checked and does not retry it.
+        metadataRepository.Verify(
+            x => x.SetLastIngestedAtAsync(sourceId, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task EnsureIngestedAsync_does_not_stamp_last_ingested_at_on_failure()
+    {
+        var sourceId = Guid.NewGuid();
+        var source = new KnowledgeSource(sourceId, "CMP 2026 - 3. RFP Analysis.docx", DateTimeOffset.UtcNow);
+
+        var metadataRepository = new Mock<IMetadataRepository>();
+        metadataRepository
+            .Setup(x => x.SetTemplateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+
+        var download = new Mock<IDownloadUseCase>();
+        download
+            .Setup(x => x.DownloadAsync(It.IsAny<DownloadRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<DownloadResponse>.Success(
+                new DownloadResponse(
+                    new FileMetadata(
+                        new FileDescriptor(Guid.NewGuid(), "CMP 2026 - 3. RFP Analysis.docx"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        1024,
+                        DateTimeOffset.UtcNow),
+                    new MemoryStream("RFP scope and requirements text."u8.ToArray()))));
+
+        var textExtractor = new Mock<IUploadedFileTextExtractor>();
+        textExtractor
+            .Setup(x => x.ExtractAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<UploadedFileTextExtraction>.Success(
+                new UploadedFileTextExtraction(true, "RFP scope and requirements text.", "TextExtracted")));
+
+        var ragsService = new Mock<IRagsService>();
+        ragsService
+            .Setup(x => x.IngestAsync(It.IsAny<IngestionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure("ingestion failed"));
+
+        var indexer = new Mock<IUploadedContentKnowledgeIndexer>();
+        indexer
+            .Setup(x => x.IndexAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+
+        var service = new RepositoryKnowledgeSourceIngestionService(
+            download.Object,
+            textExtractor.Object,
+            ragsService.Object,
+            indexer.Object,
+            templateRegistry: new DocumentTemplateRegistry(),
+            metadataRepository: metadataRepository.Object);
+
+        var result = await service.EnsureIngestedAsync(source);
+
+        Assert.True(result.IsFailure);
+        // Sprint 73: a failed ingest stays null (unchecked) so the reconciliation sweep retries it.
+        metadataRepository.Verify(
+            x => x.SetLastIngestedAtAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static RepositoryKnowledgeSourceIngestionService CreateService(
         IMetadataRepository metadataRepository,
         Lazy<IIngestionJobService>? ingestionJobs = null,

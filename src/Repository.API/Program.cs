@@ -104,6 +104,9 @@ builder.Services.AddSingleton<Aletheia.Repository.API.Services.IRagsStatusServic
 builder.Services.AddSingleton<IIngestionJobService>(sp => sp.GetRequiredService<IngestionJobService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IngestionJobService>());
 builder.Services.AddSingleton(sp => new Lazy<Aletheia.Repository.API.Services.IIngestionJobService>(sp.GetRequiredService<Aletheia.Repository.API.Services.IIngestionJobService>));
+// Sprint 73: startup reconciliation sweep — enqueues a targeted RAGS repair for any registered
+// document that never completed ingestion (zero embeddings + last_ingested_at NULL).
+builder.Services.AddHostedService<Aletheia.Repository.API.Services.IngestionReconciliationService>();
 
 // AI / Semantic Kernel
 builder.Services.AddAletheiaAI(builder.Configuration);

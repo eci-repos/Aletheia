@@ -1,0 +1,32 @@
+/* Sprint 73: Summaries results render the LLM summary body as markdown. Keep headings and lists
+   card-sized so a synthesized answer reads like a product, not a document dump. */
+.summary-body h1,
+.summary-body h2,
+.summary-body h3,
+.summary-body h4,
+.summary-body h5,
+.summary-body h6 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 0.75rem;
+    margin-bottom: 0.35rem;
+}
+
+.summary-body h1:first-child,
+.summary-body h2:first-child,
+.summary-body h3:first-child,
+.summary-body h4:first-child,
+.summary-body h5:first-child,
+.summary-body h6:first-child {
+    margin-top: 0;
+}
+
+.summary-body ul,
+.summary-body ol {
+    margin-bottom: 0.5rem;
+    padding-left: 1.25rem;
+}
+
+.summary-body p:last-child {
+    margin-bottom: 0;
+}

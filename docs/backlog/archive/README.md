@@ -15,5 +15,6 @@ Fully-implemented backlog files are moved here from `docs/backlog/` so the activ
 | `Normalized-Lexicon-for-Term-Resolution.md` | All 4 items implemented (Sprint 70) — archived 2026-08-14 |
 | `Lexicon-Governance-and-Glossary-Surface.md` | All 5 items implemented (Sprint 71) — archived 2026-08-14 |
 | `Search-UX-Clarity-Semantic-vs-Summaries.md` | All 5 items implemented (Sprint 72) — archived 2026-08-15 |
+| `Ingestion-Guard-Rails-Durable-Jobs-and-Self-Healing.md` | Items 2 + 3 implemented (Sprint 73); item 1 (durable queue) explicitly deferred — archived 2026-08-15 |
 
 Keep the historical file contents untouched except for the status header: the promotion history (sprint, commit, date) is the record of how each item was delivered.

@@ -314,6 +314,53 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
         }
     }
 
+    public async Task<Result> SetLastIngestedAtAsync(Guid fileId, DateTimeOffset timestamp, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            UPDATE file_metadata
+            SET last_ingested_at = @Timestamp
+            WHERE file_id = @FileId";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await connection.ExecuteAsync(sql, new { FileId = fileId, Timestamp = timestamp.UtcDateTime }).ConfigureAwait(false);
+            return Result.Success();
+        }
+        catch (PostgresException ex)
+        {
+            return Result.Failure($"{SaveFailedMessage} {ex.Message}");
+        }
+    }
+
+    public async Task<Result<IReadOnlyList<Guid>>> GetSourcesMissingIngestionAsync(CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT fm.file_id AS ""FileId""
+            FROM file_metadata fm
+            WHERE fm.last_ingested_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM embeddings e
+                  WHERE e.source_id = fm.file_id
+              )
+            GROUP BY fm.file_id";
+
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var rows = await connection.QueryAsync<Guid>(sql).ConfigureAwait(false);
+            return Result<IReadOnlyList<Guid>>.Success(rows.ToList());
+        }
+        catch (PostgresException ex)
+        {
+            return Result<IReadOnlyList<Guid>>.Failure($"{SearchFailedMessage} {ex.Message}");
+        }
+    }
+
     public async Task<Result<IReadOnlyList<FileThemeRow>>> ListThemeRowsAsync(CancellationToken cancellationToken = default)
     {
         var sql = $@"

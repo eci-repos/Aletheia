@@ -1,47 +1,70 @@
-# Sprint 72 - Search UX Clarity (Semantic vs Summaries)
+# Sprint 73 - Ingestion Guard-Rails and Summaries Readability
 
 **Status:** Active (2026-08-15)
 
-Full authority: `docs/sprints/Sprint-72 - Search UX Clarity (Semantic vs Summaries).md` (created 2026-08-15). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-73 - Ingestion Guard-Rails and Summaries Readability.md` (created 2026-08-15). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 71 (Lexicon Governance and Glossary Surface) is **complete, committed, and pushed** on `origin/master` (`1d5b06c`).
+Sprint 72 (Search UX Clarity — Semantic vs Summaries) is **complete, committed, and pushed** on `origin/master` (`0950dad`).
 
 ## Objective
 
-Make the search surfaces self-explanatory without adding a new surface or changing how summaries are produced. Three clarity gaps from the 2026-08-15 product/UX review: (1) the Browse "Search files..." box does not say what it searches; (2) the GraphRAG/LazyGraphRAG summary search is invisible to end users (mode buttons gated behind `FeatureFlags:ShowInternalSearch`, default false); (3) when summaries get created and how they are managed is opaque, which matters on large KBs where summaries are load-bearing.
+Two problems, one sprint:
+
+1. **Ingestion becomes resilient.** An interrupted re-ingestion must never leave a source with zero embeddings, and anything already zeroed self-heals at startup. The user's framing: "ingestion once done is done and the status should not change just because the app was refreshed." Root cause: `RagsService.IngestAsync` **deletes** existing embeddings *before* chunking/embedding/writing the new ones, and the job queue is in-memory — an API rebuild mid-job leaves the source with zero embeddings and nothing ever re-checks it.
+2. **Summaries results read like a product, not a debug dump.** The new Summaries mode returns the right summaries, but (a) the cards are unreadable — raw content with internal scaffolding (`Community Summary: {name}` prefix, a `Structured GraphRAG Context` dump, a `Chunk 0 from source {guid}` footer) — and (b) **"View in document" does nothing**: community summaries carry a *synthetic* `SourceId` (`StableGuid("community-source", …)`) so the document page can't load it, and even for entity summaries the `chunk=` leading phrase is synthesized text that can't be found in the document, so the highlight silently fails.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Summaries retrieval service:** `ISummariesRetrievalService` + `SummariesRetrievalService` (RAGS.Application/GraphRAG) — GraphRAG-first, LazyGraphRAG-fallback; `sourceIds` theme scope forwarded.
-2. **Summaries status service + snapshot:** `ISummariesStatusService` + `SummariesStatusService` + `SummariesStatusSnapshot`/`SourceSummaryStatus` — graph-level + per-source summary coverage counts (via `IGraphProvider` nodes/edges, `has_member` edges, non-empty `summary` property).
-3. **SummariesController (Repository.API):** `[Route("api/summaries")]` — `GET retrieve` (user-facing, **not** gated by `ShowInternalSearch`, themes→sourceIds) + `GET status` (Administrator). Both services registered as singletons.
-4. **Search Center Semantic/Summaries modes:** always-visible mode buttons (WRAGS/GraphRAG/LazyGraphRAG stay behind `ShowInternalSearch`); per-mode info icon; admin **Graph summaries** status block with coverage counts + **Re-cluster communities** button.
-5. **Browse search caption + info icon:** "Searches file metadata (file name) — not document content." + info icon pointing to Search Center.
-6. **Tests + docs:** RAGS 359 (+14) / Web 100 (+9) / Repository 151 / Foundation 55; build 0 errors; docs updated; backlog item archived.
+1. **Write-new-then-swap ingestion:** `IVectorStore.ReplaceSourceAsync` (default delete-then-store impl so fakes keep compiling; `PgVectorStore` override = delete + insert in one transaction); `RagsService.IngestAsync` chunks + embeds first, then atomically replaces.
+2. **`last_ingested_at` marker:** `file_metadata` column (`init.sql` + idempotent migration `2026-08-15-last-ingested-at.sql`); `FileMetadata.LastIngestedAt`; `IMetadataRepository.SetLastIngestedAtAsync`; stamped on **completion** (success or no-text), never on failure.
+3. **Startup reconciliation sweep:** `GetSourcesMissingIngestionAsync` (zero embeddings AND `last_ingested_at IS NULL`); `IngestionJobService.EnqueueRagsRepairForSources` + `RagsRepairSources` work-item kind; `IngestionReconciliationService` `BackgroundService` (runs once after a short delay) registered in `Program.cs`.
+4. **Summaries readability:** `SummaryResultFormatter` (Web) — `IsSummary` (`summary-*`), `Body` (strips prefix + `Structured GraphRAG Context` dump), `ShowViewInDocument` (false for summaries). `SearchCenter.razor` — "Summaries" badge, markdown-rendered body via `MarkdownRenderer.ToHtml`, **Sources** list, "View in document" hidden on summary cards, `Chunk N from source <guid>` footer dropped. Backend untouched.
+5. **Tests + docs:** RAGS + Repository + Web suites green; build 0 errors; docs updated; backlog item archived (item 1 durable queue explicitly deferred).
 
 ## Acceptance Criteria
 
-- The Browse search box states it is a metadata (file name) filter, with an info icon explaining the fields and pointing to Search Center for content search.
-- A normal user can choose **Semantic** or **Summaries** in Search Center without `ShowInternalSearch`; "Graph" / "LazyGraph" never appear in user-facing copy.
-- The Summaries mode returns pre-built graph summaries when they exist and falls back to query-time traversal otherwise; theme scope is forwarded.
-- An admin sees graph-summary coverage in Search Center and can re-cluster communities.
+- An interrupted re-ingestion leaves the previous embeddings intact (write-new-then-swap); a source is never left with zero embeddings by a partial ingest.
+- On API startup, documents with zero embeddings and no `last_ingested_at` are auto-queued for repair and re-ingested — the "Not ingested" flip becomes self-correcting.
+- A completed ingestion stamps `last_ingested_at`; a failed one stays NULL so the sweep retries it.
+- Summaries search results render a "Summaries" badge, a readable markdown body, a Sources list, and **no** dead "View in document" button; Semantic results keep the working "View in document" link.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- A new dedicated surface for browsing summaries (the Search Center mode toggle is the surface).
-- Renaming the internal GraphRAG/LazyGraphRAG services, controllers, or API routes (internal code/docs may keep the terms; only user-facing copy changes).
+- **Durable job queue (backlog item 1)** — explicitly deferred. The in-memory queue stays; the write-new-then-swap + reconciliation sweep make the *data* survive an interruption even though the *job* does not.
+- Job stage tracking + resume (backlog item 4).
+- Changing the ingestion pipeline's fidelity guarantees (Sprint 70) — the guard-rails make ingestion *resilient*, not *different*.
 - Changing how summaries are produced (GraphRAG ingest-time vs LazyGraphRAG query-time behavior is untouched).
-- Per-document summary status in the Repository Browser (the Sprint 69 Ingestion column pattern) — documented follow-up; this sprint ships the admin graph-level status block instead.
-- Making summary generation distributed or multi-host.
+- Making the job queue distributed or multi-host.
 
 ---
 
 ## Progress
 
+### Sprint 73 — ingestion guard-rails + summaries readability (2026-08-15)
+
+**Implemented.** See the Sprint 73 sprint file "Implementation Status" for full detail:
+
+- **A1 (write-new-then-swap):** `IVectorStore.ReplaceSourceAsync` with a default delete-then-store implementation; `PgVectorStore` overrides it with a single transaction (DELETE by source, then the batch INSERT with `ON CONFLICT` upsert; commit, rollback on error; empty batch → `DeleteBySourceAsync`).
+- **A2 (reorder):** `RagsService.IngestAsync` chunks + embeds first, then calls `ReplaceSourceAsync` — the old `DeleteBySourceAsync` → `StoreBatchAsync` sequence is gone.
+- **A3 (marker):** `last_ingested_at TIMESTAMPTZ NULL` on `file_metadata` (`init.sql` + idempotent migration `2026-08-15-last-ingested-at.sql`); `FileMetadata.LastIngestedAt`; `IMetadataRepository.SetLastIngestedAtAsync` + `PostgreSqlMetadataRepository` UPDATE.
+- **A4 (stamp):** `EnsureIngestedAsync` stamps `last_ingested_at = now` on completion (success or no-text), never on failure.
+- **A5 (sweep):** `GetSourcesMissingIngestionAsync` (zero embeddings AND `last_ingested_at IS NULL`); `IngestionJobService.EnqueueRagsRepairForSources` + `RagsRepairSources` work-item kind + fixed-list runner; `IngestionReconciliationService` `BackgroundService` (10s startup delay, runs once) registered in `Program.cs`.
+- **A6 (fix current state):** restart the API — the sweep auto-repairs the 3 zero-embedding documents; or run `POST /api/jobs/rags/repair` once.
+- **A7 (tests):** RAGS — `IngestAsync_replaces_source_embeddings_atomically` + `IngestAsync_replaces_existing_embeddings_on_reingest` (`RagsServiceTests`), `ReplaceSourceAsync_replaces_embeddings_atomically` (`PgVectorStoreTests`). Repository — `RagsRepairForSources_runs_ingestion_for_each_targeted_source` (`IngestionJobServiceRoutingTests`), `IngestionReconciliationServiceTests` (enqueues targeted repair when sources missing; no-op when nothing missing), `EnsureIngestedAsync_stamps_last_ingested_at_on_success` + `EnsureIngestedAsync_does_not_stamp_last_ingested_at_on_failure`.
+- **B1 (formatter):** `SummaryResultFormatter` — `IsSummary` (`summary-*` prefix), `Body` (strips prefix line + `Structured GraphRAG Context` dump), `ShowViewInDocument` (false for summaries).
+- **B2 (card):** `SearchCenter.razor` — "Summaries" badge (`badge bg-info text-dark`), markdown-rendered body via `MarkdownRenderer.ToHtml`, **Sources** list from `result.Citations`, "View in document" hidden on summary cards, `Chunk N from source <guid>` footer dropped on summary cards. Semantic / LazyGraphRAG-fallback cards untouched. `.summary-body` scoped CSS in `SearchCenter.razor.css`.
+- **B3 (tests):** `SummaryResultFormatterTests` — `IsSummary` true for `summary-entity`/`summary-community` (case-insensitive), false for `lazy-*`/`semantic`/`semantic-timeout-fallback`/empty/null; `Body` strips entity + community prefixes and the context dump, trims plain content, empty for blank/null; `ShowViewInDocument` false for summaries, true for semantic passages.
+
+**Residual manual (user-side):** `docker compose up -d --build` (fresh DB gets `last_ingested_at` from init.sql; an existing deployment needs the migration `2026-08-15-last-ingested-at.sql` applied once, or the API's schema initializer self-heals at startup). Then **restart the API** — the reconciliation sweep logs the 3 sources and auto-repairs them; hard-refresh `/browse` → rows show **Ingested** (green), not "Not ingested". Hard-refresh `/search` → Summaries results show a "Summaries" badge, a readable markdown body, a Sources list, and no dead "View in document" button; Semantic results keep the working "View in document" link.
+
+---
+
+## Sprint 72 progress log (2026-08-15) — completed
+
 ### Sprint 72 — search UX clarity (semantic vs summaries) (2026-08-15)
 
-**Implemented.** See the Sprint 72 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`0950dad`).** See the Sprint 72 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (summaries retrieval):** `ISummariesRetrievalService` + `SummariesRetrievalService` (`RAGS.Application/GraphRAG`) — calls `IGraphRagService.RetrieveAsync`; returns its results when present, otherwise falls back to `ILazyGraphRagService.RetrieveAsync` (empty or failure). `GraphRagService.RetrieveAsync` already has an internal fallback chain, so the service-level fallback triggers only on empty/failure.
 - **Item 2 (summaries status):** `ISummariesStatusService` + `SummariesStatusService` + `SummariesStatusSnapshot`/`SourceSummaryStatus` — reads all graph nodes/edges via `IGraphProvider`, classifies Source/Entity/Community/Chunk nodes, aggregates per-source via `has_member` edges, counts summarized communities via a non-empty `summary` property (persisted during GraphRAG ingest).

@@ -102,6 +102,11 @@ public sealed class JobsControllerTests
             return job with { SourceName = query };
         }
 
+        public IngestionJobSnapshot EnqueueRagsRepairForSources(IReadOnlyList<Guid> sourceIds)
+        {
+            return CreateJob(Guid.Empty, "RagsRepairSources");
+        }
+
         public IReadOnlyList<IngestionJobSnapshot> List(int take = 50)
         {
             return new[] { _job };

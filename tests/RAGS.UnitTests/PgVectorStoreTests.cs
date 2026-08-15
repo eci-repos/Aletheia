@@ -129,6 +129,40 @@ public class PgVectorStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReplaceSourceAsync_replaces_embeddings_atomically()
+    {
+        if (!_isAvailable)
+        {
+            return;
+        }
+
+        var sourceId = Guid.NewGuid();
+        var provider = new SimpleEmbeddingProvider();
+
+        var oldChunk = new Chunk(Guid.NewGuid(), sourceId, "old content to be replaced", 0);
+        var oldEmbedding = await provider.GenerateAsync(oldChunk.Content);
+        Assert.True(oldEmbedding.IsSuccess);
+        var storeResult = await _store!.StoreAsync(oldChunk.Id, oldEmbedding.Value, oldChunk);
+        Assert.True(storeResult.IsSuccess, storeResult.Error);
+
+        var newChunk = new Chunk(Guid.NewGuid(), sourceId, "new content after replace", 0);
+        var newEmbedding = await provider.GenerateAsync(newChunk.Content);
+        Assert.True(newEmbedding.IsSuccess);
+
+        // Sprint 73: write-new-then-swap — the source's rows are replaced in one atomic call.
+        var replaceResult = await _store!.ReplaceSourceAsync(
+            sourceId,
+            new[] { (newChunk.Id, newEmbedding.Value, newChunk) });
+        Assert.True(replaceResult.IsSuccess, replaceResult.Error);
+
+        var searchResult = await _store!.SearchAsync(newEmbedding.Value, 5);
+        Assert.True(searchResult.IsSuccess, searchResult.Error);
+        Assert.NotNull(searchResult.Value);
+        Assert.Contains(searchResult.Value, r => r.Chunk.Content == newChunk.Content);
+        Assert.DoesNotContain(searchResult.Value, r => r.Chunk.Content == oldChunk.Content);
+    }
+
+    [Fact]
     public void Constructor_rejects_invalid_command_timeout()
     {
         var factory = new PostgreSqlConnectionFactory("Host=localhost;Database=dummy");

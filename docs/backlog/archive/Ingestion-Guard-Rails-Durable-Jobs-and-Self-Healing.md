@@ -1,7 +1,8 @@
 # Backlog: Ingestion Guard-Rails — Durable Jobs and Self-Healing
 
-**Status:** Proposed (not yet promoted to a sprint)
+**Status:** Implemented (items 2 + 3, Sprint 73); item 1 (durable queue) explicitly deferred
 **Created:** 2026-08-14
+**Promoted:** Sprint 73 (2026-08-15) — items 2 + 3; item 1 remains proposed
 **Source:** Operational incident (2026-08-14) — the Repository Browser flipped all three documents from **Ingested** to **Not ingested** after an API rebuild. Diagnosis: the `embeddings` and `document_facts` tables were genuinely empty (metadata/wiki/taxonomy/ontology intact) — the signature of a re-ingestion that deleted the old data but never wrote new data. Root cause: the ingestion job queue is **in-memory** and the ingestion pipeline is **delete-then-insert**, so an API restart mid-job loses the queue and leaves the source with no embeddings/facts.
 
 ## Problem
@@ -21,11 +22,11 @@
 
 | # | Item | Why it matters | Effort (agent) | Status |
 |---|------|----------------|----------------|--------|
-| 1 | **Durable ingestion job queue** — persist jobs to PostgreSQL (`ingestion_jobs` table + repository), re-queue incomplete jobs on startup. | The queue survives API restarts; a job interrupted by a rebuild is picked up again. | ~1.5–2 days | Proposed |
-| 2 | **Write-new-then-swap ingestion** — embeddings + facts write new rows before deleting old ones (or one transaction). | An interruption never leaves a source with zero embeddings/facts; the previous good state survives. | ~1 day | Proposed |
-| 3 | **Startup reconciliation sweep** — detect documents with metadata but no embeddings and auto-queue a repair. | Self-heals interrupted ingestions with zero user action; the "Not ingested" flip becomes self-correcting. | ~1 day | Proposed |
+| 1 | **Durable ingestion job queue** — persist jobs to PostgreSQL (`ingestion_jobs` table + repository), re-queue incomplete jobs on startup. | The queue survives API restarts; a job interrupted by a rebuild is picked up again. | ~1.5–2 days | **Deferred** (Sprint 73 ships items 2 + 3 only) |
+| 2 | **Write-new-then-swap ingestion** — embeddings + facts write new rows before deleting old ones (or one transaction). | An interruption never leaves a source with zero embeddings/facts; the previous good state survives. | ~1 day | **Implemented** (Sprint 73) |
+| 3 | **Startup reconciliation sweep** — detect documents with metadata but no embeddings and auto-queue a repair. | Self-heals interrupted ingestions with zero user action; the "Not ingested" flip becomes self-correcting. | ~1 day | **Implemented** (Sprint 73) |
 | 4 | **Job stage tracking + resume** — record the last committed stage per job; resume from it. | A resumed job doesn't redo completed work (re-embedding, fact extraction, graph indexing are expensive). | ~0.5–1 day | Proposed |
-| 5 | **Tests + docs** — repository round-trips for the durable queue, reconciliation-sweep tests, restart-survival tests; AGENTS/CLAUDE/File 02/03 + sprint file; backlog item archived. | The resilience guarantees must be locked down. | ~0.5–1 day | Proposed |
+| 5 | **Tests + docs** — repository round-trips for the durable queue, reconciliation-sweep tests, restart-survival tests; AGENTS/CLAUDE/File 02/03 + sprint file; backlog item archived. | The resilience guarantees must be locked down. | ~0.5–1 day | **Implemented** (Sprint 73, items 2 + 3) |
 
 ## Suggested Sequencing
 
@@ -33,6 +34,8 @@
 - **Item 3** — the reconciliation sweep is the safety net that catches anything the first two miss; it can land after 1 + 2.
 - **Item 4** — stage tracking is an optimization on top of the durable queue; land it with or after item 1.
 - **Item 5** alongside each item, not a trailing batch.
+
+**Sprint 73 (2026-08-15) shipped items 2 + 3** (write-new-then-swap + startup reconciliation) as the approved core fix; **item 1 (durable queue) is explicitly deferred** — the swap + sweep make the *data* survive an interruption even though the in-memory *job* does not. Item 4 remains proposed.
 
 **Total (agent):** ~4–5 working days including build/test verification. A single sprint.
 

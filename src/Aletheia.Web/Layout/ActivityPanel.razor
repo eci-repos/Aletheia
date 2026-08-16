@@ -5,14 +5,6 @@
 @inject IJSRuntime JS
 
 <aside class="activity-panel @(isOpen ? "open" : "collapsed")" aria-label="Activity log">
-    <button class="activity-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle activity log">
-        <span>Activity</span>
-        @if (ActivityLog.RunningCount > 0)
-        {
-            <span class="activity-count">@ActivityLog.RunningCount</span>
-        }
-    </button>
-
     @if (isOpen)
     {
         <div class="activity-shell">
@@ -88,6 +80,15 @@
             </div>
         </div>
     }
+
+    <button class="activity-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle activity log">
+        <span class="activity-toggle-icon icon-activity" aria-hidden="true"></span>
+        <span class="activity-toggle-label">Activity</span>
+        @if (ActivityLog.RunningCount > 0)
+        {
+            <span class="activity-count">@ActivityLog.RunningCount</span>
+        }
+    </button>
 </aside>
 
 @code {

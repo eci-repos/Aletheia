@@ -1,6 +1,6 @@
 # Backlog: Activity/Chats Right Rail (in-flow, no overlap)
 
-**Status:** Proposed (not yet authorized — waiting for a sprint to promote it)
+**Status:** **Complete** — all 4 items implemented (Sprint 75, 2026-08-16). Archived.
 **Created:** 2026-08-15
 **Source:** Project-owner request (2026-08-15) — the right-side **Activity** and **Chats** panels "block the view of visual artifacts behind"; keep them where they are but make the main panel items not overlap, leaving a clean vertical strip for the side tabs. Owner confirmed: **Option A** — the panels collapse into vertical strips with related icons + count badges, and expand to push content. Starts **collapsed by default**.
 

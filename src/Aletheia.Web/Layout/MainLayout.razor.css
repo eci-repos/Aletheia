@@ -11,6 +11,21 @@ main {
     background-color: #ffffff;
 }
 
+/* Sprint 75: the Activity/Chats panels live in an in-flow right column beside
+   <main> (mirroring the left sidebar) instead of position:fixed overlays. The
+   rail width is driven by the widest panel (42px collapsed / 420px open), so
+   main (flex: 1; min-width: 0) shrinks and opening a panel PUSHES content —
+   it never covers it. Below the breakpoint the rail returns to a full-height
+   overlay (see the panel CSS media queries). */
+.right-rail {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+}
+
 .sidebar {
     color: #111827;
     background-color: #f3f4f6;
@@ -77,5 +92,19 @@ main {
     .top-row, article {
         padding-left: 2rem !important;
         padding-right: 1.5rem !important;
+    }
+}
+
+/* Sprint 75 responsive fallback: below the breakpoint the right rail returns to
+   a full-height overlay (the pre-Sprint-75 behavior) so narrow screens are not
+   crushed by the in-flow column. The panels stay in-flow inside the fixed rail;
+   an open panel widens to calc(100vw - 12px) via the panel CSS media queries. */
+@media (max-width: 640.98px) {
+    .right-rail {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 30;
     }
 }

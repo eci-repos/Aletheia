@@ -1,60 +1,75 @@
-# Sprint 74 - UI List Scrolling and Collapsible Forms
+# Sprint 75 - Activity and Chats Right Rail (in-flow, no overlap)
 
-**Status:** Active (2026-08-15)
+**Status:** Active (2026-08-16)
 
-Full authority: `docs/sprints/Sprint-74 - UI List Scrolling and Collapsible Forms.md` (created 2026-08-15). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-75 - Activity and Chats Right Rail.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 73 (Ingestion Guard-Rails and Summaries Readability) is **complete, committed, and pushed** on `origin/master` (`1cdb2d8`).
+Sprint 74 (UI List Scrolling and Collapsible Forms) is **complete, committed, and pushed** on `origin/master` (`343d9ca` + post-sprint `d8cb518`).
 
 ## Objective
 
-One coherent Web-only UI pass (no API/backend changes, no schema migration):
+One coherent Web-only layout pass (no API/backend changes, no schema migration):
 
-1. **Lists scroll inside their panel.** A list/table that outgrows the viewport scrolls within its own container instead of stretching the surrounding panel and the page — applied to every "list beside other content" surface: `/lexicon` Concepts + Unmapped terms, `/glossary` Concepts + Verified facts, `/wiki` index sidebar, `/governance` Roles / Audit / PII matches / Policies, `/taxonomy` Categories, `/ontology` Entities + Relationships.
-2. **The `/lexicon` "Add concept" form is collapsed by default.** The right column becomes an **Add concept / Unmapped terms** tab control; the form expands only when the admin clicks the tab (or **Edit** on a concept). No permanently-open form.
+1. **In-flow right rail.** Move both panels out of `position: fixed` into the page layout as a right column beside `<main>` in `MainLayout.razor` — mirroring the existing left `NavMenu` sidebar. Collapsed = a vertical icon strip; open = expands to ~420px and **pushes** the main content instead of covering it. No overlap in any state.
+2. **Collapsed by default, icons + counts on the strip.** Both panels start collapsed (`isOpen = false`, as today). The collapsed strip shows related icons per the existing `nav-icon icon-*` convention (add `icon-activity` + `icon-chats`) plus count badges: the Activity running-count badge (`activity-count`) is retained, and Chats keeps its open-conversation count (`chats-count`).
+3. **Two stacked strips, not one shared rail.** Activity above, Chats below — two independent vertically-stacked strips preserving the current mental model and independent toggles.
+4. **Responsive fallback.** Below the breakpoint, the rail falls back to a full-height overlay (current behavior) so narrow screens are not crushed.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Scrollable-list utilities:** `.list-scroll` / `.table-scroll` (`max-height: 70vh; overflow-y: auto; overscroll-behavior: contain;`) in `wwwroot/css/app.css`.
-2. **`/lexicon` tab control + collapsible Add concept:** `nav-tabs` control (Add concept / Unmapped terms), form collapsed by default (default tab = Unmapped terms), `EditConceptAsync` auto-switches to the form tab, Concepts + Unmapped lists scrollable.
-3. **Apply to similar pages:** Glossary (Concepts + facts table), Wiki (`.wiki-index` sidebar max-height), Governance (Roles/Audit/PII/Policies), Taxonomy (Categories), Ontology (Entities + Relationships).
-4. **Tests + docs:** Web binding tests (Lexicon tab/collapse + `ListScrollBindingTests`); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived.
+1. **In-flow right rail:** `MainLayout.razor` gains a `<div class="right-rail">` right column between `<main>` and the end of `.page`; `ActivityPanel`/`ChatsPanel` drop `position: fixed` for flex layout (each panel a flex row `[shell][toggle strip]`, `align-self: flex-end`); the rail width is driven by the widest panel (42px collapsed / 420px open) so `main` (`flex: 1; min-width: 0`) shrinks and content is **pushed**, never covered.
+2. **Collapsed strip = icon + vertical label + count badge:** the toggle button keeps its vertical label and gains an icon span (`icon-activity` / `icon-chats`, NavMenu `--icon` mask convention, defined in `app.css`); `activity-count` / `chats-count` badges retained.
+3. **Two stacked strips:** Activity above, Chats below, each `flex: 0 0 auto` collapsed and `flex: 1 1 auto` open (split the rail height when both open).
+4. **Responsive fallback:** below `640.98px` the `.right-rail` becomes `position: fixed; top: 0; right: 0; bottom: 0; z-index: 30` (overlay) and an open panel widens to `calc(100vw - 12px)`.
+5. **Tests + docs:** Web binding tests (`RightRailBindingTests`); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Acceptance Criteria
 
-- On `/lexicon`, the Add concept form is **not** visible on page load; the admin expands it via the **Add concept** tab or by clicking **Edit** on a concept (which pre-fills the form). Unmapped terms live in their own tab.
-- A long Concepts / Unmapped / Glossary / Governance / Taxonomy / Ontology / Wiki-index list scrolls inside its panel; a short list keeps its natural height (no wasted empty scroll area).
+- On any page, the Activity and Chats panels never cover page content: collapsed they are a 42px vertical icon strip at the right edge; open they expand to ~420px and **push** the main content.
+- Both panels start collapsed; the collapsed strips show an icon + count badge (Activity running count, Chats open-conversation count).
+- Activity and Chats are two independent stacked strips (Activity above, Chats below) with independent toggles.
+- Below the breakpoint the rail returns to a full-height overlay so narrow screens are not crushed.
 - No API, backend, or schema changes — Web-only.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Bootstrap collapse/tab JS widgets (tab/collapse behavior is Blazor state — conditional render, testable without JS interop).
-- Re-architecting pages that already constrain their own scroll regions (Copilot, Graph Explorer).
-- Making paginated or bounded lists scroll (Browse, Metadata picker, Dashboard, Upload).
-- Turning Search Center results or the Document viewer into internal scroll regions (whole-page scroll is their reading model).
-- Any backend, controller, or schema change.
+- Changing panel content, the Activity log data flow, job polling, or the Chats conversation restore flow — this is a layout/positioning change only.
+- Merging Activity and Chats into a single shared rail or tab control (decision 3 keeps them as two independent stacked strips).
+- Any API, backend, or schema change.
+- Changing the left sidebar layout or the Copilot page's own internal three-column grid (`.copilot-layout`).
 
 ---
 
 ## Progress
 
+### Sprint 75 — Activity and Chats right rail (2026-08-16)
+
+**Implemented.** See the Sprint 75 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (in-flow right rail):** `MainLayout.razor` gains `<div class="right-rail">` wrapping `<ActivityPanel />` + `<ChatsPanel />` after `<main>`; `MainLayout.razor.css` adds `.right-rail` (`display: flex; flex-direction: column; flex: 0 0 auto; height: 100vh; position: sticky; top: 0;`). `main` (`flex: 1; min-width: 0`) shrinks when a panel opens — content is pushed, never covered.
+- **Item 2 (panels become in-flow flex rows):** `ActivityPanel.razor` / `ChatsPanel.razor` — the `<aside>` is `display: flex; flex-direction: row; flex: 0 0 auto; align-self: flex-end;` (42px collapsed, `width: 420px; flex: 1 1 auto;` open); the shell renders before the toggle (shell `flex: 1; min-height: 0`, toggle `flex: 0 0 42px`) and drops its `position`-era `height`/`margin-right`; the toggle keeps its vertical label + count badge and gains an icon span (`activity-toggle-icon icon-activity` / `chats-toggle-icon icon-chats`).
+- **Item 3 (strip icons):** `wwwroot/css/app.css` defines `.icon-activity` (pulse) + `.icon-chats` (message bubble) `--icon` mask URLs; the panels' scoped `.activity-toggle-icon` / `.chats-toggle-icon` apply the mask.
+- **Item 4 (responsive fallback):** both panel CSS files — `@media (max-width: 640.98px)` makes `.right-rail` `position: fixed; top: 0; right: 0; bottom: 0; z-index: 30;` and open panels `width: calc(100vw - 12px)`.
+- **Item 5 (tests + docs):** Web 133 (+6) — new `RightRailBindingTests` (MainLayout renders the panels inside a `.right-rail`; panels collapsed by default; `icon-activity`/`icon-chats` + `activity-count`/`chats-count` present; panel CSS in-flow with a `@media (max-width: 640.98px)` overlay fallback; `app.css` defines the two icons). Foundation 55 / Repository 157 / RAGS 361 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh any page (e.g. `/graph`, `/search`) — the Activity/Chats strips sit at the right edge as 42px icon strips; opening one pushes the content instead of covering it; both start collapsed. On a narrow window (< 641px) the rail returns to an overlay. No schema migration — Web-only.
+
+---
+
+## Sprint 74 progress log (2026-08-15) — completed
+
 ### Sprint 74 — UI list scrolling + collapsible forms (2026-08-15)
 
-**Implemented.** See the Sprint 74 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`343d9ca` + post-sprint `d8cb518`).** See the Sprint 74 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (utilities):** `.list-scroll` / `.table-scroll` (`max-height: 70vh; overflow-y: auto; overscroll-behavior: contain;`) in `wwwroot/css/app.css` — one convention for "this list scrolls inside its panel"; `.table-scroll` composes with Bootstrap `table-responsive`.
 - **Item 2 (`/lexicon` tabs + collapse):** right column is a `nav-tabs` control (Add concept / Unmapped terms); default tab = Unmapped terms → the form is collapsed on load; `EditConceptAsync` sets `_activeTab = LexiconTab.AddConcept` (tab label flips to "Edit concept" while editing); Concepts + Unmapped lists wrapped in `.list-scroll`.
 - **Item 3 (similar pages):** Glossary — Concepts cards in `.list-scroll`, facts table wrapper `table-responsive table-scroll`; Wiki — `.wiki-index` gains `max-height: calc(100vh - 16rem); overflow-y: auto;`; Governance — Roles/PII/Policies in `.list-scroll`, Audit table `table-responsive table-scroll`; Taxonomy — Categories in `.list-scroll`; Ontology — Entities in `.list-scroll`, Relationships table `table-responsive table-scroll`.
 - **Item 4 (tests + docs):** Web 125 (+10) — `LexiconBindingTests` (+4: tab control, collapsed-by-default, Edit switches to the form tab, lists use `.list-scroll`) + new `ListScrollBindingTests` (+6: `app.css` utilities defined, Glossary/Governance/Taxonomy/Ontology use them, Wiki scoped CSS scrolls `.wiki-index`). Foundation 55 / Repository 157 / RAGS 361 unchanged; build 0 errors; docs updated; backlog item archived.
-
-**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/lexicon` (tabs; Add concept collapsed by default; long lists scroll in place) and the other surfaces (`/glossary`, `/wiki`, `/governance`, `/taxonomy`, `/ontology`) for a live visual check. No schema migration — Web-only.
-
 - **Post-sprint (2026-08-15): one-click Promote in Unmapped terms.** Each pending unmapped term row gains a **Promote** button next to **Dismiss**: upserts a concept (`Key`/`Label` = the term, `ValuePattern = "text"`) and resolves the pending record in one action — the term graduates from unmapped to canonical; refine value pattern/scope/aliases afterwards via **Edit**. `_message` alert moved above the tab content so Promote/Dismiss feedback shows on both tabs. Web 127 (+2). The Concepts list on `/lexicon` **and** `/glossary` was already scrollable from Items 2 + 3 — confirmed, no change.
 
----
-
-## Sprint 73 progress log (2026-08-15) — completed
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/lexicon` (tabs; Add concept collapsed by default; long lists scroll in place) and the other surfaces (`/glossary`, `/wiki`, `/governance`, `/taxonomy`, `/ontology`) for a live visual check. No schema migration — Web-only.
 
 ### Sprint 73 — ingestion guard-rails + summaries readability (2026-08-15)
 

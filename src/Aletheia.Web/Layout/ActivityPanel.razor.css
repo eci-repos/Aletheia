@@ -1,24 +1,20 @@
 .activity-panel {
-    position: fixed;
-    top: 3.75rem;
-    right: 0;
-    z-index: 20;
+    display: flex;
+    flex-direction: row;
+    flex: 0 0 auto;
+    align-self: flex-end;
+    width: 42px;
     color: #111827;
 }
 
-.activity-panel.collapsed {
-    width: 42px;
-}
-
 .activity-panel.open {
-    width: min(420px, calc(100vw - 24px));
-    bottom: 1rem;
+    flex: 1 1 auto;
+    width: 420px;
+    min-height: 0;
 }
 
 .activity-toggle {
-    position: absolute;
-    top: 0;
-    right: 0;
+    flex: 0 0 42px;
     width: 42px;
     min-height: 132px;
     border: 1px solid #cbd5e1;
@@ -31,6 +27,16 @@
     writing-mode: vertical-rl;
     text-orientation: mixed;
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+}
+
+.activity-toggle-icon {
+    display: inline-block;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-bottom: 0.4rem;
+    background-color: currentColor;
+    -webkit-mask: var(--icon) center / contain no-repeat;
+    mask: var(--icon) center / contain no-repeat;
 }
 
 .activity-count {
@@ -48,8 +54,8 @@
 }
 
 .activity-shell {
-    height: calc(100vh - 4.75rem);
-    margin-right: 42px;
+    flex: 1;
+    min-height: 0;
     border: 1px solid #cbd5e1;
     border-radius: 8px 0 0 8px;
     background: #ffffff;
@@ -291,15 +297,7 @@
 }
 
 @media (max-width: 640.98px) {
-    .activity-panel {
-        top: 3.6rem;
-    }
-
     .activity-panel.open {
         width: calc(100vw - 12px);
-    }
-
-    .activity-shell {
-        height: calc(100vh - 4.25rem);
     }
 }

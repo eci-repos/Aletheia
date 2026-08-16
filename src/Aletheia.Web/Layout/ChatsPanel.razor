@@ -3,14 +3,6 @@
 @inject CopilotStateService CopilotState
 
 <aside class="chats-panel @(isOpen ? "open" : "collapsed")" aria-label="Chat history">
-    <button class="chats-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle chat history">
-        <span>Chats</span>
-        @if (CopilotState.RecentSessions.Count > 0)
-        {
-            <span class="chats-count">@CopilotState.RecentSessions.Count</span>
-        }
-    </button>
-
     @if (isOpen)
     {
         <div class="chats-shell">
@@ -45,6 +37,15 @@
             </div>
         </div>
     }
+
+    <button class="chats-toggle" type="button" @onclick="Toggle" aria-expanded="@isOpen" aria-label="Toggle chat history">
+        <span class="chats-toggle-icon icon-chats" aria-hidden="true"></span>
+        <span class="chats-toggle-label">Chats</span>
+        @if (CopilotState.RecentSessions.Count > 0)
+        {
+            <span class="chats-count">@CopilotState.RecentSessions.Count</span>
+        }
+    </button>
 </aside>
 
 @code {

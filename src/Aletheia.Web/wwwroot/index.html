@@ -211,7 +211,8 @@
                         label: e.relationshipType,
                         displayLabel: '',
                         edgeColor: e.edgeColor,
-                        edgeWidth: e.edgeWidth
+                        edgeWidth: e.edgeWidth,
+                        relationshipType: e.relationshipType
                     }
                 }))
             ];
@@ -300,6 +301,57 @@
                 // overlay. layoutstop fires on the graph once the layout (including animation) ends.
                 window.cy.on('layoutstop', () => dotNetRef.invokeMethodAsync('OnGraphLayoutSettled'));
             }
+
+            // Sprint 76: drag a source document and its exclusively-found_in children as one group.
+            // A child node joins the group only when EVERY found_in edge it has points to this
+            // document — a child found in multiple documents stays put (it is not "solely based
+            // on this doc"). Positions persist across re-renders via preservePositions, so a
+            // moved cluster stays where the user put it.
+            let dragGroup = null;
+            let dragStartPositions = null;
+
+            const computeDragGroup = (cy, sourceNode) => {
+                const sourceId = sourceNode.id();
+                const group = new Set([sourceNode]);
+                cy.nodes().forEach(node => {
+                    if (node === sourceNode || node.data('type') === 'SourceDocument') return;
+                    const foundInEdges = node.connectedEdges().filter(edge => edge.data('relationshipType') === 'found_in');
+                    if (foundInEdges.length === 0) return;
+                    const exclusivelyInThisSource = foundInEdges.every(edge => {
+                        const other = edge.source().id() === node.id() ? edge.target() : edge.source();
+                        return other.id() === sourceId;
+                    });
+                    if (exclusivelyInThisSource) group.add(node);
+                });
+                return group;
+            };
+
+            window.cy.on('grab', 'node', event => {
+                const node = event.target;
+                if (node.data('type') !== 'SourceDocument') return;
+                dragGroup = computeDragGroup(window.cy, node);
+                dragStartPositions = new Map();
+                dragGroup.forEach(n => dragStartPositions.set(n.id(), { x: n.position('x'), y: n.position('y') }));
+            });
+
+            window.cy.on('drag', 'node', event => {
+                const node = event.target;
+                if (!dragGroup || !dragGroup.has(node)) return;
+                const start = dragStartPositions.get(node.id());
+                if (!start) return;
+                const dx = node.position('x') - start.x;
+                const dy = node.position('y') - start.y;
+                dragGroup.forEach(n => {
+                    if (n === node) return;
+                    const s = dragStartPositions.get(n.id());
+                    n.position({ x: s.x + dx, y: s.y + dy });
+                });
+            });
+
+            window.cy.on('free', 'node', () => {
+                dragGroup = null;
+                dragStartPositions = null;
+            });
         };
 
         function getGraphLayoutOptions(spread) {
@@ -334,6 +386,20 @@
             window.cy.resize();
             window.cy.fit(window.cy.elements(), 40);
             window.cy.center();
+        };
+
+        // Sprint 76: explicit zoom control. cy.zoom({ level }) fires the 'zoom' event, so the
+        // existing zoom-threshold label logic (configureGraphLabels' updateLabels) re-runs at the
+        // new scale automatically — the two features compose.
+        window.setGraphZoom = (factor) => {
+            if (!window.cy) return;
+            const clamped = Math.max(0.25, Math.min(3, Number(factor) || 1));
+            window.cy.zoom({ level: clamped });
+        };
+
+        window.getGraphZoom = () => {
+            if (!window.cy) return 1;
+            return window.cy.zoom();
         };
 
         window.relayoutGraph = () => {

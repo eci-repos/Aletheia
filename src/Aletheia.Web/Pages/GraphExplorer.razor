@@ -1,4 +1,5 @@
 @page "/graph"
+@using System.Globalization
 @using System.Text.Json
 @inject RepositoryApiClient ApiClient
 @inject RecentGraphContextService RecentContext
@@ -24,6 +25,16 @@
             <button class="btn btn-outline-secondary" title="Fit graph to window" @onclick="FitGraphAsync" disabled="@_isLoadingGraph">Fit</button>
             <button class="btn btn-outline-secondary" title="Run layout again" @onclick="RelayoutGraphAsync" disabled="@_isLoadingGraph">Re-layout</button>
             <button class="btn btn-outline-secondary" title="Spread nodes farther apart" @onclick="SpreadGraphAsync" disabled="@_isLoadingGraph">Spread</button>
+
+            <div class="graph-zoom" title="Zoom level">
+                <label class="form-label" for="graph-zoom-slider">Zoom</label>
+                <input id="graph-zoom-slider" class="form-range" type="range" min="25" max="300" step="5"
+                       value="@ZoomPercent" @oninput="OnZoomSliderAsync" aria-label="Zoom level" />
+                <input id="graph-zoom-factor" class="form-control form-control-sm graph-zoom-factor" type="number"
+                       min="0.25" max="3" step="0.05" value="@_zoomFactor" @onchange="OnZoomFactorAsync"
+                       aria-label="Scaling factor" />
+                <span class="graph-zoom-unit">&times;</span>
+            </div>
         </div>
 
         <div class="path-finder">
@@ -159,6 +170,9 @@
     private string _graphStatus = string.Empty;
     private bool _graphRendered;
     private DotNetObjectReference<GraphExplorer>? _dotNetRef;
+    private double _zoomFactor = 1.0;
+
+    private int ZoomPercent => (int)Math.Round(_zoomFactor * 100);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -222,11 +236,12 @@
     }
 
     [JSInvokable]
-    public Task OnGraphLayoutSettled()
+    public async Task OnGraphLayoutSettled()
     {
         _isLoadingGraph = false;
         _graphStatus = string.Empty;
-        return InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
+        await SyncZoomFromGraphAsync();
     }
 
     public void Dispose()
@@ -262,6 +277,40 @@
     private async Task FitGraphAsync()
     {
         await JS.InvokeVoidAsync("fitGraph");
+        await SyncZoomFromGraphAsync();
+    }
+
+    private async Task OnZoomSliderAsync(ChangeEventArgs args)
+    {
+        if (double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var percent))
+        {
+            _zoomFactor = Math.Clamp(percent / 100.0, 0.25, 3.0);
+            await ApplyZoomAsync();
+        }
+    }
+
+    private async Task OnZoomFactorAsync(ChangeEventArgs args)
+    {
+        if (double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var factor))
+        {
+            _zoomFactor = Math.Clamp(factor, 0.25, 3.0);
+            await ApplyZoomAsync();
+        }
+    }
+
+    private async Task ApplyZoomAsync()
+    {
+        await JS.InvokeVoidAsync("setGraphZoom", _zoomFactor);
+    }
+
+    private async Task SyncZoomFromGraphAsync()
+    {
+        var zoom = await JS.InvokeAsync<double>("getGraphZoom");
+        if (zoom > 0)
+        {
+            _zoomFactor = Math.Clamp(zoom, 0.25, 3.0);
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task RelayoutGraphAsync()

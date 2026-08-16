@@ -18,5 +18,6 @@ Fully-implemented backlog files are moved here from `docs/backlog/` so the activ
 | `Ingestion-Guard-Rails-Durable-Jobs-and-Self-Healing.md` | Items 2 + 3 implemented (Sprint 73); item 1 (durable queue) explicitly deferred — archived 2026-08-15 |
 | `UI-List-Scroll-and-Collapsible-Forms.md` | All 4 items implemented (Sprint 74) — archived 2026-08-15 |
 | `Activity-Chats-Right-Rail.md` | All 4 items implemented (Sprint 75) — archived 2026-08-16 |
+| `Graph-Drag-Group-and-Scale-Slider.md` | All 3 items implemented (Sprint 76) — archived 2026-08-16 |
 
 Keep the historical file contents untouched except for the status header: the promotion history (sprint, commit, date) is the record of how each item was delivered.

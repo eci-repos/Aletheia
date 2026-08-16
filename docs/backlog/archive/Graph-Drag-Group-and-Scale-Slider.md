@@ -1,6 +1,6 @@
 # Backlog: Graph Drag-Group and Scale Slider
 
-**Status:** Proposed (not yet authorized — waiting for a sprint to promote it)
+**Status:** **Complete** — all 3 items implemented (Sprint 76, 2026-08-16). Archived.
 **Created:** 2026-08-15
 **Source:** Project-owner request (2026-08-15) — "would it be possible in the Graph to drag a 'root' node that represents the source document and all children that are solely based on this doc be dragged at the same time?... plan B is good, lets add a scale slider that also allow the user to put a scaling factor since scaling the graph now is difficult. make a backlog item and keep it to work on it later."
 

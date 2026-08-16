@@ -1,51 +1,61 @@
-# Sprint 75 - Activity and Chats Right Rail (in-flow, no overlap)
+# Sprint 76 - Graph Drag-Group and Scale Slider
 
 **Status:** Active (2026-08-16)
 
-Full authority: `docs/sprints/Sprint-75 - Activity and Chats Right Rail.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-76 - Graph Drag-Group and Scale Slider.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 74 (UI List Scrolling and Collapsible Forms) is **complete, committed, and pushed** on `origin/master` (`343d9ca` + post-sprint `d8cb518`).
+Sprint 75 (Activity and Chats Right Rail) is **complete, committed, and pushed** on `origin/master` (`4899ab3`).
 
 ## Objective
 
-One coherent Web-only layout pass (no API/backend changes, no schema migration):
+One coherent Graph Explorer UX pass (Web-only — no API/backend changes, no schema migration):
 
-1. **In-flow right rail.** Move both panels out of `position: fixed` into the page layout as a right column beside `<main>` in `MainLayout.razor` — mirroring the existing left `NavMenu` sidebar. Collapsed = a vertical icon strip; open = expands to ~420px and **pushes** the main content instead of covering it. No overlap in any state.
-2. **Collapsed by default, icons + counts on the strip.** Both panels start collapsed (`isOpen = false`, as today). The collapsed strip shows related icons per the existing `nav-icon icon-*` convention (add `icon-activity` + `icon-chats`) plus count badges: the Activity running-count badge (`activity-count`) is retained, and Chats keeps its open-conversation count (`chats-count`).
-3. **Two stacked strips, not one shared rail.** Activity above, Chats below — two independent vertically-stacked strips preserving the current mental model and independent toggles.
-4. **Responsive fallback.** Below the breakpoint, the rail falls back to a full-height overlay (current behavior) so narrow screens are not crushed.
+1. **Drag-group on source nodes.** In the Graph Explorer, dragging a source-document node (type `Source`) also moves the entity nodes attributed to it via `found_in` edges — but only those **solely based on this doc** (a child found in multiple documents stays put). Flat rendering preserved: the group is delta translation, not hierarchy.
+2. **Scale slider + numeric scaling factor.** An explicit zoom control in the Graph Explorer toolbar: a range slider (25%–300%) plus a numeric factor input, wired to `cy.zoom({ level })`. The existing zoom-threshold label logic re-runs automatically at the new scale. A **Fit** button resets the view (already present in the toolbar).
+3. **Tests + docs.** Web binding tests lock down the `initGraph` drag-group contract and the zoom control; AGENTS/CLAUDE/File 02/03 + sprint file; backlog item archived when complete.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **In-flow right rail:** `MainLayout.razor` gains a `<div class="right-rail">` right column between `<main>` and the end of `.page`; `ActivityPanel`/`ChatsPanel` drop `position: fixed` for flex layout (each panel a flex row `[shell][toggle strip]`, `align-self: flex-end`); the rail width is driven by the widest panel (42px collapsed / 420px open) so `main` (`flex: 1; min-width: 0`) shrinks and content is **pushed**, never covered.
-2. **Collapsed strip = icon + vertical label + count badge:** the toggle button keeps its vertical label and gains an icon span (`icon-activity` / `icon-chats`, NavMenu `--icon` mask convention, defined in `app.css`); `activity-count` / `chats-count` badges retained.
-3. **Two stacked strips:** Activity above, Chats below, each `flex: 0 0 auto` collapsed and `flex: 1 1 auto` open (split the rail height when both open).
-4. **Responsive fallback:** below `640.98px` the `.right-rail` becomes `position: fixed; top: 0; right: 0; bottom: 0; z-index: 30` (overlay) and an open panel widens to `calc(100vw - 12px)`.
-5. **Tests + docs:** Web binding tests (`RightRailBindingTests`); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
+1. **Drag-group on source nodes:** in `initGraph` (`wwwroot/index.html`), edge elements gain `relationshipType: e.relationshipType`; `grab`/`drag`/`free` handlers on `window.cy` — on grab of a `SourceDocument` node, `computeDragGroup` returns the node + every non-source node whose `found_in` edges all point to this document (`exclusivelyInThisSource`); on each drag tick, group members are translated by the dragged node's delta from its grab-time position; on `free`, the group state is cleared. Positions persist across re-renders via the existing `preservePositions` flow.
+2. **Scale slider + numeric factor + Fit:** `GraphExplorer.razor` toolbar gains a `.graph-zoom` control (`#graph-zoom-slider` range 25–300 + `#graph-zoom-factor` number 0.25–3 + `×` unit); slider `@oninput` / number `@onchange` update `_zoomFactor` (clamped) and call `setGraphZoom`. `index.html` defines `window.setGraphZoom` (clamps + `cy.zoom({ level })`) and `window.getGraphZoom`. `OnGraphLayoutSettled` and `FitGraphAsync` sync `_zoomFactor` from the graph. The existing **Fit** button is retained as the view-reset control.
+3. **Tests + docs:** Web binding tests (`GraphExplorerBindingTests`); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Acceptance Criteria
 
-- On any page, the Activity and Chats panels never cover page content: collapsed they are a 42px vertical icon strip at the right edge; open they expand to ~420px and **push** the main content.
-- Both panels start collapsed; the collapsed strips show an icon + count badge (Activity running count, Chats open-conversation count).
-- Activity and Chats are two independent stacked strips (Activity above, Chats below) with independent toggles.
-- Below the breakpoint the rail returns to a full-height overlay so narrow screens are not crushed.
+- Dragging a source-document node moves its exclusively-`found_in` children with it; a child found in multiple documents stays put; dragging a non-source node moves only that node.
+- The toolbar has an explicit zoom control: a range slider (25%–300%) and a numeric scaling factor input that both apply the zoom; the control reflects the graph's actual zoom after load/layout/Fit.
+- The existing Fit button resets the view; the zoom-threshold label logic still works at the new scale.
 - No API, backend, or schema changes — Web-only.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Changing panel content, the Activity log data flow, job polling, or the Chats conversation restore flow — this is a layout/positioning change only.
-- Merging Activity and Chats into a single shared rail or tab control (decision 3 keeps them as two independent stacked strips).
-- Any API, backend, or schema change.
-- Changing the left sidebar layout or the Copilot page's own internal three-column grid (`.copilot-layout`).
+- Compound/parent-node rendering (the flat graph look is preserved — group drag is delta translation, not hierarchy).
+- Recursive subtree dragging beyond one hop (a child whose descendants are also exclusively this doc could be an extension).
+- Changing graph node/edge data, API contracts, or backend behavior — Web-only (no schema migration).
+- Physics simulations or layout algorithm changes — the existing `getGraphLayoutOptions`/`Re-layout` flow is untouched.
 
 ---
 
 ## Progress
 
+### Sprint 76 — Graph drag-group + scale slider (2026-08-16)
+
+**Implemented.** See the Sprint 76 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (drag-group on source nodes):** `wwwroot/index.html` `initGraph` — edge elements now carry `relationshipType: e.relationshipType`; `grab`/`drag`/`free` handlers on `window.cy` implement the group (`computeDragGroup` + `exclusivelyInThisSource` exclusivity check; delta translation from grab-time positions; cleared on `free`). Positions persist via the existing `preservePositions` flow.
+- **Item 2 (scale slider + numeric factor + Fit):** `GraphExplorer.razor` toolbar gains a `.graph-zoom` control (`#graph-zoom-slider` range 25–300 + `#graph-zoom-factor` number 0.25–3 + `×` unit); slider `@oninput` / number `@onchange` update `_zoomFactor` (clamped) and call `setGraphZoom`. `index.html` defines `window.setGraphZoom` (clamps + `cy.zoom({ level })`) and `window.getGraphZoom`. `OnGraphLayoutSettled` and `FitGraphAsync` sync `_zoomFactor` from the graph. The existing **Fit** button is retained as the view-reset control; the `'zoom'` event re-runs `updateLabels`, so the zoom-threshold label logic composes automatically.
+- **Item 3 (tests + docs):** Web 139 (+6) — new `GraphExplorerBindingTests` (initGraph defines the `grab`/`drag`/`free` handlers, the `found_in` exclusivity check, and `relationshipType` edge data; `index.html` defines `setGraphZoom`/`getGraphZoom`; `GraphExplorer.razor` renders the slider + factor inputs and wires Fit/zoom sync). Foundation 55 / Repository 157 / RAGS 361 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/graph` — drag a source-document node (teal) and its exclusively-`found_in` children move with it (a child shared by multiple documents stays put); use the toolbar **Zoom** slider or the numeric factor to scale precisely, and **Fit** to reset the view. No schema migration — Web-only.
+
+---
+
+## Sprint 75 progress log (2026-08-16) — completed
+
 ### Sprint 75 — Activity and Chats right rail (2026-08-16)
 
-**Implemented.** See the Sprint 75 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`4899ab3`).** See the Sprint 75 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (in-flow right rail):** `MainLayout.razor` gains `<div class="right-rail">` wrapping `<ActivityPanel />` + `<ChatsPanel />` after `<main>`; `MainLayout.razor.css` adds `.right-rail` (`display: flex; flex-direction: column; flex: 0 0 auto; height: 100vh; position: sticky; top: 0;`). `main` (`flex: 1; min-width: 0`) shrinks when a panel opens — content is pushed, never covered.
 - **Item 2 (panels become in-flow flex rows):** `ActivityPanel.razor` / `ChatsPanel.razor` — the `<aside>` is `display: flex; flex-direction: row; flex: 0 0 auto; align-self: flex-end;` (42px collapsed, `width: 420px; flex: 1 1 auto;` open); the shell renders before the toggle (shell `flex: 1; min-height: 0`, toggle `flex: 0 0 42px`) and drops its `position`-era `height`/`margin-right`; the toggle keeps its vertical label + count badge and gains an icon span (`activity-toggle-icon icon-activity` / `chats-toggle-icon icon-chats`).

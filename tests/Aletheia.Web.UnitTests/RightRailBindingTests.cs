@@ -3,7 +3,7 @@ namespace Aletheia.Web.UnitTests;
 /// <summary>
 /// Sprint 75: the Activity and Chats panels live in an in-flow right rail beside
 /// &lt;main&gt; (mirroring the left sidebar) instead of position:fixed overlays, so
-/// opening a panel PUSHES content instead of covering it. Collapsed = a 42px
+/// opening a panel PUSHES content instead of covering it. Collapsed = a 24px
 /// vertical icon strip with count badges; below the breakpoint the rail returns
 /// to a full-height overlay.
 /// </summary>
@@ -42,6 +42,21 @@ public class RightRailBindingTests
         Assert.Contains("activity-count", activity);
         Assert.Contains("icon-chats", chats);
         Assert.Contains("chats-count", chats);
+    }
+
+    [Fact]
+    public void Collapsed_strips_use_the_same_narrow_width()
+    {
+        var activity = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/ActivityPanel.razor.css"));
+        var chats = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Layout/ChatsPanel.razor.css"));
+
+        // Sprint 78: the collapsed strip is just a few pixels more than the button
+        // content (20px icon + 2px border) — 24px, not 42px — so it stops eating
+        // ~18px of main. Both panels must use the same value so they cannot drift.
+        Assert.Contains("width: 24px", activity);
+        Assert.Contains("flex: 0 0 24px", activity);
+        Assert.Contains("width: 24px", chats);
+        Assert.Contains("flex: 0 0 24px", chats);
     }
 
     [Fact]

@@ -3,7 +3,7 @@
     flex-direction: row;
     flex: 0 0 auto;
     align-self: flex-end;
-    width: 42px;
+    width: 24px;
     color: #111827;
 }
 
@@ -14,8 +14,8 @@
 }
 
 .chats-toggle {
-    flex: 0 0 42px;
-    width: 42px;
+    flex: 0 0 24px;
+    width: 24px;
     min-height: 132px;
     border: 1px solid #cbd5e1;
     border-right: 0;

@@ -1,6 +1,6 @@
 # Backlog: Right Rail Strip Width (narrow the collapsed Activity/Chats strips)
 
-**Status:** **Proposed** — promoted to Sprint 78 (2026-08-16).
+**Status:** **Complete** — all 3 items implemented (Sprint 78, 2026-08-16). Archived.
 **Created:** 2026-08-16
 **Source:** Project-owner request (2026-08-16) — the collapsed right-rail strip that holds the **Activity** and **Chats** toggle buttons is too wide. The buttons are shown vertically (`writing-mode: vertical-rl`), so their content is only ~22px wide (20px icon + 2px border), yet the strip reserves 42px. The extra ~18px eats into `main` and hides a button on the main panel — only a few characters on its left are readable.
 

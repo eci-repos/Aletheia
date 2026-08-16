@@ -53,4 +53,17 @@ One small Web-only CSS pass (no API/backend changes, no schema migration):
 
 ## Implementation Status
 
-**Not yet implemented.** Sprint queued 2026-08-16; work authorized by this file.
+**Implemented (2026-08-16).** All 3 items complete; tests green.
+
+### Item 1 — Narrow the collapsed strip
+- `Layout/ActivityPanel.razor.css` + `Layout/ChatsPanel.razor.css`: `.activity-panel`/`.chats-panel` `width: 42px` → `24px`; `.activity-toggle`/`.chats-toggle` `flex: 0 0 42px; width: 42px` → `flex: 0 0 24px; width: 24px`. The toggle content is a 20px icon + 2px border = 22px; 24px leaves 2px of breathing room. The vertical label (~12.5px) and the count badge (min-width 20px) both fit.
+- `MainLayout.razor.css` `.right-rail` comment: "42px collapsed / 420px open" → "24px collapsed / 420px open". The `.right-rail` width is driven by the widest panel, so the rail itself narrows to 24px when both panels are collapsed.
+- Open state (`.open` `width: 420px; flex: 1 1 auto`) and the `@media (max-width: 640.98px)` overlay fallback are untouched.
+
+### Item 2 — Binding tests
+- **Web 145 (+1)**: `RightRailBindingTests.Collapsed_strips_use_the_same_narrow_width` — both `ActivityPanel.razor.css` and `ChatsPanel.razor.css` use `width: 24px` + `flex: 0 0 24px` (the two panels cannot drift). Class doc comment updated: "Collapsed = a 24px vertical icon strip".
+
+### Item 3 — Docs
+- AGENTS Sprint 75 section ("42px collapsed" → "24px collapsed"), CLAUDE, File 02/03, this sprint file updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh any page — the collapsed Activity/Chats strips are now 24px (a few px more than the button content) and no longer hide the main-panel button. No schema migration — Web-only.

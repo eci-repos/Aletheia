@@ -13,7 +13,7 @@ main {
 
 /* Sprint 75: the Activity/Chats panels live in an in-flow right column beside
    <main> (mirroring the left sidebar) instead of position:fixed overlays. The
-   rail width is driven by the widest panel (42px collapsed / 420px open), so
+   rail width is driven by the widest panel (24px collapsed / 420px open), so
    main (flex: 1; min-width: 0) shrinks and opening a panel PUSHES content —
    it never covers it. Below the breakpoint the rail returns to a full-height
    overlay (see the panel CSS media queries). */

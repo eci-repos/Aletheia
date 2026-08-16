@@ -40,7 +40,13 @@ One small Web-only CSS pass (no API/backend changes, no schema migration): the c
 
 ### Sprint 78 — right rail strip width (2026-08-16)
 
-**Queued.** Sprint file created; work not yet implemented. See the Sprint 78 sprint file "Implementation Status" for the authorized scope.
+**Implemented.** See the Sprint 78 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (narrow the collapsed strip):** `Layout/ActivityPanel.razor.css` + `Layout/ChatsPanel.razor.css` — `.activity-panel`/`.chats-panel` `width: 42px` → `24px`; `.activity-toggle`/`.chats-toggle` `flex: 0 0 42px; width: 42px` → `flex: 0 0 24px; width: 24px`. `MainLayout.razor.css` `.right-rail` comment "42px collapsed" → "24px collapsed". Open state (420px) + responsive overlay fallback unchanged.
+- **Item 2 (binding tests):** Web 145 (+1) — `RightRailBindingTests.Collapsed_strips_use_the_same_narrow_width` (both panels `width: 24px` + `flex: 0 0 24px`); class doc comment 42px → 24px.
+- **Item 3 (docs):** AGENTS Sprint 75 section, CLAUDE, File 02/03, sprint file updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh any page — the collapsed Activity/Chats strips are now 24px (a few px more than the button content) and no longer hide the main-panel button. No schema migration — Web-only.
 
 ---
 
@@ -87,7 +93,9 @@ One small Web-only CSS pass (no API/backend changes, no schema migration): the c
 - **Item 4 (responsive fallback):** both panel CSS files — `@media (max-width: 640.98px)` makes `.right-rail` `position: fixed; top: 0; right: 0; bottom: 0; z-index: 30;` and open panels `width: calc(100vw - 12px)`.
 - **Item 5 (tests + docs):** Web 133 (+6) — new `RightRailBindingTests` (MainLayout renders the panels inside a `.right-rail`; panels collapsed by default; `icon-activity`/`icon-chats` + `activity-count`/`chats-count` present; panel CSS in-flow with a `@media (max-width: 640.98px)` overlay fallback; `app.css` defines the two icons). Foundation 55 / Repository 157 / RAGS 361 unchanged; build 0 errors; docs updated; backlog item archived.
 
-**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh any page (e.g. `/graph`, `/search`) — the Activity/Chats strips sit at the right edge as 42px icon strips; opening one pushes the content instead of covering it; both start collapsed. On a narrow window (< 641px) the rail returns to an overlay. No schema migration — Web-only.
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh any page (e.g. `/graph`, `/search`) — the Activity/Chats strips sit at the right edge as 24px icon strips; opening one pushes the content instead of covering it; both start collapsed. On a narrow window (< 641px) the rail returns to an overlay. No schema migration — Web-only.
+
+**Follow-up (2026-08-16):** the collapsed strip was too wide (42px vs ~22px of button content) and hid a main-panel button — narrowed to 24px in Sprint 78.
 
 ---
 

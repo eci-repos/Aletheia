@@ -20,5 +20,6 @@ Fully-implemented backlog files are moved here from `docs/backlog/` so the activ
 | `Activity-Chats-Right-Rail.md` | All 4 items implemented (Sprint 75) — archived 2026-08-16 |
 | `Graph-Drag-Group-and-Scale-Slider.md` | All 3 items implemented (Sprint 76) — archived 2026-08-16 |
 | `AI-Agent-Instructions-by-Role.md` | All 6 items implemented (Sprint 77) — archived 2026-08-16 |
+| `Right-Rail-Strip-Width.md` | All 3 items implemented (Sprint 78) — archived 2026-08-16 |
 
 Keep the historical file contents untouched except for the status header: the promotion history (sprint, commit, date) is the record of how each item was delivered.

@@ -1,6 +1,6 @@
 # Backlog: AI Agent Instructions by Role (Config-Seeded, Admin-Overridable)
 
-**Status:** **Proposed** — not yet promoted to a sprint. No work authorized.
+**Status:** **Implemented** — all 6 items delivered in Sprint 77 (2026-08-16). See `docs/sprints/Sprint-77 - AI Agent Instructions by Role.md`.
 **Created:** 2026-08-11
 **Source:** Design review with the project owner of where AI agent instructions live today and how operators tune them. Agent personas/instructions are currently split across `ChatAgentOptions` (`appsettings.json` `ChatAgent` section), the orchestration script file `src/Repository.API/Prompts/copilot-rags-orchestration.md`, and hard-coded system prompts in `SemanticKernelChatService.BuildSystemPrompt()` and the GraphIntelligence services (`EntityExtractionService`, `GraphReasoningService`). The Sprint 61 settings foundation (`app_settings` + `ISettingsService` singleton + `GET/PUT /api/settings`, admin) provides the natural home for runtime overrides.
 

@@ -1,4 +1,5 @@
 using Aletheia.Foundation.Shared;
+using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -8,10 +9,12 @@ namespace Aletheia.RAGS.Application.GraphIntelligence;
 public sealed class EntityExtractionService : IEntityExtractionService
 {
     private readonly Kernel _kernel;
+    private readonly IAgentInstructionResolver? _instructionResolver;
 
-    public EntityExtractionService(Kernel kernel)
+    public EntityExtractionService(Kernel kernel, IAgentInstructionResolver? instructionResolver = null)
     {
         _kernel = kernel ?? throw new ArgumentNullException(nameof(kernel));
+        _instructionResolver = instructionResolver;
     }
 
     public async Task<Result<IReadOnlyList<ExtractedEntity>>> DiscoverAsync(string text, IGraphTraversalBudget? budget = null, CancellationToken cancellationToken = default)
@@ -23,10 +26,7 @@ public sealed class EntityExtractionService : IEntityExtractionService
         {
             var chatCompletion = _kernel.GetRequiredService<IChatCompletionService>();
             var history = new ChatHistory();
-            history.AddSystemMessage(
-                "You are an entity extraction assistant. Extract named entities from the provided text. " +
-                "Return a JSON array of objects with 'name' (string), 'type' (string, e.g., Person, Organization, Location, Technology, Concept), " +
-                "and 'description' (string) fields. Example: [{\"name\":\"Microsoft\",\"type\":\"Organization\",\"description\":\"A multinational technology corporation\"}]");
+            history.AddSystemMessage(await ResolveExtractorInstructionsAsync(cancellationToken).ConfigureAwait(false));
             history.AddUserMessage(text);
 
             var response = await chatCompletion.GetChatMessageContentAsync(history, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -47,6 +47,26 @@ public sealed class EntityExtractionService : IEntityExtractionService
             var entities = SimpleExtractEntities(text);
             return Result<IReadOnlyList<ExtractedEntity>>.Success(entities);
         }
+    }
+
+    /// <summary>Sprint 77: the extractor system prompt resolves through <see cref="IAgentInstructionResolver"/>
+    /// (<c>graphrag.extractor</c>); the hard-coded prompt is the backward-compat fallback.</summary>
+    private async Task<string> ResolveExtractorInstructionsAsync(CancellationToken cancellationToken)
+    {
+        if (_instructionResolver is not null)
+        {
+            var resolved = await _instructionResolver
+                .ResolveAsync(AgentInstructionRoles.GraphRagExtractor, cancellationToken)
+                .ConfigureAwait(false);
+            if (resolved.IsSuccess && !string.IsNullOrWhiteSpace(resolved.Value!.Value))
+            {
+                return resolved.Value.Value;
+            }
+        }
+
+        return "You are an entity extraction assistant. Extract named entities from the provided text. " +
+               "Return a JSON array of objects with 'name' (string), 'type' (string, e.g., Person, Organization, Location, Technology, Concept), " +
+               "and 'description' (string) fields. Example: [{\"name\":\"Microsoft\",\"type\":\"Organization\",\"description\":\"A multinational technology corporation\"}]";
     }
 
     private static IReadOnlyList<ExtractedEntity> TryParseJsonEntities(string json)

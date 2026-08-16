@@ -392,6 +392,40 @@ public class ChatPlanApprovalServiceTests
 
             return Task.FromResult(Result<bool>.Success(true));
         }
+
+        public Task<Result<string?>> GetStringAsync(string key, string? userId = null, CancellationToken cancellationToken = default)
+        {
+            var raw = userId is null
+                ? _app.TryGetValue(key, out var v) ? v : null
+                : _users.TryGetValue(userId, out var user) && user.TryGetValue(key, out var uv) ? uv : null;
+            return Task.FromResult(Result<string?>.Success(raw));
+        }
+
+        public Task<Result<bool>> SetStringAsync(string key, string value, string? userId = null, CancellationToken cancellationToken = default)
+        {
+            if (userId is null)
+            {
+                _app[key] = value;
+            }
+            else
+            {
+                if (!_users.TryGetValue(userId, out var user))
+                {
+                    user = new Dictionary<string, string>();
+                    _users[userId] = user;
+                }
+
+                user[key] = value;
+            }
+
+            return Task.FromResult(Result<bool>.Success(true));
+        }
+
+        public Task<Result<bool>> ClearAppSettingAsync(string key, CancellationToken cancellationToken = default)
+        {
+            _app.Remove(key);
+            return Task.FromResult(Result<bool>.Success(true));
+        }
     }
 
     private static ChatPlanRecord Map(ChatExecutionPlan plan)

@@ -1,5 +1,6 @@
 @page "/settings"
 @using Aletheia.Foundation.Security
+@using Aletheia.Web.Services
 @inject RepositoryApiClient ApiClient
 @inject AuthService Auth
 
@@ -75,6 +76,49 @@
                 </AuthorizeView>
             </div>
         </div>
+
+        <AuthorizeView Roles="Administrator" Context="adminContext">
+            <Authorized>
+                <div class="card mt-3">
+                    <div class="card-header bg-secondary text-white">AI Agent Instructions (Administrator)</div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            Per-role system prompts that shape how each AI agent behaves. Overrides take effect
+                            immediately; reset returns a role to its config default.
+                        </p>
+
+                        @if (_agentInstructions is null)
+                        {
+                            <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                        }
+                        else
+                        {
+                            @foreach (var item in _agentInstructions)
+                            {
+                                <div class="agent-instruction-item mb-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <strong class="text-break">@item.Role</strong>
+                                        <span class="badge @(item.Source == "override" ? "bg-warning text-dark" : "bg-light text-dark border")">
+                                            @(item.Source == "override" ? "Customized" : "Config default")
+                                        </span>
+                                    </div>
+                                    <textarea class="form-control form-control-sm" rows="3" @bind="item.Value"></textarea>
+                                    <div class="mt-1">
+                                        <button class="btn btn-sm btn-primary" @onclick="() => SaveAgentInstructionAsync(item)">Save</button>
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResetAgentInstructionAsync(item)" disabled="@(item.Source != "override")">Reset to config default</button>
+                                    </div>
+                                </div>
+                            }
+                        }
+
+                        @if (!string.IsNullOrEmpty(_agentInstructionsMessage))
+                        {
+                            <div class="alert alert-@(_agentInstructionsSuccess ? "success" : "danger") mt-2 mb-0">@_agentInstructionsMessage</div>
+                        }
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
     </Authorized>
 </AuthorizeView>
 
@@ -85,6 +129,9 @@
     private bool? _globalSaved;
     private string _savedMessage = string.Empty;
     private string _globalSavedMessage = string.Empty;
+    private List<AgentInstructionItem>? _agentInstructions;
+    private string _agentInstructionsMessage = string.Empty;
+    private bool _agentInstructionsSuccess;
 
     protected override async Task OnInitializedAsync()
     {
@@ -106,11 +153,40 @@
                 {
                     _forceApproval = string.Equals(force, "true", StringComparison.OrdinalIgnoreCase);
                 }
+
+                _agentInstructions = (await ApiClient.GetAgentInstructionsAsync())?.ToList();
             }
         }
         catch (HttpRequestException)
         {
             // Keep defaults; the API enforces access.
+        }
+    }
+
+    private async Task SaveAgentInstructionAsync(AgentInstructionItem item)
+    {
+        var ok = await ApiClient.UpdateAgentInstructionAsync(item.Role, item.Value);
+        _agentInstructionsSuccess = ok;
+        _agentInstructionsMessage = ok
+            ? $"Saved {item.Role}."
+            : $"Failed to save {item.Role}.";
+        if (ok)
+        {
+            item.Source = "override";
+        }
+    }
+
+    private async Task ResetAgentInstructionAsync(AgentInstructionItem item)
+    {
+        var ok = await ApiClient.ResetAgentInstructionAsync(item.Role);
+        _agentInstructionsSuccess = ok;
+        _agentInstructionsMessage = ok
+            ? $"Reset {item.Role} to config default."
+            : $"Failed to reset {item.Role}.";
+        if (ok)
+        {
+            // Re-fetch so the value reflects the config baseline.
+            _agentInstructions = (await ApiClient.GetAgentInstructionsAsync())?.ToList();
         }
     }
 

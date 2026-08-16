@@ -109,6 +109,46 @@ public sealed class SettingsService : ISettingsService
             : await SetUserSettingAsync(userId, key, value.ToString(), cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<Result<string?>> GetStringAsync(string key, string? userId = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return Result<string?>.Failure("Setting key is required.");
+        }
+
+        if (userId is null)
+        {
+            await EnsureAppLoadedAsync(cancellationToken).ConfigureAwait(false);
+            return Result<string?>.Success(_appCache.TryGetValue(key, out var appStored) ? appStored : null);
+        }
+
+        var cache = await GetUserCacheAsync(userId, cancellationToken).ConfigureAwait(false);
+        return Result<string?>.Success(cache.Values.TryGetValue(key, out var userStored) ? userStored : null);
+    }
+
+    public async Task<Result<bool>> SetStringAsync(string key, string value, string? userId = null, CancellationToken cancellationToken = default)
+    {
+        return userId is null
+            ? await SetAppSettingAsync(key, value, updatedBy: null, cancellationToken).ConfigureAwait(false)
+            : await SetUserSettingAsync(userId, key, value, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<Result<bool>> ClearAppSettingAsync(string key, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return Result<bool>.Failure("Setting key is required.");
+        }
+
+        var result = await _repository.DeleteAppSettingAsync(key, cancellationToken).ConfigureAwait(false);
+        if (result.IsSuccess)
+        {
+            _appCache.TryRemove(key, out _);
+        }
+
+        return result;
+    }
+
     private async Task EnsureAppLoadedAsync(CancellationToken cancellationToken)
     {
         if (_appLoaded)

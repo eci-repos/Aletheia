@@ -1,5 +1,6 @@
 using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Interfaces;
+using Aletheia.RAGS.Application.AgentInstructions;
 using Aletheia.RAGS.Application.Planning;
 using Aletheia.RAGS.Application.Providers;
 using Aletheia.RAGS.Application.SemanticKernel;
@@ -36,6 +37,7 @@ public static class AIServiceCollectionExtensions
         services.Configure<ChatPlanningOptions>(configuration.GetSection(ChatPlanningOptions.SectionName));
         services.Configure<ChatExecutionEngineOptions>(configuration.GetSection(ChatExecutionEngineOptions.SectionName));
         services.Configure<ChatAgentOptions>(configuration.GetSection(ChatAgentOptions.SectionName));
+        services.Configure<AgentInstructionsOptions>(configuration.GetSection(AgentInstructionsOptions.SectionName));
 
         // Chat planning abstractions
         services.AddSingleton<IChatPlanningService, ChatPlanningService>();
@@ -127,6 +129,9 @@ public static class AIServiceCollectionExtensions
             services.AddSingleton<IEmbeddingProvider>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
             services.AddSingleton<IEmbeddingService>(sp => sp.GetRequiredService<SimpleEmbeddingProvider>());
         }
+
+        // Sprint 77: per-role AI agent instructions — config-seeded baseline, admin-overridable via app_settings.
+        services.AddSingleton<IAgentInstructionResolver, AgentInstructionResolver>();
 
         // Semantic Kernel AI services
         services.AddSingleton<IChatAgentInstructionProvider, FileChatAgentInstructionProvider>();

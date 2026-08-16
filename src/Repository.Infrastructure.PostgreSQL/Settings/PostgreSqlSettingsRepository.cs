@@ -95,6 +95,25 @@ public sealed class PostgreSqlSettingsRepository : ISettingsRepository
         }
     }
 
+    public async Task<Result<bool>> DeleteAppSettingAsync(string key, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            await connection.ExecuteAsync(
+                "DELETE FROM app_settings WHERE key = @Key",
+                new { Key = key }).ConfigureAwait(false);
+
+            return Result<bool>.Success(true);
+        }
+        catch (Exception ex)
+        {
+            return Result<bool>.Failure($"App setting delete failed: {ex.Message}");
+        }
+    }
+
     private sealed class SettingRow
     {
         public string Key { get; set; } = string.Empty;

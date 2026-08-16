@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using Aletheia.Foundation.Security;
+using Aletheia.RAGS.Abstractions.Configuration;
+using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.Repository.Abstractions.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,11 +13,15 @@ namespace Repository.API.Controllers;
 [Authorize]
 public class SettingsController : ControllerBase
 {
-    private readonly ISettingsService _settings;
+    private const int MaxAgentInstructionLength = 20_000;
 
-    public SettingsController(ISettingsService settings)
+    private readonly ISettingsService _settings;
+    private readonly IAgentInstructionResolver? _agentInstructions;
+
+    public SettingsController(ISettingsService settings, IAgentInstructionResolver? agentInstructions = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _agentInstructions = agentInstructions;
     }
 
     // Global (admin-managed) settings
@@ -90,5 +96,74 @@ public class SettingsController : ControllerBase
         return updated.IsSuccess ? Ok(updated.Value) : StatusCode(500, new { error = updated.Error });
     }
 
+    // Agent instructions (Sprint 77) — per-role AI agent system prompts. Config-seeded baseline,
+    // admin-overridable via app_settings; row-existence is the "modified" marker.
+    [HttpGet("agent-instructions")]
+    [Authorize(Roles = RoleDefinitions.Administrator)]
+    public async Task<ActionResult<IReadOnlyList<Aletheia.RAGS.Abstractions.Models.AgentInstructionResolution>>> GetAgentInstructions(CancellationToken cancellationToken)
+    {
+        if (_agentInstructions is null)
+        {
+            return StatusCode(500, new { error = "Agent instruction resolver is not configured." });
+        }
+
+        var result = new List<Aletheia.RAGS.Abstractions.Models.AgentInstructionResolution>();
+        foreach (var role in AgentInstructionRoles.All)
+        {
+            var resolved = await _agentInstructions.ResolveAsync(role, cancellationToken).ConfigureAwait(false);
+            if (resolved.IsFailure)
+            {
+                return StatusCode(500, new { error = resolved.Error });
+            }
+
+            result.Add(resolved.Value);
+        }
+
+        return Ok(result);
+    }
+
+    [HttpPut("agent-instructions/{role}")]
+    [Authorize(Roles = RoleDefinitions.Administrator)]
+    public async Task<IActionResult> UpdateAgentInstruction(string role, [FromBody] UpdateAgentInstructionRequest request, CancellationToken cancellationToken)
+    {
+        if (!AgentInstructionRoles.IsKnown(role))
+        {
+            return BadRequest(new { error = $"Unknown agent instruction role '{role}'." });
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.Value))
+        {
+            return BadRequest(new { error = "Agent instruction value is required." });
+        }
+
+        if (request.Value.Length > MaxAgentInstructionLength)
+        {
+            return BadRequest(new { error = $"Agent instruction exceeds the {MaxAgentInstructionLength} character limit." });
+        }
+
+        var result = await _settings.SetAppSettingAsync(
+            AgentInstructionRoles.SettingKey(role),
+            request.Value,
+            CurrentUserId,
+            cancellationToken).ConfigureAwait(false);
+
+        return result.IsSuccess ? Ok() : BadRequest(new { error = result.Error });
+    }
+
+    [HttpDelete("agent-instructions/{role}")]
+    [Authorize(Roles = RoleDefinitions.Administrator)]
+    public async Task<IActionResult> ResetAgentInstruction(string role, CancellationToken cancellationToken)
+    {
+        if (!AgentInstructionRoles.IsKnown(role))
+        {
+            return BadRequest(new { error = $"Unknown agent instruction role '{role}'." });
+        }
+
+        var result = await _settings.ClearAppSettingAsync(AgentInstructionRoles.SettingKey(role), cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess ? NoContent() : BadRequest(new { error = result.Error });
+    }
+
     private string? CurrentUserId => User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 }
+
+public sealed record UpdateAgentInstructionRequest(string Value);

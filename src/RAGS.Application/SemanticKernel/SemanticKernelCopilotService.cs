@@ -102,7 +102,9 @@ public sealed class SemanticKernelCopilotService : ICopilotService
         Result<IReadOnlyList<SearchResult>> retrieval;
         KnowledgeSource? source;
         var answerProfile = SelectAnswerProfile(userMessage, requestOptions);
-        var orchestrationInstructions = _instructionProvider?.GetInstructions();
+        var orchestrationInstructions = _instructionProvider is not null
+            ? await _instructionProvider.GetInstructionsAsync(cancellationToken).ConfigureAwait(false)
+            : null;
         var topK = Math.Clamp(_options.RetrievalTopK, 1, 20);
         var retrievalQuery = BuildRetrievalQuery(userMessage, answerProfile);
         if (requestOptions?.RetrievalResults is { Count: > 0 } providedResults)

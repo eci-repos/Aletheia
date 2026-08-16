@@ -1,47 +1,69 @@
-# Sprint 76 - Graph Drag-Group and Scale Slider
+# Sprint 77 - AI Agent Instructions by Role
 
 **Status:** Active (2026-08-16)
 
-Full authority: `docs/sprints/Sprint-76 - Graph Drag-Group and Scale Slider.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-77 - AI Agent Instructions by Role.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 75 (Activity and Chats Right Rail) is **complete, committed, and pushed** on `origin/master` (`4899ab3`).
+Sprint 76 (Graph Drag-Group and Scale Slider) is **complete, committed, and pushed** on `origin/master` (`8eb3d6a`).
 
 ## Objective
 
-One coherent Graph Explorer UX pass (Web-only — no API/backend changes, no schema migration):
+Give operators a single, admin-managed surface to view and tune the AI agent system prompts at runtime — config stays the shipped baseline, `app_settings` overrides win, and "reset to config default" is a first-class action. Six work items:
 
-1. **Drag-group on source nodes.** In the Graph Explorer, dragging a source-document node (type `Source`) also moves the entity nodes attributed to it via `found_in` edges — but only those **solely based on this doc** (a child found in multiple documents stays put). Flat rendering preserved: the group is delta translation, not hierarchy.
-2. **Scale slider + numeric scaling factor.** An explicit zoom control in the Graph Explorer toolbar: a range slider (25%–300%) plus a numeric factor input, wired to `cy.zoom({ level })`. The existing zoom-threshold label logic re-runs automatically at the new scale. A **Fit** button resets the view (already present in the toolbar).
-3. **Tests + docs.** Web binding tests lock down the `initGraph` drag-group contract and the zoom control; AGENTS/CLAUDE/File 02/03 + sprint file; backlog item archived when complete.
+1. **Settings foundation extension** — `GetStringAsync`/`SetStringAsync`/`ClearAppSettingAsync` on `ISettingsService`/`SettingsService` (+ `DeleteAppSettingAsync` on `ISettingsRepository`).
+2. **Config section + role registry** — `AgentInstructionsOptions` bound section + canonical role key registry (`AgentInstructionRoles`).
+3. **Precedence resolver** — `AgentInstructionResolver` (Application) implementing `ResolveAsync(role)`: `app_settings` row exists → DB value; else → config value; wired into every prompt-building consumer.
+4. **API surface** — `GET /api/settings/agent-instructions` (list roles + effective value + source), `PUT /api/settings/agent-instructions/{role}` (write override, Administrator), `DELETE /api/settings/agent-instructions/{role}` (reset to config, Administrator).
+5. **Admin Settings panel card** — "AI Agent Instructions" card on `/settings` (admin-gated): per-role edit controls, Customized/Config-default badge, Reset button.
+6. **Tests** — precedence + resolver + controller + Web binding tests.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Drag-group on source nodes:** in `initGraph` (`wwwroot/index.html`), edge elements gain `relationshipType: e.relationshipType`; `grab`/`drag`/`free` handlers on `window.cy` — on grab of a `SourceDocument` node, `computeDragGroup` returns the node + every non-source node whose `found_in` edges all point to this document (`exclusivelyInThisSource`); on each drag tick, group members are translated by the dragged node's delta from its grab-time position; on `free`, the group state is cleared. Positions persist across re-renders via the existing `preservePositions` flow.
-2. **Scale slider + numeric factor + Fit:** `GraphExplorer.razor` toolbar gains a `.graph-zoom` control (`#graph-zoom-slider` range 25–300 + `#graph-zoom-factor` number 0.25–3 + `×` unit); slider `@oninput` / number `@onchange` update `_zoomFactor` (clamped) and call `setGraphZoom`. `index.html` defines `window.setGraphZoom` (clamps + `cy.zoom({ level })`) and `window.getGraphZoom`. `OnGraphLayoutSettled` and `FitGraphAsync` sync `_zoomFactor` from the graph. The existing **Fit** button is retained as the view-reset control.
-3. **Tests + docs:** Web binding tests (`GraphExplorerBindingTests`); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
+1. **Settings foundation extension:** `ISettingsService` gains `GetStringAsync` (`Result<string?>`, null when missing), `SetStringAsync`, `ClearAppSettingAsync`; `ISettingsRepository` gains `DeleteAppSettingAsync`; `PostgreSqlSettingsRepository` implements it; `SettingsService` implements all three.
+2. **Config section + role registry:** `AgentInstructionsOptions` (`SectionName = "AgentInstructions"`, `Roles` dictionary) + `AgentInstructionRoles` (5 roles: `copilot.assistant`, `copilot.orchestrator`, `graphrag.extractor`, `graphrag.summarizer`, `graphrag.query`; `IsKnown`, `SettingKey`). `appsettings.json` seeds the three GraphRAG prompts; `copilot.assistant`/`copilot.orchestrator` stay out of config (composed/loaded baselines).
+3. **Precedence resolver + consumers:** `AgentInstructionResolver` (`RAGS.Application/AgentInstructions`) — DB override → config value → role-specific baseline; `AgentInstructionResolution(role, value, source)`. Wired into `SemanticKernelChatService` (`copilot.assistant`), `FileChatAgentInstructionProvider` (`copilot.orchestrator`, now async), `EntityExtractionService` (`graphrag.extractor`), `GraphReasoningService` (`graphrag.query`), `GraphSummaryService` (`graphrag.summarizer`). Registered in `AIServiceCollectionExtensions`.
+4. **API surface:** `SettingsController` — `GET agent-instructions` (list + source), `PUT agent-instructions/{role}` (validate known role / non-empty / ≤ 20k, write override), `DELETE agent-instructions/{role}` (reset → NoContent). All Administrator.
+5. **Admin Settings panel card:** `Pages/Settings/Index.razor` — "AI Agent Instructions (Administrator)" card (admin-gated): per-role textarea + Customized/Config-default badge + Save + Reset (disabled on config default). `RepositoryApiClient` gains the three client methods.
+6. **Tests + docs:** RAGS `AgentInstructionResolverTests` (9), Repository `AgentInstructionsControllerTests` (8) + `SettingsServiceTests` string accessors (5), Web `SettingsAgentInstructionsBindingTests` (5); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Acceptance Criteria
 
-- Dragging a source-document node moves its exclusively-`found_in` children with it; a child found in multiple documents stays put; dragging a non-source node moves only that node.
-- The toolbar has an explicit zoom control: a range slider (25%–300%) and a numeric scaling factor input that both apply the zoom; the control reflects the graph's actual zoom after load/layout/Fit.
-- The existing Fit button resets the view; the zoom-threshold label logic still works at the new scale.
-- No API, backend, or schema changes — Web-only.
+- A role's effective instructions are the `app_settings` row when one exists, otherwise the config baseline; clearing the row returns the role to baseline.
+- The admin Settings panel shows every role with its effective value and source, and can save an override or reset to config default.
+- All five prompt consumers resolve through the resolver; the hard-coded prompts remain the fallback when no resolver/config value exists.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Compound/parent-node rendering (the flat graph look is preserved — group drag is delta translation, not hierarchy).
-- Recursive subtree dragging beyond one hop (a child whose descendants are also exclusively this doc could be an extension).
-- Changing graph node/edge data, API contracts, or backend behavior — Web-only (no schema migration).
-- Physics simulations or layout algorithm changes — the existing `getGraphLayoutOptions`/`Re-layout` flow is untouched.
+- User-role RBAC changes (Administrator/… role permissions).
+- Per-user agent instructions (global/app-level only; per-user stays `user_settings` territory).
+- Prompt-versioning history / rollback beyond "reset to config baseline".
+- Secrets or credentials in agent instructions — admin-only plain text, not treated as sensitive.
 
 ---
 
 ## Progress
 
+### Sprint 77 — AI agent instructions by role (2026-08-16)
+
+**Implemented.** See the Sprint 77 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (settings foundation extension):** `ISettingsService` gains `GetStringAsync` (`Result<string?>`, null when missing), `SetStringAsync`, `ClearAppSettingAsync`; `ISettingsRepository` gains `DeleteAppSettingAsync`; `PostgreSqlSettingsRepository` implements it (`DELETE FROM app_settings WHERE key = @Key`); `SettingsService` implements all three (cache read / delegate to set / delete + evict).
+- **Item 2 (config section + role registry):** `AgentInstructionsOptions` (`SectionName = "AgentInstructions"`, `Roles` dictionary) + `AgentInstructionRoles` (5 roles, `IsKnown`, `SettingKey` → `agent.instructions.<role>`). `appsettings.json` seeds the three GraphRAG prompts; `copilot.assistant`/`copilot.orchestrator` stay out of config (composed/loaded baselines).
+- **Item 3 (precedence resolver + consumers):** `AgentInstructionResolver` (`RAGS.Application/AgentInstructions`) — DB override → config value → role-specific baseline (`ComposeAssistantPersona` from `ChatAgentOptions` / `LoadOrchestrationScript` from `OrchestrationScriptPath`); `AgentInstructionResolution(role, value, source)`. Wired into `SemanticKernelChatService` (`copilot.assistant`), `FileChatAgentInstructionProvider` (`copilot.orchestrator`, now async), `EntityExtractionService` (`graphrag.extractor`), `GraphReasoningService` (`graphrag.query`), `GraphSummaryService` (`graphrag.summarizer`). Registered in `AIServiceCollectionExtensions`.
+- **Item 4 (API surface):** `SettingsController` — `GET agent-instructions` (list + source), `PUT agent-instructions/{role}` (validate known role / non-empty / ≤ 20k, write override), `DELETE agent-instructions/{role}` (reset → NoContent). All Administrator.
+- **Item 5 (admin Settings panel card):** `Pages/Settings/Index.razor` — "AI Agent Instructions (Administrator)" card (admin-gated): per-role textarea + Customized/Config-default badge + Save + Reset (disabled on config default). `RepositoryApiClient` gains `GetAgentInstructionsAsync` / `UpdateAgentInstructionAsync` / `ResetAgentInstructionAsync`.
+- **Item 6 (tests + docs):** RAGS 369 (+9) — `AgentInstructionResolverTests` (precedence: DB wins / config / after-clear / whitespace-ignored, unknown role, persona composition, orchestration file load, empty baseline); Repository 170 (+13) — `AgentInstructionsControllerTests` (8) + `SettingsServiceTests` string accessors (5); Web 144 (+5) — `SettingsAgentInstructionsBindingTests` (card, badge, buttons, admin load, client endpoints). Foundation 55 unchanged; build 0 errors; docs updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/settings` as an Administrator — the **AI Agent Instructions** card lists all five roles with their effective prompts; edit one and **Save** (badge flips to **Customized**), then **Reset to config default** (badge returns to **Config default**). Re-ask a Copilot question or run a GraphRAG search to see the override take effect. No schema migration — the `app_settings` table already exists (Sprint 61).
+
+---
+
+## Sprint 76 progress log (2026-08-16) — completed
+
 ### Sprint 76 — Graph drag-group + scale slider (2026-08-16)
 
-**Implemented.** See the Sprint 76 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`8eb3d6a`).** See the Sprint 76 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (drag-group on source nodes):** `wwwroot/index.html` `initGraph` — edge elements now carry `relationshipType: e.relationshipType`; `grab`/`drag`/`free` handlers on `window.cy` implement the group (`computeDragGroup` + `exclusivelyInThisSource` exclusivity check; delta translation from grab-time positions; cleared on `free`). Positions persist via the existing `preservePositions` flow.
 - **Item 2 (scale slider + numeric factor + Fit):** `GraphExplorer.razor` toolbar gains a `.graph-zoom` control (`#graph-zoom-slider` range 25–300 + `#graph-zoom-factor` number 0.25–3 + `×` unit); slider `@oninput` / number `@onchange` update `_zoomFactor` (clamped) and call `setGraphZoom`. `index.html` defines `window.setGraphZoom` (clamps + `cy.zoom({ level })`) and `window.getGraphZoom`. `OnGraphLayoutSettled` and `FitGraphAsync` sync `_zoomFactor` from the graph. The existing **Fit** button is retained as the view-reset control; the `'zoom'` event re-runs `updateLabels`, so the zoom-threshold label logic composes automatically.

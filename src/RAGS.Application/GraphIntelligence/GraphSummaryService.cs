@@ -1,5 +1,6 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.KnowledgeGraph.Abstractions.Models;
+using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -12,15 +13,18 @@ public sealed class GraphSummaryService : IGraphSummaryService
     private readonly Kernel _kernel;
     private readonly IGraphProvider _provider;
     private readonly ICommunityDetectionService _communityDetection;
+    private readonly IAgentInstructionResolver? _instructionResolver;
 
     public GraphSummaryService(
         Kernel kernel,
         IGraphProvider provider,
-        ICommunityDetectionService communityDetection)
+        ICommunityDetectionService communityDetection,
+        IAgentInstructionResolver? instructionResolver = null)
     {
         _kernel = kernel ?? throw new ArgumentNullException(nameof(kernel));
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _communityDetection = communityDetection ?? throw new ArgumentNullException(nameof(communityDetection));
+        _instructionResolver = instructionResolver;
     }
 
     public async Task<Result<string>> SummarizeEntityAsync(string entityId, CancellationToken cancellationToken = default)
@@ -234,9 +238,7 @@ public sealed class GraphSummaryService : IGraphSummaryService
         {
             var chatCompletion = _kernel.GetRequiredService<IChatCompletionService>();
             var history = new ChatHistory();
-            history.AddSystemMessage(
-                "You are a precise knowledge graph summarization assistant. " +
-                "Produce concise, factual summaries without speculation. Use only the provided data.");
+            history.AddSystemMessage(await ResolveSummarizerInstructionsAsync(cancellationToken).ConfigureAwait(false));
             history.AddUserMessage(prompt);
 
             var response = await chatCompletion.GetChatMessageContentAsync(history, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -247,5 +249,24 @@ public sealed class GraphSummaryService : IGraphSummaryService
             // Fallback: if LLM is unavailable, return a structured text summary
             return prompt.Replace("Generate a ", "Generated ").Replace("based on the information above", "from available data");
         }
+    }
+
+    /// <summary>Sprint 77: the summarizer system prompt resolves through <see cref="IAgentInstructionResolver"/>
+    /// (<c>graphrag.summarizer</c>); the hard-coded prompt is the backward-compat fallback.</summary>
+    private async Task<string> ResolveSummarizerInstructionsAsync(CancellationToken cancellationToken)
+    {
+        if (_instructionResolver is not null)
+        {
+            var resolved = await _instructionResolver
+                .ResolveAsync(AgentInstructionRoles.GraphRagSummarizer, cancellationToken)
+                .ConfigureAwait(false);
+            if (resolved.IsSuccess && !string.IsNullOrWhiteSpace(resolved.Value!.Value))
+            {
+                return resolved.Value.Value;
+            }
+        }
+
+        return "You are a precise knowledge graph summarization assistant. " +
+               "Produce concise, factual summaries without speculation. Use only the provided data.";
     }
 }

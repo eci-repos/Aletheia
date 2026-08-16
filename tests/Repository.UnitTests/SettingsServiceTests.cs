@@ -92,6 +92,67 @@ public class SettingsServiceTests
     }
 
     [Fact]
+    public async Task GetStringAsync_returns_null_when_setting_missing()
+    {
+        var service = CreateService();
+
+        var result = await service.GetStringAsync("agent.instructions.graphrag.extractor");
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task SetStringAsync_then_GetStringAsync_round_trips_app_scope()
+    {
+        var service = CreateService();
+
+        var set = await service.SetStringAsync("agent.instructions.graphrag.extractor", "Extract entities.");
+        var get = await service.GetStringAsync("agent.instructions.graphrag.extractor");
+
+        Assert.True(set.IsSuccess);
+        Assert.True(get.IsSuccess);
+        Assert.Equal("Extract entities.", get.Value);
+    }
+
+    [Fact]
+    public async Task SetStringAsync_then_GetStringAsync_round_trips_user_scope()
+    {
+        var service = CreateService();
+
+        var set = await service.SetStringAsync("agent.instructions.graphrag.extractor", "User override.", "user-1");
+        var get = await service.GetStringAsync("agent.instructions.graphrag.extractor", "user-1");
+
+        Assert.True(set.IsSuccess);
+        Assert.True(get.IsSuccess);
+        Assert.Equal("User override.", get.Value);
+    }
+
+    [Fact]
+    public async Task ClearAppSettingAsync_removes_the_row()
+    {
+        var service = CreateService();
+        await service.SetStringAsync("agent.instructions.graphrag.extractor", "Extract entities.");
+
+        var clear = await service.ClearAppSettingAsync("agent.instructions.graphrag.extractor");
+        var get = await service.GetStringAsync("agent.instructions.graphrag.extractor");
+
+        Assert.True(clear.IsSuccess);
+        Assert.True(get.IsSuccess);
+        Assert.Null(get.Value);
+    }
+
+    [Fact]
+    public async Task ClearAppSettingAsync_is_idempotent_when_missing()
+    {
+        var service = CreateService();
+
+        var result = await service.ClearAppSettingAsync("agent.instructions.graphrag.extractor");
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
     public async Task SetAppSettingAsync_rejects_empty_key()
     {
         var service = CreateService();
@@ -137,6 +198,12 @@ public class SettingsServiceTests
             }
 
             user[key] = value;
+            return Task.FromResult(Result<bool>.Success(true));
+        }
+
+        public Task<Result<bool>> DeleteAppSettingAsync(string key, CancellationToken cancellationToken = default)
+        {
+            _app.Remove(key);
             return Task.FromResult(Result<bool>.Success(true));
         }
     }

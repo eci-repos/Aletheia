@@ -1224,6 +1224,35 @@ public sealed class RepositoryApiClient
         return response.IsSuccessStatusCode;
     }
 
+    // Agent instructions (Sprint 77) — per-role AI agent system prompts, admin-managed.
+    public async Task<IReadOnlyList<AgentInstructionItem>?> GetAgentInstructionsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync("/api/settings/agent-instructions", cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<IReadOnlyList<AgentInstructionItem>>(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateAgentInstructionAsync(string role, string value, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PutAsJsonAsync(
+            $"/api/settings/agent-instructions/{Uri.EscapeDataString(role)}",
+            new { value },
+            cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> ResetAgentInstructionAsync(string role, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.DeleteAsync(
+            $"/api/settings/agent-instructions/{Uri.EscapeDataString(role)}",
+            cancellationToken).ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+
     // ---- Sprint 71: lexicon governance + glossary surface ----
 
     public async Task<IReadOnlyList<LexiconConcept>?> GetLexiconConceptsAsync(string? template = null, CancellationToken cancellationToken = default)

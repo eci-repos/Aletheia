@@ -1,5 +1,6 @@
 using Aletheia.Foundation.Shared;
 using Aletheia.KnowledgeGraph.Abstractions.Models;
+using Aletheia.RAGS.Abstractions.Configuration;
 using Aletheia.RAGS.Abstractions.Interfaces;
 using Aletheia.RAGS.Abstractions.Models;
 using Microsoft.SemanticKernel;
@@ -12,12 +13,18 @@ public sealed class GraphReasoningService : IGraphReasoningService
     private readonly Kernel _kernel;
     private readonly IGraphProvider _provider;
     private readonly IRagsService _ragsService;
+    private readonly IAgentInstructionResolver? _instructionResolver;
 
-    public GraphReasoningService(Kernel kernel, IGraphProvider provider, IRagsService ragsService)
+    public GraphReasoningService(
+        Kernel kernel,
+        IGraphProvider provider,
+        IRagsService ragsService,
+        IAgentInstructionResolver? instructionResolver = null)
     {
         _kernel = kernel ?? throw new ArgumentNullException(nameof(kernel));
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _ragsService = ragsService ?? throw new ArgumentNullException(nameof(ragsService));
+        _instructionResolver = instructionResolver;
     }
 
     public async Task<Result<IReadOnlyList<GraphPath>>> DiscoverReasoningPathsAsync(string query, CancellationToken cancellationToken = default)
@@ -189,9 +196,7 @@ public sealed class GraphReasoningService : IGraphReasoningService
         {
             var chatCompletion = _kernel.GetRequiredService<IChatCompletionService>();
             var history = new ChatHistory();
-            history.AddSystemMessage(
-                "You are an entity extraction assistant. Extract all named entities from the user's query. " +
-                "Return ONLY a comma-separated list of entity names, nothing else. For example: 'Microsoft, Bill Gates, OpenAI'.");
+            history.AddSystemMessage(await ResolveQueryInstructionsAsync(cancellationToken).ConfigureAwait(false));
             history.AddUserMessage(query);
 
             var response = await chatCompletion.GetChatMessageContentAsync(history, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -235,5 +240,24 @@ public sealed class GraphReasoningService : IGraphReasoningService
         }
 
         return matched;
+    }
+
+    /// <summary>Sprint 77: the query-entity system prompt resolves through <see cref="IAgentInstructionResolver"/>
+    /// (<c>graphrag.query</c>); the hard-coded prompt is the backward-compat fallback.</summary>
+    private async Task<string> ResolveQueryInstructionsAsync(CancellationToken cancellationToken)
+    {
+        if (_instructionResolver is not null)
+        {
+            var resolved = await _instructionResolver
+                .ResolveAsync(AgentInstructionRoles.GraphRagQuery, cancellationToken)
+                .ConfigureAwait(false);
+            if (resolved.IsSuccess && !string.IsNullOrWhiteSpace(resolved.Value!.Value))
+            {
+                return resolved.Value.Value;
+            }
+        }
+
+        return "You are an entity extraction assistant. Extract all named entities from the user's query. " +
+               "Return ONLY a comma-separated list of entity names, nothing else. For example: 'Microsoft, Bill Gates, OpenAI'.";
     }
 }

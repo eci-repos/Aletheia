@@ -1,52 +1,54 @@
-# Sprint 77 - AI Agent Instructions by Role
+# Sprint 78 - Right Rail Strip Width (narrow the collapsed Activity/Chats strips)
 
 **Status:** Active (2026-08-16)
 
-Full authority: `docs/sprints/Sprint-77 - AI Agent Instructions by Role.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-78 - Right Rail Strip Width.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 76 (Graph Drag-Group and Scale Slider) is **complete, committed, and pushed** on `origin/master` (`8eb3d6a`).
+Sprint 77 (AI Agent Instructions by Role) is **complete, committed, and pushed** on `origin/master` (`b886a73` + post-sprint fix `44c02c3`).
 
 ## Objective
 
-Give operators a single, admin-managed surface to view and tune the AI agent system prompts at runtime — config stays the shipped baseline, `app_settings` overrides win, and "reset to config default" is a first-class action. Six work items:
+One small Web-only CSS pass (no API/backend changes, no schema migration): the collapsed right-rail strip that holds the **Activity** and **Chats** toggle buttons is too wide. The buttons are shown vertically (`writing-mode: vertical-rl`), so their content is only ~22px wide (20px icon + 2px border), yet the strip reserves 42px — the extra ~18px eats into `main` and hides a button on the main panel. Three work items:
 
-1. **Settings foundation extension** — `GetStringAsync`/`SetStringAsync`/`ClearAppSettingAsync` on `ISettingsService`/`SettingsService` (+ `DeleteAppSettingAsync` on `ISettingsRepository`).
-2. **Config section + role registry** — `AgentInstructionsOptions` bound section + canonical role key registry (`AgentInstructionRoles`).
-3. **Precedence resolver** — `AgentInstructionResolver` (Application) implementing `ResolveAsync(role)`: `app_settings` row exists → DB value; else → config value; wired into every prompt-building consumer.
-4. **API surface** — `GET /api/settings/agent-instructions` (list roles + effective value + source), `PUT /api/settings/agent-instructions/{role}` (write override, Administrator), `DELETE /api/settings/agent-instructions/{role}` (reset to config, Administrator).
-5. **Admin Settings panel card** — "AI Agent Instructions" card on `/settings` (admin-gated): per-role edit controls, Customized/Config-default badge, Reset button.
-6. **Tests** — precedence + resolver + controller + Web binding tests.
+1. **Narrow the collapsed strip** — 42px → **24px** in both panel CSS files and both toggle buttons; update the `.right-rail` comment in `MainLayout.razor.css`. Open state (420px) and the responsive overlay fallback unchanged.
+2. **Binding tests** — `RightRailBindingTests` asserts both panels use the same narrow collapsed width; fix the "42px" doc comment.
+3. **Docs** — AGENTS Sprint 75 section, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Settings foundation extension:** `ISettingsService` gains `GetStringAsync` (`Result<string?>`, null when missing), `SetStringAsync`, `ClearAppSettingAsync`; `ISettingsRepository` gains `DeleteAppSettingAsync`; `PostgreSqlSettingsRepository` implements it; `SettingsService` implements all three.
-2. **Config section + role registry:** `AgentInstructionsOptions` (`SectionName = "AgentInstructions"`, `Roles` dictionary) + `AgentInstructionRoles` (5 roles: `copilot.assistant`, `copilot.orchestrator`, `graphrag.extractor`, `graphrag.summarizer`, `graphrag.query`; `IsKnown`, `SettingKey`). `appsettings.json` seeds the three GraphRAG prompts; `copilot.assistant`/`copilot.orchestrator` stay out of config (composed/loaded baselines).
-3. **Precedence resolver + consumers:** `AgentInstructionResolver` (`RAGS.Application/AgentInstructions`) — DB override → config value → role-specific baseline; `AgentInstructionResolution(role, value, source)`. Wired into `SemanticKernelChatService` (`copilot.assistant`), `FileChatAgentInstructionProvider` (`copilot.orchestrator`, now async), `EntityExtractionService` (`graphrag.extractor`), `GraphReasoningService` (`graphrag.query`), `GraphSummaryService` (`graphrag.summarizer`). Registered in `AIServiceCollectionExtensions`.
-4. **API surface:** `SettingsController` — `GET agent-instructions` (list + source), `PUT agent-instructions/{role}` (validate known role / non-empty / ≤ 20k, write override), `DELETE agent-instructions/{role}` (reset → NoContent). All Administrator.
-5. **Admin Settings panel card:** `Pages/Settings/Index.razor` — "AI Agent Instructions (Administrator)" card (admin-gated): per-role textarea + Customized/Config-default badge + Save + Reset (disabled on config default). `RepositoryApiClient` gains the three client methods.
-6. **Tests + docs:** RAGS `AgentInstructionResolverTests` (9), Repository `AgentInstructionsControllerTests` (8) + `SettingsServiceTests` string accessors (5), Web `SettingsAgentInstructionsBindingTests` (5); AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
+1. **Narrow the collapsed strip:** `Layout/ActivityPanel.razor.css` + `Layout/ChatsPanel.razor.css` — `.activity-panel`/`.chats-panel` `width: 42px` → `24px`; `.activity-toggle`/`.chats-toggle` `flex: 0 0 42px; width: 42px` → `flex: 0 0 24px; width: 24px`. `MainLayout.razor.css` `.right-rail` comment "42px collapsed" → "24px collapsed".
+2. **Binding tests:** `RightRailBindingTests` — new test asserting both panels use the same narrow collapsed width (`width: 24px` + `flex: 0 0 24px`); class doc comment "42px" → "24px".
+3. **Docs:** AGENTS Sprint 75 section ("42px collapsed" → "24px collapsed"), CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Acceptance Criteria
 
-- A role's effective instructions are the `app_settings` row when one exists, otherwise the config baseline; clearing the row returns the role to baseline.
-- The admin Settings panel shows every role with its effective value and source, and can save an override or reset to config default.
-- All five prompt consumers resolve through the resolver; the hard-coded prompts remain the fallback when no resolver/config value exists.
+- The collapsed Activity/Chats strip is 24px wide — just a few pixels more than the button content — and no longer hides the main-panel button (its full label is readable).
+- The open state (420px) and the responsive overlay fallback are unchanged.
+- Both panels use the same collapsed width (binding test).
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- User-role RBAC changes (Administrator/… role permissions).
-- Per-user agent instructions (global/app-level only; per-user stays `user_settings` territory).
-- Prompt-versioning history / rollback beyond "reset to config baseline".
-- Secrets or credentials in agent instructions — admin-only plain text, not treated as sensitive.
+- Changing the open panel width (420px), the panel content, the Activity log data flow, job polling, or the Chats conversation restore flow.
+- The responsive overlay fallback below the breakpoint.
+- Any API, backend, or schema change.
+- If a main-panel button is still clipped after the strip narrows (its container does not shrink), that is a separate layout follow-up.
 
 ---
 
 ## Progress
 
+### Sprint 78 — right rail strip width (2026-08-16)
+
+**Queued.** Sprint file created; work not yet implemented. See the Sprint 78 sprint file "Implementation Status" for the authorized scope.
+
+---
+
+## Sprint 77 progress log (2026-08-16) — completed
+
 ### Sprint 77 — AI agent instructions by role (2026-08-16)
 
-**Implemented.** See the Sprint 77 sprint file "Implementation Status" for full detail:
+**Implemented, committed, and pushed (`b886a73` + post-sprint fix `44c02c3`).** See the Sprint 77 sprint file "Implementation Status" for full detail:
 
 - **Item 1 (settings foundation extension):** `ISettingsService` gains `GetStringAsync` (`Result<string?>`, null when missing), `SetStringAsync`, `ClearAppSettingAsync`; `ISettingsRepository` gains `DeleteAppSettingAsync`; `PostgreSqlSettingsRepository` implements it (`DELETE FROM app_settings WHERE key = @Key`); `SettingsService` implements all three (cache read / delegate to set / delete + evict).
 - **Item 2 (config section + role registry):** `AgentInstructionsOptions` (`SectionName = "AgentInstructions"`, `Roles` dictionary) + `AgentInstructionRoles` (5 roles, `IsKnown`, `SettingKey` → `agent.instructions.<role>`). `appsettings.json` seeds the three GraphRAG prompts; `copilot.assistant`/`copilot.orchestrator` stay out of config (composed/loaded baselines).

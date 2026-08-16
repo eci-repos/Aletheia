@@ -79,6 +79,8 @@ One small Web-only CSS pass (no API/backend changes, no schema migration): the c
 
 **Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/graph` — drag a source-document node (teal) and its exclusively-`found_in` children move with it (a child shared by multiple documents stays put); use the toolbar **Zoom** slider or the numeric factor to scale precisely, and **Fit** to reset the view. No schema migration — Web-only.
 
+**Post-sprint (2026-08-16):** the **Find Path** button next to the From/To dropdowns was truncated and unreadable at 1200–1500px viewports. Root cause: the `.path-finder` grid used `minmax(150px, 1fr)` for both selects, so its content (~498px) overflowed the toolbar's 420px column floor (`minmax(420px, 1.4fr)`) and the rightmost button was clipped at the workspace's `overflow: hidden` edge. Fixed in `GraphExplorer.razor.css`: selects now use `minmax(0, 1fr)` (shrink to fit the column) and the button carries `white-space: nowrap` (never wraps). Web 146 (+1 `PathFinder_grid_lets_selects_shrink_so_find_path_button_is_never_clipped`); build 0 errors.
+
 ---
 
 ## Sprint 75 progress log (2026-08-16) — completed

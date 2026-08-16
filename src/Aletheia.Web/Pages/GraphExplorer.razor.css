@@ -73,7 +73,7 @@
 
 .path-finder {
     display: grid;
-    grid-template-columns: auto minmax(150px, 1fr) auto minmax(150px, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
     gap: 0.5rem;
     align-items: center;
 }
@@ -82,10 +82,15 @@
     margin: 0;
     color: #374151;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .path-finder .form-select {
     min-width: 0;
+}
+
+.path-finder .btn {
+    white-space: nowrap;
 }
 
 .graph-message {

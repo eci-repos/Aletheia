@@ -73,6 +73,20 @@ public class GraphExplorerBindingTests
         Assert.Contains("getGraphZoom", page);
     }
 
+    [Fact]
+    public void PathFinder_grid_lets_selects_shrink_so_find_path_button_is_never_clipped()
+    {
+        var css = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/GraphExplorer.razor.css"));
+
+        // The path-finder grid used minmax(150px, 1fr) for both selects, so its content
+        // (~498px) overflowed the toolbar's 420px column floor and the rightmost "Find Path"
+        // button was clipped at the workspace edge. The selects must be able to shrink
+        // (minmax(0, 1fr)) and the button must never wrap.
+        Assert.Contains("grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto", css);
+        Assert.Contains(".path-finder .btn", css);
+        Assert.Contains("white-space: nowrap", css);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

@@ -8,8 +8,8 @@ namespace Repository.UnitTests.Services;
 
 /// <summary>
 /// Sprint 73: the startup reconciliation sweep must enqueue a targeted RAGS repair for exactly the
-/// registered documents that never completed ingestion (zero embeddings + last_ingested_at NULL), and
-/// must stay quiet when nothing is missing.
+/// registered documents with zero embeddings (the candidate set is embeddings-only — a stale
+/// last_ingested_at marker does not exempt a source), and must stay quiet when nothing is missing.
 /// </summary>
 public class IngestionReconciliationServiceTests
 {

@@ -337,11 +337,17 @@ public sealed class PostgreSqlMetadataRepository : IMetadataRepository
 
     public async Task<Result<IReadOnlyList<Guid>>> GetSourcesMissingIngestionAsync(CancellationToken cancellationToken = default)
     {
+        // Sprint 73 post-fix: the sweep targets ANY source with zero embeddings, regardless of the
+        // last_ingested_at marker. The marker is stamped on completion (success or no-text), so a
+        // source with a stale marker but zero embeddings — an interrupted re-ingest that deleted the
+        // old rows before the write-new-then-swap landed — is invisible to a marker-gated predicate.
+        // Ground truth for the Browser's "Ingested" status is embeddings count, so the sweep must
+        // match that signal exactly. A checked-and-non-ingestable source is re-checked each restart
+        // (cheap: download + extract, no LLM) and self-heals if it later becomes extractable.
         const string sql = @"
             SELECT fm.file_id AS ""FileId""
             FROM file_metadata fm
-            WHERE fm.last_ingested_at IS NULL
-              AND NOT EXISTS (
+            WHERE NOT EXISTS (
                   SELECT 1 FROM embeddings e
                   WHERE e.source_id = fm.file_id
               )

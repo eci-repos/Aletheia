@@ -5,11 +5,12 @@ using Microsoft.Extensions.Logging;
 namespace Aletheia.Repository.API.Services;
 
 /// <summary>
-/// Sprint 73: startup reconciliation sweep. On boot, finds registered documents that never
-/// completed a RAGS ingestion pass (last_ingested_at IS NULL) AND have zero embeddings — the
-/// signature of an interrupted ingestion (the old delete-then-insert race plus the in-memory job
-/// queue being lost on an API restart) — and enqueues a targeted repair for exactly those sources.
-/// Runs once; the durable job queue is a documented follow-up.
+/// Sprint 73: startup reconciliation sweep. On boot, finds registered documents with zero
+/// embeddings — the signature of an interrupted ingestion (the old delete-then-insert race plus the
+/// in-memory job queue being lost on an API restart) — and enqueues a targeted repair for exactly
+/// those sources. The candidate set is embeddings-only (not gated on last_ingested_at): a source
+/// with a stale marker but zero embeddings is still a repair candidate, matching the Browser's
+/// "Ingested" ground truth. Runs once; the durable job queue is a documented follow-up.
 /// </summary>
 public sealed class IngestionReconciliationService : BackgroundService
 {
@@ -60,7 +61,7 @@ public sealed class IngestionReconciliationService : BackgroundService
             }
 
             _logger.LogWarning(
-                "Ingestion reconciliation: {Count} registered document(s) never completed ingestion (zero embeddings, last_ingested_at NULL); enqueuing targeted RAGS repair.",
+                "Ingestion reconciliation: {Count} registered document(s) have zero embeddings; enqueuing targeted RAGS repair.",
                 result.Value.Count);
 
             var snapshot = _ingestionJobs.EnqueueRagsRepairForSources(result.Value);

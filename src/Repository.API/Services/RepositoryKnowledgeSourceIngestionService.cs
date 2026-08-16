@@ -111,8 +111,10 @@ public sealed class RepositoryKnowledgeSourceIngestionService : IKnowledgeSource
         if (!extraction.Value.IsSupported || string.IsNullOrWhiteSpace(extraction.Value.Text))
         {
             _logger.LogInformation("Knowledge source {SourceName} has no extractable text; marking as not ingestable.", source.SourceName);
-            // Sprint 73: a checked-and-non-ingestable source is stamped so the startup reconciliation
-            // sweep does not retry it forever — only never-checked sources (null) are candidates.
+            // Sprint 73: stamp the marker as an audit record ("checked, non-ingestable"). The startup
+            // reconciliation sweep is embeddings-only, so a non-ingestable source is re-checked on the
+            // next restart — cheap (download + extract, no LLM) and self-healing if it later becomes
+            // extractable. The marker is not a sweep gate.
             await StampLastIngestedAsync(source.SourceId, cancellationToken).ConfigureAwait(false);
             return Result<bool>.Success(false);
         }

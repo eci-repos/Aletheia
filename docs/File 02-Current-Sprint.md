@@ -1,41 +1,54 @@
-# Sprint 79 - Graph Orphan-Nodes Toggle
+# Sprint 80 - Copilot Knowledge Panel Collapsed by Default
 
 **Status:** Active (2026-08-17)
 
-Full authority: `docs/sprints/Sprint-79 - Graph Orphan-Nodes Toggle.md` (created 2026-08-17). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-80 - Copilot Knowledge Panel Collapsed by Default.md` (created 2026-08-17). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 78 (Right Rail Strip Width) is **complete, committed, and pushed** on `origin/master` (`6a1b1ea`).
+Sprint 79 (Graph Orphan-Nodes Toggle) is **complete, committed, and pushed** on `origin/master` (`de055c0`).
 
 ## Objective
 
-One small Web-only Graph Explorer filter pass (no API/backend changes, no schema migration, no `wwwroot/index.html` JS changes): the Graph Explorer's `.context-mode` block gains a **Show orphan nodes (technical)** checkbox, **off by default**, that hides degree-0 (isolated) nodes. Three work items:
+One small Web-only Copilot page pass (no API/backend changes, no schema migration): the **Knowledge** (theme) panel auto-opens on **New Chat** and on a fresh session load; the owner wants it to stay collapsed and only expand when the **Knowledge** button is pressed, with no theme selected meaning **all themes**. Three work items:
 
-1. **Orphan toggle + filter** — `_showOrphanNodes` bool (default `false`), "Show orphan nodes (technical)" checkbox in `.context-mode`, `ToggleOrphanNodesAsync` handler, `ApplyOrphanFilter()` (degree computed from `_edges`; drops degree-0 nodes; clears `_pathFrom`/`_pathTo` if needed) — runs from `ApplyGraphScope` after `ApplyChunkFilter()`.
-2. **Tests** — `GraphExplorerTests` logic test on the public static `FilterOrphans` helper (degree-0 nodes dropped) + `GraphExplorerBindingTests` (checkbox present + off by default + filter ordering + path-select clearing).
+1. **Collapsed by default** — remove the two non-button auto-opens of `_showThemePicker`: the `_showThemePicker = true;` in `ResetChatAsync` (the **New chat** handler) and the Sprint 58 fresh-session auto-open block in `OnAfterRenderAsync`. The field already defaults to `false`, so only `OpenThemePickerAsync` (the **Knowledge** button / chips **Edit**) expands the picker.
+2. **No theme selected = all themes (lock the contract)** — `ApplyThemePickerAsync` maps an empty `_selectedThemes` to an empty `_session.ThemeFilter` and `SendChat` passes `null` when `ThemeFilter` is empty (backend treats null source scope as all sources). This existing semantics is documented + binding-tested, not changed.
 3. **Docs** — AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Orphan toggle + filter:** `Pages/GraphExplorer.razor` — `private bool _showOrphanNodes;` (off by default); "Show orphan nodes (technical)" checkbox in `.context-mode`; `ToggleOrphanNodesAsync(ChangeEventArgs)` mirrors `ToggleChunkNodesAsync`; `ApplyGraphScope` calls `ApplyOrphanFilter()` right after `ApplyChunkFilter()`; `public static FilterOrphans(nodes, edges)` computes degree per node from `_edges` (count of edges where the node is `SourceId` or `TargetId`) and returns the kept nodes/edges; private `ApplyOrphanFilter()` applies it and clears `_pathFrom`/`_pathTo` when they reference a removed node. The `.context-mode` label nesting is fixed while adding the third checkbox.
-2. **Tests:** Web 151 (+5) — `GraphExplorerTests` (3) + `GraphExplorerBindingTests` (2).
-3. **Docs:** AGENTS (new Sprint 79 section), CLAUDE, File 02/03, sprint file; backlog item archived when complete.
+1. **Remove both auto-opens:** `Pages/Copilot/Index.razor` — `OnAfterRenderAsync`: delete the Sprint 58 block (`if (_session.Messages.Count == 0) { _showThemePicker = true; }` + comment). `ResetChatAsync`: delete `_showThemePicker = true;`. `OpenThemePickerAsync` (the **Knowledge** button + chips **Edit** handler) keeps `_showThemePicker = true;` — the only expand path.
+2. **Tests:** Web 153 (+2) — `CopilotIndexBindingTests` — picker stays collapsed until the Knowledge button is pressed (method-body scoped: `OpenThemePickerAsync` sets `_showThemePicker = true`; `ResetChatAsync` + `OnAfterRenderAsync` no longer reference `_showThemePicker`; field declared without an initializer) + no-theme-selected = all-themes contract (`ApplyThemePickerAsync` empty→empty `ThemeFilter`; `SendChat` empty→null; Knowledge button markup present).
+3. **Docs:** AGENTS (new Sprint 80 section), CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Acceptance Criteria
 
-- The `.context-mode` block shows **Explore full graph**, **Show chunk nodes (technical)**, and **Show orphan nodes (technical)**, the last **unchecked by default**.
-- With the toggle off, nodes with zero edges in the current view are not rendered; toggling it on restores them.
-- The path From/To selects are cleared if they reference a node removed by the filter.
+- Pressing **New chat** leaves the Knowledge panel **collapsed**; a fresh session load leaves it collapsed too.
+- The **Knowledge** button (and the chips **Edit** button, when a theme is already selected) still opens the picker.
+- With nothing selected, the session assumes **all themes** (empty `ThemeFilter` → `null` scope on the chat request).
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Server-side orphan detection/counting (`GraphHealth.OrphanNodes` is hardcoded to 0) and auto-repairing/removing orphan nodes (`RepairGraphAsync` is a no-op) — separate analytics concerns.
-- Any change to the existing "Show chunk nodes (technical)" toggle or the drag-group/zoom behavior.
-- Any API, backend, schema, or `wwwroot/index.html` change.
+- Changing theme-filter semantics on the backend or Search Center ("empty = all themes" already holds; only Copilot's default picker visibility changes).
+- Persisting the picker open/closed state across reloads (page-local, stays so).
+- The theme chips row (shown only when a theme IS selected), the "All themes" / Apply / Cancel picker actions, or the picker styling.
+- Any API, backend, or schema change.
 
 ---
 
 ## Progress
+
+### Sprint 80 — Copilot Knowledge Panel Collapsed by Default (2026-08-17)
+
+**Implemented.** See the Sprint 80 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (remove both auto-opens):** `Pages/Copilot/Index.razor` — `OnAfterRenderAsync` no longer auto-opens the picker for a fresh empty session (the Sprint 58 block + comment removed); `ResetChatAsync` (the **New chat** handler) no longer sets `_showThemePicker = true`. `OpenThemePickerAsync` (the **Knowledge** button + chips **Edit** handler) remains the only expand path. The field `private bool _showThemePicker;` still defaults to `false`.
+- **Item 2 (tests):** Web 153 (+2) — `CopilotIndexBindingTests.Copilot_theme_picker_stays_collapsed_until_knowledge_button_is_pressed` (method-body scoped) + `Copilot_no_theme_selected_assumes_all_themes`. Foundation 55 / Repository 172 / RAGS 369 unchanged.
+- **Item 3 (docs):** AGENTS (new Sprint 80 section), CLAUDE, File 02/03, sprint file updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/copilot` — the Knowledge panel stays collapsed on load and after **New chat**; press **Knowledge** (or chips **Edit**) to open it. With nothing selected the session uses all themes. No schema migration — Web-only.
+
+---
 
 ### Sprint 79 — graph orphan-nodes toggle (2026-08-17)
 

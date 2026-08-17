@@ -207,6 +207,54 @@ public class CopilotIndexBindingTests
         Assert.Contains("public async Task<bool> UpdateAppSettingsAsync", client);
     }
 
+    [Fact]
+    public void Copilot_theme_picker_stays_collapsed_until_knowledge_button_is_pressed()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Copilot/Index.razor"));
+
+        // OpenThemePickerAsync (Knowledge button + chips Edit) is the only expand path.
+        var openPicker = Slice(page, "private async Task OpenThemePickerAsync()", "private void ToggleTheme(string theme)");
+        Assert.Contains("_showThemePicker = true;", openPicker);
+
+        // ResetChatAsync (New chat) and OnAfterRenderAsync (fresh session) no longer auto-open.
+        var resetChat = Slice(page, "private async Task ResetChatAsync()", "private async Task UpdateUserInputAsync");
+        Assert.DoesNotContain("_showThemePicker", resetChat);
+
+        var afterRender = Slice(page, "protected override async Task OnAfterRenderAsync", "public void Dispose()");
+        Assert.DoesNotContain("_showThemePicker", afterRender);
+
+        // Field has no initializer, so it defaults to false (collapsed).
+        Assert.Contains("private bool _showThemePicker;", page);
+        Assert.DoesNotContain("private bool _showThemePicker =", page);
+    }
+
+    [Fact]
+    public void Copilot_no_theme_selected_assumes_all_themes()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/Copilot/Index.razor"));
+
+        // ApplyThemePickerAsync maps an empty selection to an empty ThemeFilter (= all themes).
+        var applyPicker = Slice(page, "private async Task ApplyThemePickerAsync()", "private async Task CancelThemePickerAsync");
+        Assert.Contains("_session.ThemeFilter = _selectedThemes.Count == 0", applyPicker);
+        Assert.Contains("new List<string>()", applyPicker);
+
+        // SendChat passes null when ThemeFilter is empty — backend treats null scope as all sources.
+        Assert.Contains("_session.ThemeFilter is { Count: > 0 } ? _session.ThemeFilter : null", page);
+
+        // The Knowledge button (the expand trigger) is present.
+        Assert.Contains(">Knowledge</button>", page);
+        Assert.Contains("title=\"Scope this session to knowledge themes\"", page);
+    }
+
+    private static string Slice(string source, string startMarker, string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Start marker not found: {startMarker}");
+        var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"End marker not found after '{startMarker}': {endMarker}");
+        return source[start..end];
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

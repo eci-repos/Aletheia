@@ -246,12 +246,6 @@
         _stateRestored = true;
         var state = await CopilotState.RestoreAsync();
         ApplyState(state);
-        // Sprint 58: surface the knowledge-theme picker immediately for a fresh session so the
-        // filtering option is discoverable without having to click "New chat" first.
-        if (_session.Messages.Count == 0)
-        {
-            _showThemePicker = true;
-        }
 
         await InvokeAsync(StateHasChanged);
 
@@ -769,7 +763,6 @@
         _chatActivityId = null;
         _loggedProgressMessages.Clear();
         _selectedThemes.Clear();
-        _showThemePicker = true;
 
         await CopilotState.ClearAsync();
         await InvokeAsync(StateHasChanged);

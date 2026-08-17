@@ -5,6 +5,8 @@ namespace Aletheia.Web.UnitTests;
 /// dragging a Source node moves its exclusively-found_in children with it — and (2) an explicit
 /// zoom control (range slider + numeric scaling factor + Fit) wired to cy.zoom(). All behavior
 /// lives in the initGraph JS in wwwroot/index.html + GraphExplorer.razor markup/handlers.
+/// Sprint 79: the .context-mode block also gains a "Show orphan nodes (technical)" toggle
+/// (off by default) that filters degree-0 nodes client-side via ApplyOrphanFilter/FilterOrphans.
 /// </summary>
 public class GraphExplorerBindingTests
 {
@@ -85,6 +87,43 @@ public class GraphExplorerBindingTests
         Assert.Contains("grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto", css);
         Assert.Contains(".path-finder .btn", css);
         Assert.Contains("white-space: nowrap", css);
+    }
+
+    [Fact]
+    public void GraphExplorer_has_orphan_toggle_off_by_default()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/GraphExplorer.razor"));
+
+        // Checkbox in the .context-mode block, wired to the handler.
+        Assert.Contains("Show orphan nodes (technical)", page);
+        Assert.Contains("_showOrphanNodes", page);
+        Assert.Contains("ToggleOrphanNodesAsync", page);
+        // Off by default: declared with no initializer (false).
+        Assert.Contains("private bool _showOrphanNodes;", page);
+        // The orphan filter runs from ApplyGraphScope right after the chunk filter.
+        Assert.Contains("ApplyChunkFilter();", page);
+        Assert.Contains("ApplyOrphanFilter();", page);
+        Assert.True(page.IndexOf("ApplyOrphanFilter();", StringComparison.Ordinal) >
+                    page.IndexOf("ApplyChunkFilter();", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GraphExplorer_orphan_filter_clears_path_selects_for_removed_nodes()
+    {
+        var page = File.ReadAllText(FindRepoFile("src/Aletheia.Web/Pages/GraphExplorer.razor"));
+
+        // The orphan filter must clear a path select that references a node the filter removed
+        // (the same guard pattern as ApplyChunkFilter).
+        var methodStart = page.IndexOf("private void ApplyOrphanFilter()", StringComparison.Ordinal);
+        var methodEnd = page.IndexOf(
+            "public static (List<GraphNode> Nodes, List<GraphEdge> Edges) FilterOrphans",
+            StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart, "ApplyOrphanFilter method body not found.");
+        var body = page[methodStart..methodEnd];
+
+        Assert.Contains("FilterOrphans(_nodes, _edges)", body);
+        Assert.Contains("_pathFrom = string.Empty", body);
+        Assert.Contains("_pathTo = string.Empty", body);
     }
 
     private static string FindRepoFile(string relativePath)

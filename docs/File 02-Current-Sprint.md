@@ -1,42 +1,53 @@
-# Sprint 78 - Right Rail Strip Width (narrow the collapsed Activity/Chats strips)
+# Sprint 79 - Graph Orphan-Nodes Toggle
 
-**Status:** Active (2026-08-16)
+**Status:** Active (2026-08-17)
 
-Full authority: `docs/sprints/Sprint-78 - Right Rail Strip Width.md` (created 2026-08-16). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
+Full authority: `docs/sprints/Sprint-79 - Graph Orphan-Nodes Toggle.md` (created 2026-08-17). This file is the active implementation authority; the referenced sprint file defines the authorized scope.
 
-Sprint 77 (AI Agent Instructions by Role) is **complete, committed, and pushed** on `origin/master` (`b886a73` + post-sprint fix `44c02c3`).
+Sprint 78 (Right Rail Strip Width) is **complete, committed, and pushed** on `origin/master` (`6a1b1ea`).
 
 ## Objective
 
-One small Web-only CSS pass (no API/backend changes, no schema migration): the collapsed right-rail strip that holds the **Activity** and **Chats** toggle buttons is too wide. The buttons are shown vertically (`writing-mode: vertical-rl`), so their content is only ~22px wide (20px icon + 2px border), yet the strip reserves 42px — the extra ~18px eats into `main` and hides a button on the main panel. Three work items:
+One small Web-only Graph Explorer filter pass (no API/backend changes, no schema migration, no `wwwroot/index.html` JS changes): the Graph Explorer's `.context-mode` block gains a **Show orphan nodes (technical)** checkbox, **off by default**, that hides degree-0 (isolated) nodes. Three work items:
 
-1. **Narrow the collapsed strip** — 42px → **24px** in both panel CSS files and both toggle buttons; update the `.right-rail` comment in `MainLayout.razor.css`. Open state (420px) and the responsive overlay fallback unchanged.
-2. **Binding tests** — `RightRailBindingTests` asserts both panels use the same narrow collapsed width; fix the "42px" doc comment.
-3. **Docs** — AGENTS Sprint 75 section, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
+1. **Orphan toggle + filter** — `_showOrphanNodes` bool (default `false`), "Show orphan nodes (technical)" checkbox in `.context-mode`, `ToggleOrphanNodesAsync` handler, `ApplyOrphanFilter()` (degree computed from `_edges`; drops degree-0 nodes; clears `_pathFrom`/`_pathTo` if needed) — runs from `ApplyGraphScope` after `ApplyChunkFilter()`.
+2. **Tests** — `GraphExplorerTests` logic test on the public static `FilterOrphans` helper (degree-0 nodes dropped) + `GraphExplorerBindingTests` (checkbox present + off by default + filter ordering + path-select clearing).
+3. **Docs** — AGENTS, CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Authorized Work (summary - see sprint file for details)
 
-1. **Narrow the collapsed strip:** `Layout/ActivityPanel.razor.css` + `Layout/ChatsPanel.razor.css` — `.activity-panel`/`.chats-panel` `width: 42px` → `24px`; `.activity-toggle`/`.chats-toggle` `flex: 0 0 42px; width: 42px` → `flex: 0 0 24px; width: 24px`. `MainLayout.razor.css` `.right-rail` comment "42px collapsed" → "24px collapsed".
-2. **Binding tests:** `RightRailBindingTests` — new test asserting both panels use the same narrow collapsed width (`width: 24px` + `flex: 0 0 24px`); class doc comment "42px" → "24px".
-3. **Docs:** AGENTS Sprint 75 section ("42px collapsed" → "24px collapsed"), CLAUDE, File 02/03, sprint file; backlog item archived when complete.
+1. **Orphan toggle + filter:** `Pages/GraphExplorer.razor` — `private bool _showOrphanNodes;` (off by default); "Show orphan nodes (technical)" checkbox in `.context-mode`; `ToggleOrphanNodesAsync(ChangeEventArgs)` mirrors `ToggleChunkNodesAsync`; `ApplyGraphScope` calls `ApplyOrphanFilter()` right after `ApplyChunkFilter()`; `public static FilterOrphans(nodes, edges)` computes degree per node from `_edges` (count of edges where the node is `SourceId` or `TargetId`) and returns the kept nodes/edges; private `ApplyOrphanFilter()` applies it and clears `_pathFrom`/`_pathTo` when they reference a removed node. The `.context-mode` label nesting is fixed while adding the third checkbox.
+2. **Tests:** Web 151 (+5) — `GraphExplorerTests` (3) + `GraphExplorerBindingTests` (2).
+3. **Docs:** AGENTS (new Sprint 79 section), CLAUDE, File 02/03, sprint file; backlog item archived when complete.
 
 ## Acceptance Criteria
 
-- The collapsed Activity/Chats strip is 24px wide — just a few pixels more than the button content — and no longer hides the main-panel button (its full label is readable).
-- The open state (420px) and the responsive overlay fallback are unchanged.
-- Both panels use the same collapsed width (binding test).
+- The `.context-mode` block shows **Explore full graph**, **Show chunk nodes (technical)**, and **Show orphan nodes (technical)**, the last **unchecked by default**.
+- With the toggle off, nodes with zero edges in the current view are not rendered; toggling it on restores them.
+- The path From/To selects are cleared if they reference a node removed by the filter.
 - Repository + Web + RAGS + Foundation unit suites green; `dotnet build Aletheia.slnx` succeeds.
 
 ## Out of Scope
 
-- Changing the open panel width (420px), the panel content, the Activity log data flow, job polling, or the Chats conversation restore flow.
-- The responsive overlay fallback below the breakpoint.
-- Any API, backend, or schema change.
-- If a main-panel button is still clipped after the strip narrows (its container does not shrink), that is a separate layout follow-up.
+- Server-side orphan detection/counting (`GraphHealth.OrphanNodes` is hardcoded to 0) and auto-repairing/removing orphan nodes (`RepairGraphAsync` is a no-op) — separate analytics concerns.
+- Any change to the existing "Show chunk nodes (technical)" toggle or the drag-group/zoom behavior.
+- Any API, backend, schema, or `wwwroot/index.html` change.
 
 ---
 
 ## Progress
+
+### Sprint 79 — graph orphan-nodes toggle (2026-08-17)
+
+**Implemented.** See the Sprint 79 sprint file "Implementation Status" for full detail:
+
+- **Item 1 (orphan toggle + filter):** `Pages/GraphExplorer.razor` — `private bool _showOrphanNodes;` (off by default); "Show orphan nodes (technical)" checkbox in `.context-mode` (`checked="@_showOrphanNodes"` + `ToggleOrphanNodesAsync`); `ToggleOrphanNodesAsync(ChangeEventArgs)` mirrors `ToggleChunkNodesAsync`. `ApplyGraphScope` calls `ApplyOrphanFilter()` right after `ApplyChunkFilter()`. `public static FilterOrphans(nodes, edges)` computes degree per node from the current `_edges` (count of edges where the node is `SourceId` or `TargetId`) and returns the kept nodes/edges; private `ApplyOrphanFilter()` applies it and clears `_pathFrom`/`_pathTo` when they reference a removed node. The `.context-mode` label nesting was fixed (the full-graph + chunk checkboxes were previously nested `<label>`s — now three properly-closed sibling `.form-check` labels).
+- **Item 2 (tests):** Web 151 (+5) — `GraphExplorerTests.FilterOrphans_drops_degree_zero_nodes_and_keeps_edges_between_kept_nodes`, `FilterOrphans_keeps_all_nodes_when_every_node_has_an_edge`, `FilterOrphans_drops_edges_that_reference_a_node_outside_the_node_set` + `GraphExplorerBindingTests.GraphExplorer_has_orphan_toggle_off_by_default`, `GraphExplorer_orphan_filter_clears_path_selects_for_removed_nodes`.
+- **Item 3 (docs):** AGENTS (new Sprint 79 section), CLAUDE, File 02/03, sprint file updated; backlog item archived.
+
+**Residual manual (user-side):** `docker compose up -d --build`, then hard-refresh `/graph` — the `.context-mode` block lists three checkboxes; **Show orphan nodes (technical)** is off by default, so isolated circles (zero-edge sources/entities/communities) are hidden; check it to render them again. No schema migration — Web-only.
+
+---
 
 ### Sprint 78 — right rail strip width (2026-08-16)
 

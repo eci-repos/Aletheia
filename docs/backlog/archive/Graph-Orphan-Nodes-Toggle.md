@@ -1,6 +1,6 @@
 # Backlog: Graph Orphan-Nodes Toggle
 
-**Status:** Proposed
+**Status:** **Complete** — items 1 + 2 implemented (Sprint 79, 2026-08-17). Archived.
 **Created:** 2026-08-16
 **Source:** Project-owner request (2026-08-16) — "in the Graph can 'orphan' nodes be toggled on and off (off by default) if so, create a backlog item to manage this."
 

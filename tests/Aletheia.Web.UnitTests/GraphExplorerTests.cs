@@ -62,4 +62,64 @@ public class GraphExplorerTests
         Assert.DoesNotContain(scopedNodes, node => node.Id == "finance");
         Assert.Single(scopedEdges);
     }
+
+    [Fact]
+    public void FilterOrphans_drops_degree_zero_nodes_and_keeps_edges_between_kept_nodes()
+    {
+        var nodes = new[]
+        {
+            new GraphNode("source-1", "CMP 2026 RFP", "Source"),
+            new GraphNode("entity-ai", "AI automation", "Entity"),
+            new GraphNode("orphan-1", "Isolated entity", "Entity")
+        };
+        var edges = new[]
+        {
+            new GraphEdge("edge-1", "entity-ai", "source-1", "found_in")
+        };
+
+        var (filteredNodes, filteredEdges) = GraphExplorer.FilterOrphans(nodes, edges);
+
+        Assert.Contains(filteredNodes, node => node.Id == "source-1");
+        Assert.Contains(filteredNodes, node => node.Id == "entity-ai");
+        Assert.DoesNotContain(filteredNodes, node => node.Id == "orphan-1");
+        Assert.Single(filteredEdges);
+        Assert.Equal("edge-1", filteredEdges[0].Id);
+    }
+
+    [Fact]
+    public void FilterOrphans_keeps_all_nodes_when_every_node_has_an_edge()
+    {
+        var nodes = new[]
+        {
+            new GraphNode("source-1", "CMP 2026 RFP", "Source"),
+            new GraphNode("entity-ai", "AI automation", "Entity")
+        };
+        var edges = new[]
+        {
+            new GraphEdge("edge-1", "entity-ai", "source-1", "found_in")
+        };
+
+        var (filteredNodes, filteredEdges) = GraphExplorer.FilterOrphans(nodes, edges);
+
+        Assert.Equal(2, filteredNodes.Count);
+        Assert.Single(filteredEdges);
+    }
+
+    [Fact]
+    public void FilterOrphans_drops_edges_that_reference_a_node_outside_the_node_set()
+    {
+        var nodes = new[]
+        {
+            new GraphNode("entity-ai", "AI automation", "Entity")
+        };
+        var edges = new[]
+        {
+            new GraphEdge("edge-1", "entity-ai", "source-1", "found_in")
+        };
+
+        var (filteredNodes, filteredEdges) = GraphExplorer.FilterOrphans(nodes, edges);
+
+        Assert.Single(filteredNodes);
+        Assert.Empty(filteredEdges);
+    }
 }

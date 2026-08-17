@@ -113,10 +113,14 @@
                 <label class="form-check">
                     <input class="form-check-input" type="checkbox" checked="@_showFullGraph" @onchange="ToggleFullGraphAsync" />
                     <span class="form-check-label">Explore full graph</span>
+                </label>
                 <label class="form-check">
                     <input class="form-check-input" type="checkbox" checked="@_showChunkNodes" @onchange="ToggleChunkNodesAsync" />
                     <span class="form-check-label">Show chunk nodes (technical)</span>
                 </label>
+                <label class="form-check">
+                    <input class="form-check-input" type="checkbox" checked="@_showOrphanNodes" @onchange="ToggleOrphanNodesAsync" />
+                    <span class="form-check-label">Show orphan nodes (technical)</span>
                 </label>
             </div>
 
@@ -158,6 +162,7 @@
     private HashSet<string> _selectedContextKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _showFullGraph;
     private bool _showChunkNodes;
+    private bool _showOrphanNodes;
     private bool _importing;
     private string _statusMessage = string.Empty;
     private bool _statusSuccess;
@@ -360,6 +365,12 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    private async Task ToggleOrphanNodesAsync(ChangeEventArgs args)
+    {
+        _showOrphanNodes = args.Value is bool value && value;
+        ApplyGraphScope();
+        await InvokeAsync(StateHasChanged);
+    }
 
     private async Task ToggleContextItemAsync(string key, ChangeEventArgs args)
     {
@@ -427,6 +438,7 @@
         }
 
         ApplyChunkFilter();
+        ApplyOrphanFilter();
 
         _pathFrom = string.Empty;
         _pathTo = string.Empty;
@@ -460,6 +472,53 @@
         {
             _pathTo = string.Empty;
         }
+    }
+
+    // Sprint 79: orphans are nodes with degree 0 — no edge lists them as SourceId or TargetId.
+    // Computed on the current (post-context, post-chunk) edge set, so "orphan" means *isolated in
+    // the rendered view* (a node whose only edges were to filtered chunk nodes is an orphan).
+    private void ApplyOrphanFilter()
+    {
+        if (_nodes is null || _edges is null || _showOrphanNodes)
+        {
+            return;
+        }
+
+        (_nodes, _edges) = FilterOrphans(_nodes, _edges);
+
+        var keptIds = _nodes.Select(node => node.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(_pathFrom) && !keptIds.Contains(_pathFrom))
+        {
+            _pathFrom = string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_pathTo) && !keptIds.Contains(_pathTo))
+        {
+            _pathTo = string.Empty;
+        }
+    }
+
+    public static (List<GraphNode> Nodes, List<GraphEdge> Edges) FilterOrphans(
+        IReadOnlyList<GraphNode> nodes,
+        IReadOnlyList<GraphEdge> edges)
+    {
+        var degree = edges
+            .SelectMany(edge => new[] { edge.SourceId, edge.TargetId })
+            .GroupBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        var keptIds = nodes
+            .Where(node => degree.TryGetValue(node.Id, out var nodeDegree) && nodeDegree > 0)
+            .Select(node => node.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var filteredNodes = nodes.Where(node => keptIds.Contains(node.Id)).ToList();
+        var filteredEdges = edges
+            .Where(edge => keptIds.Contains(edge.SourceId) && keptIds.Contains(edge.TargetId))
+            .ToList();
+
+        return (filteredNodes, filteredEdges);
     }
 
     public static (List<GraphNode> Nodes, List<GraphEdge> Edges) FilterGraph(
